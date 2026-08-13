@@ -336,6 +336,13 @@ export class LionPocketDatabase {
     const recurring = this.db.prepare(`
       SELECT * FROM recurring_expenses WHERE active = 1 AND deleted_at IS NULL
     `).all() as unknown as Row[];
+    const { start, end } = monthRange(month);
+    const existing = this.db.prepare(`
+      SELECT id FROM transactions
+      WHERE source_type = 'recurring' AND source_id = ? AND due_date >= ? AND due_date < ?
+        AND deleted_at IS NULL
+      LIMIT 1
+    `);
     const statement = this.db.prepare(`
       INSERT OR IGNORE INTO transactions(
         id, kind, description, category_id, planned_cents, due_date, status,
@@ -344,6 +351,7 @@ export class LionPocketDatabase {
     `);
     const timestamp = now();
     for (const item of recurring) {
+      if (existing.get(item.id, start, end)) continue;
       statement.run(
         randomUUID(),
         item.description,
@@ -524,22 +532,56 @@ export class LionPocketDatabase {
   saveRecurringExpense(input: RecurringExpenseInput): RecurringExpense {
     const id = input.id ?? randomUUID();
     const timestamp = now();
+    const plannedCents = toCents(input.plannedAmount) ?? 0;
+    const dueDay = Math.min(31, Math.max(1, input.dueDay));
     if (input.id) {
-      this.db.prepare(`
-        UPDATE recurring_expenses SET active = ?, description = ?, category_id = ?,
-          payment_method_id = ?, planned_cents = ?, due_day = ?, notes = ?, updated_at = ?
-        WHERE id = ? AND deleted_at IS NULL
-      `).run(
-        input.active ? 1 : 0,
-        input.description.trim(),
-        input.categoryId ?? null,
-        input.paymentMethodId ?? null,
-        toCents(input.plannedAmount) ?? 0,
-        Math.min(31, Math.max(1, input.dueDay)),
-        input.notes?.trim() ?? '',
-        timestamp,
-        id,
-      );
+      this.db.exec('BEGIN');
+      try {
+        this.db.prepare(`
+          UPDATE recurring_expenses SET active = ?, description = ?, category_id = ?,
+            payment_method_id = ?, planned_cents = ?, due_day = ?, notes = ?, updated_at = ?
+          WHERE id = ? AND deleted_at IS NULL
+        `).run(
+          input.active ? 1 : 0,
+          input.description.trim(),
+          input.categoryId ?? null,
+          input.paymentMethodId ?? null,
+          plannedCents,
+          dueDay,
+          input.notes?.trim() ?? '',
+          timestamp,
+          id,
+        );
+
+        const pendingTransactions = this.db.prepare(`
+          SELECT id, due_date AS dueDate
+          FROM transactions
+          WHERE source_type = 'recurring' AND source_id = ? AND status = 'planned'
+            AND actual_cents IS NULL AND settled_date IS NULL AND deleted_at IS NULL
+        `).all(id) as unknown as Row[];
+        const updatePending = this.db.prepare(`
+          UPDATE transactions SET description = ?, category_id = ?, planned_cents = ?,
+            due_date = ?, payment_method_id = ?, notes = ?, updated_at = ?
+          WHERE id = ?
+        `);
+        for (const transaction of pendingTransactions) {
+          const month = String(transaction.dueDate).slice(0, 7);
+          updatePending.run(
+            input.description.trim(),
+            input.categoryId ?? null,
+            plannedCents,
+            dateForMonthDay(month, dueDay),
+            input.paymentMethodId ?? null,
+            input.notes?.trim() ?? '',
+            timestamp,
+            transaction.id,
+          );
+        }
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
     } else {
       this.db.prepare(`
         INSERT INTO recurring_expenses(
@@ -552,8 +594,8 @@ export class LionPocketDatabase {
         input.description.trim(),
         input.categoryId ?? null,
         input.paymentMethodId ?? null,
-        toCents(input.plannedAmount) ?? 0,
-        Math.min(31, Math.max(1, input.dueDay)),
+        plannedCents,
+        dueDay,
         input.notes?.trim() ?? '',
         timestamp,
         timestamp,
