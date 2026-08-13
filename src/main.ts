@@ -31,6 +31,29 @@ const createWindow = () => {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.once('did-finish-load', () => {
+    mainWindow.webContents.setZoomFactor(1);
+  });
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const modifierPressed = input.control || input.meta;
+    if (!modifierPressed || input.alt || input.type !== 'keyDown') return;
+
+    const zoomIn = input.key === '=' || input.key === '+' || input.code === 'NumpadAdd';
+    const zoomOut = input.key === '-' || input.key === '_' || input.code === 'NumpadSubtract';
+    const resetZoom = input.key === '0' || input.code === 'Numpad0';
+    if (!zoomIn && !zoomOut && !resetZoom) return;
+
+    event.preventDefault();
+    const currentZoom = mainWindow.webContents.getZoomFactor();
+    if (resetZoom) {
+      mainWindow.webContents.setZoomFactor(1);
+      return;
+    }
+
+    const direction = zoomIn ? 0.1 : -0.1;
+    const nextZoom = Math.min(2, Math.max(0.6, Math.round((currentZoom + direction) * 10) / 10));
+    mainWindow.webContents.setZoomFactor(nextZoom);
+  });
 
   // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -40,7 +63,6 @@ const createWindow = () => {
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
     );
   }
-
 };
 
 // This method will be called when Electron has finished
