@@ -9,7 +9,7 @@ import type {
   Transaction,
   TransactionInput,
 } from '../shared/types';
-import { Modal } from './components';
+import { DateField, Modal, SelectField } from './components';
 import { todayIso } from './format';
 
 const moneyValue = (value: number | null | undefined) => (value === null || value === undefined ? '' : String(value));
@@ -75,17 +75,11 @@ export const TransactionForm = ({
           <span>Descrição</span>
           <input required autoFocus value={description} onChange={(event) => setDescription(event.target.value)} placeholder={kind === 'expense' ? 'Ex.: Supermercado' : 'Ex.: Salário'} />
         </label>
-        <label className="field">
-          <span>Categoria</span>
-          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-            <option value="">Sem categoria</option>
-            {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-          </select>
-        </label>
-        <label className="field">
-          <span>Data prevista</span>
-          <input required type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
-        </label>
+        <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[
+          { value: '', label: 'Sem categoria' },
+          ...categories.map((category) => ({ value: category.id, label: category.name })),
+        ]} />
+        <DateField label="Data prevista" value={dueDate} onChange={setDueDate} required />
         <label className="field">
           <span>Valor planejado</span>
           <div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={plannedAmount} onChange={(event) => setPlannedAmount(event.target.value)} /></div>
@@ -94,28 +88,19 @@ export const TransactionForm = ({
           <span>Valor real <small>(opcional)</small></span>
           <div className="money-input"><span>R$</span><input min="0" step="0.01" type="number" value={actualAmount} onChange={(event) => setActualAmount(event.target.value)} /></div>
         </label>
-        <label className="field">
-          <span>Situação</span>
-          <select value={status} onChange={(event) => setStatus(event.target.value as TransactionInput['status'])}>
-            <option value="planned">Planejado</option>
-            <option value={kind === 'income' ? 'received' : 'paid'}>{kind === 'income' ? 'Recebido' : 'Pago'}</option>
-            <option value="cancelled">Cancelado</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>Forma de pagamento</span>
-          <select value={paymentMethodId} onChange={(event) => setPaymentMethodId(event.target.value)} disabled={kind === 'income'}>
-            <option value="">Não informada</option>
-            {catalogs.paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
-          </select>
-        </label>
-        <label className="field">
-          <span>Cartão</span>
-          <select value={cardId} onChange={(event) => setCardId(event.target.value)} disabled={kind === 'income'}>
-            <option value="">Nenhum</option>
-            {catalogs.cards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}
-          </select>
-        </label>
+        <SelectField label="Situação" value={status} onChange={(value) => setStatus(value as TransactionInput['status'])} options={[
+          { value: 'planned', label: 'Planejado' },
+          { value: kind === 'income' ? 'received' : 'paid', label: kind === 'income' ? 'Recebido' : 'Pago' },
+          { value: 'cancelled', label: 'Cancelado' },
+        ]} />
+        <SelectField label="Forma de pagamento" value={paymentMethodId} onChange={setPaymentMethodId} disabled={kind === 'income'} options={[
+          { value: '', label: 'Não informada' },
+          ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name })),
+        ]} />
+        <SelectField label="Cartão" value={cardId} onChange={setCardId} disabled={kind === 'income'} options={[
+          { value: '', label: 'Nenhum' },
+          ...catalogs.cards.map((card) => ({ value: card.id, label: card.name })),
+        ]} />
         <label className="field form-grid__full">
           <span>Observações</span>
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Algo importante sobre este lançamento?" rows={3} />
@@ -149,8 +134,8 @@ export const RecurringForm = ({ item, catalogs, onSave, onClose }: {
         await onSave({ id: item?.id, description, categoryId: categoryId || null, paymentMethodId: paymentMethodId || null, plannedAmount: Number(amount), dueDay: Number(dueDay), active, notes });
       }}>
         <label className="field form-grid__full"><span>Descrição</span><input required autoFocus value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Internet" /></label>
-        <label className="field"><span>Categoria</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Sem categoria</option>{catalogs.categories.filter((category) => category.kind === 'expense').map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-        <label className="field"><span>Forma de pagamento</span><select value={paymentMethodId} onChange={(event) => setPaymentMethodId(event.target.value)}><option value="">Não informada</option>{catalogs.paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select></label>
+        <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === 'expense').map((category) => ({ value: category.id, label: category.name }))]} />
+        <SelectField label="Forma de pagamento" value={paymentMethodId} onChange={setPaymentMethodId} options={[{ value: '', label: 'Não informada' }, ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name }))]} />
         <label className="field"><span>Valor mensal</span><div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>
         <label className="field"><span>Dia do vencimento</span><input required min="1" max="31" type="number" value={dueDay} onChange={(event) => setDueDay(event.target.value)} /></label>
         <label className="field form-grid__full"><span>Observações</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
@@ -182,11 +167,11 @@ export const InstallmentForm = ({ catalogs, onSave, onClose }: {
         await onSave({ description, categoryId: categoryId || null, cardId: cardId || null, paymentMethodId: creditMethod?.id ?? null, installmentAmount: Number(amount), totalInstallments: Number(total), firstDueDate, notes });
       }}>
         <label className="field form-grid__full"><span>Compra</span><input required autoFocus value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Notebook" /></label>
-        <label className="field"><span>Categoria</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Sem categoria</option>{catalogs.categories.filter((category) => category.kind === 'expense').map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-        <label className="field"><span>Cartão</span><select value={cardId} onChange={(event) => setCardId(event.target.value)}><option value="">Não informado</option>{catalogs.cards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select></label>
+        <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === 'expense').map((category) => ({ value: category.id, label: category.name }))]} />
+        <SelectField label="Cartão" value={cardId} onChange={setCardId} options={[{ value: '', label: 'Não informado' }, ...catalogs.cards.map((card) => ({ value: card.id, label: card.name }))]} />
         <label className="field"><span>Valor da parcela</span><div className="money-input"><span>R$</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>
         <label className="field"><span>Quantidade</span><input required min="2" max="120" type="number" value={total} onChange={(event) => setTotal(event.target.value)} /></label>
-        <label className="field"><span>Primeiro vencimento</span><input required type="date" value={firstDueDate} onChange={(event) => setFirstDueDate(event.target.value)} /></label>
+        <DateField label="Primeiro vencimento" value={firstDueDate} onChange={setFirstDueDate} required />
         <div className="installment-total"><span>Valor total da compra</span><strong>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalAmount)}</strong></div>
         <label className="field form-grid__full"><span>Observações</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
         <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary">Criar parcelas</button></div>
@@ -222,14 +207,13 @@ export const GoalForm = ({ goal, catalogs, onSave, onClose }: {
         <label className="field form-grid__full"><span>Link</span><input type="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="https://…" /></label>
         <label className="field"><span>Valor desejado</span><div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={targetAmount} onChange={(event) => setTargetAmount(event.target.value)} /></div></label>
         <label className="field"><span>Já reservado</span><div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={savedAmount} onChange={(event) => setSavedAmount(event.target.value)} /></div></label>
-        <label className="field"><span>Categoria</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Sem categoria</option>{catalogs.categories.filter((category) => category.kind === 'expense').map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-        <label className="field"><span>Prazo</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
-        <label className="field"><span>Prioridade</span><select value={priority} onChange={(event) => setPriority(event.target.value as GoalInput['priority'])}><option value="high">Alta</option><option value="medium">Média</option><option value="low">Baixa</option></select></label>
-        <label className="field"><span>Situação</span><select value={status} onChange={(event) => setStatus(event.target.value as GoalInput['status'])}><option value="planned">Planejado</option><option value="saving">Juntando</option><option value="completed">Concluído</option><option value="paused">Pausado</option><option value="cancelled">Cancelado</option></select></label>
+        <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === 'expense').map((category) => ({ value: category.id, label: category.name }))]} />
+        <DateField label="Prazo" value={dueDate} onChange={setDueDate} />
+        <SelectField label="Prioridade" value={priority} onChange={(value) => setPriority(value as GoalInput['priority'])} options={[{ value: 'high', label: 'Alta' }, { value: 'medium', label: 'Média' }, { value: 'low', label: 'Baixa' }]} />
+        <SelectField label="Situação" value={status} onChange={(value) => setStatus(value as GoalInput['status'])} options={[{ value: 'planned', label: 'Planejado' }, { value: 'saving', label: 'Juntando' }, { value: 'completed', label: 'Concluído' }, { value: 'paused', label: 'Pausado' }, { value: 'cancelled', label: 'Cancelado' }]} />
         <label className="field form-grid__full"><span>Observações</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
         <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary">Salvar objetivo</button></div>
       </form>
     </Modal>
   );
 };
-

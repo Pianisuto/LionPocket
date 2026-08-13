@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Plus, ShieldCheck } from 'lucide-react';
 import type { CatalogInput, Catalogs, MoneyKind } from '../../shared/types';
+import { SelectField } from '../components';
 
 export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
   catalogs: Catalogs;
@@ -46,8 +47,8 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
       <div className="panel settings-panel settings-panel--wide">
         <header className="panel__header"><div><h3>Listas personalizadas</h3><p>Adicione categorias, formas de pagamento e cartões aos formulários.</p></div></header>
         <form className="catalog-form" onSubmit={addCatalog}>
-          <label className="field"><span>Tipo de lista</span><select value={type} onChange={(event) => setType(event.target.value as CatalogInput['type'])}><option value="category">Categoria</option><option value="paymentMethod">Forma de pagamento</option><option value="card">Cartão</option></select></label>
-          {type === 'category' && <label className="field"><span>Usada em</span><select value={kind} onChange={(event) => setKind(event.target.value as MoneyKind)}><option value="expense">Saídas</option><option value="income">Entradas</option></select></label>}
+          <SelectField label="Tipo de lista" value={type} onChange={(value) => setType(value as CatalogInput['type'])} options={[{ value: 'category', label: 'Categoria' }, { value: 'paymentMethod', label: 'Forma de pagamento' }, { value: 'card', label: 'Cartão' }]} />
+          {type === 'category' && <SelectField label="Usada em" value={kind} onChange={(value) => setKind(value as MoneyKind)} options={[{ value: 'expense', label: 'Saídas' }, { value: 'income', label: 'Entradas' }]} />}
           <label className="field catalog-form__name"><span>Nome</span><input required value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Digite o nome" /></label>
           <button className="button button--primary"><Plus size={17} /> Adicionar</button>
         </form>
@@ -59,4 +60,3 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
     </section>
   );
 };
-

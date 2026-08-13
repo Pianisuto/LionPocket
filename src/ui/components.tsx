@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react';
-import { Check, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
-import { monthLabel } from './format';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
+import { formatDate, monthLabel, todayIso } from './format';
 
 export const LionLogo = ({ compact = false }: { compact?: boolean }) => (
   <div className={`brand ${compact ? 'brand--compact' : ''}`}>
@@ -110,6 +112,335 @@ export const SearchField = ({ value, onChange, placeholder = 'Buscar' }: {
   </label>
 );
 
+export type SelectOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
+};
+
+const findNextOption = (options: SelectOption[], current: number, direction: 1 | -1) => {
+  if (options.length === 0) return -1;
+  for (let offset = 1; offset <= options.length; offset += 1) {
+    const index = (current + offset * direction + options.length) % options.length;
+    if (!options[index].disabled) return index;
+  }
+  return current;
+};
+
+export const SelectControl = ({
+  value,
+  options,
+  onChange,
+  disabled = false,
+  ariaLabel,
+  className = '',
+}: {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  ariaLabel: string;
+  className?: string;
+}) => {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const selectedIndex = options.findIndex((option) => option.value === value);
+  const selected = options[selectedIndex];
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const estimatedHeight = Math.min(260, Math.max(54, options.length * 38 + 12));
+    const roomBelow = window.innerHeight - rect.bottom - 12;
+    const openAbove = roomBelow < Math.min(estimatedHeight, 180) && rect.top > roomBelow;
+    setMenuStyle({
+      left: rect.left,
+      top: openAbove ? Math.max(8, rect.top - estimatedHeight - 6) : rect.bottom + 6,
+      width: rect.width,
+      maxHeight: estimatedHeight,
+    });
+  }, [options.length]);
+
+  const openMenu = (direction: 1 | -1 = 1) => {
+    if (disabled) return;
+    const fallback = direction === 1 ? -1 : 0;
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : findNextOption(options, fallback, direction));
+    updateMenuPosition();
+    setOpen(true);
+  };
+
+  const closeMenu = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  const choose = (option: SelectOption) => {
+    if (option.disabled) return;
+    onChange(option.value);
+    closeMenu(true);
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    updateMenuPosition();
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLButtonElement>(`[data-option-index="${activeIndex}"]`)?.focus();
+    });
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) closeMenu();
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') closeMenu(true);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [activeIndex, open, updateMenuPosition]);
+
+  const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      openMenu(event.key === 'ArrowDown' ? 1 : -1);
+    }
+  };
+
+  const handleOptionKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex(findNextOption(options, index, event.key === 'ArrowDown' ? 1 : -1));
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      setActiveIndex(findNextOption(options, event.key === 'Home' ? -1 : 0, event.key === 'Home' ? 1 : -1));
+    }
+  };
+
+  return (
+    <div className={`select-control ${open ? 'select-control--open' : ''} ${className}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="select-control__trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        disabled={disabled}
+        onClick={() => (open ? closeMenu() : openMenu())}
+        onKeyDown={handleTriggerKeyDown}
+      >
+        <span>{selected?.label ?? 'Selecione'}</span>
+        <ChevronDown size={16} aria-hidden="true" />
+      </button>
+      {open && createPortal(
+        <div ref={menuRef} id={menuId} className="select-control__menu" role="listbox" aria-label={ariaLabel} style={menuStyle}>
+          {options.map((option, index) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className="select-control__option"
+              data-option-index={index}
+              disabled={option.disabled}
+              tabIndex={-1}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => choose(option)}
+              onKeyDown={(event) => handleOptionKeyDown(event, index)}
+            >
+              <span>{option.label}</span>
+              {option.value === value && <Check size={15} strokeWidth={2.6} aria-hidden="true" />}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+};
+
+export const SelectField = ({
+  label,
+  className = '',
+  ...props
+}: Omit<React.ComponentProps<typeof SelectControl>, 'ariaLabel'> & { label: string; className?: string }) => (
+  <div className={`field ${className}`}>
+    <span>{label}</span>
+    <SelectControl {...props} ariaLabel={label} />
+  </div>
+);
+
+const parseLocalDate = (value: string) => {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const localDateIso = (date: Date) => [
+  date.getFullYear(),
+  String(date.getMonth() + 1).padStart(2, '0'),
+  String(date.getDate()).padStart(2, '0'),
+].join('-');
+
+export const DateField = ({
+  label,
+  value,
+  onChange,
+  required = false,
+  className = '',
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  className?: string;
+}) => {
+  const selectedDate = parseLocalDate(value);
+  const [open, setOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() => {
+    const initial = selectedDate ?? new Date();
+    return new Date(initial.getFullYear(), initial.getMonth(), 1);
+  });
+  const [calendarStyle, setCalendarStyle] = useState<CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const calendarRef = useRef<HTMLDivElement>(null);
+  const calendarId = useId();
+
+  const updateCalendarPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const estimatedHeight = 342;
+    const roomBelow = window.innerHeight - rect.bottom - 12;
+    const openAbove = roomBelow < estimatedHeight && rect.top > roomBelow;
+    setCalendarStyle({
+      left: Math.min(rect.left, window.innerWidth - Math.max(300, rect.width) - 8),
+      top: openAbove ? Math.max(8, rect.top - estimatedHeight - 6) : rect.bottom + 6,
+      width: Math.max(300, rect.width),
+    });
+  }, []);
+
+  const openCalendar = () => {
+    const initial = selectedDate ?? new Date();
+    setVisibleMonth(new Date(initial.getFullYear(), initial.getMonth(), 1));
+    updateCalendarPosition();
+    setOpen(true);
+  };
+
+  const closeCalendar = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    updateCalendarPosition();
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !calendarRef.current?.contains(target)) closeCalendar();
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') closeCalendar(true);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    window.addEventListener('resize', updateCalendarPosition);
+    window.addEventListener('scroll', updateCalendarPosition, true);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('resize', updateCalendarPosition);
+      window.removeEventListener('scroll', updateCalendarPosition, true);
+    };
+  }, [open, updateCalendarPosition]);
+
+  const firstDayOffset = (visibleMonth.getDay() + 6) % 7;
+  const days = Array.from({ length: 42 }, (_, index) => new Date(
+    visibleMonth.getFullYear(),
+    visibleMonth.getMonth(),
+    index - firstDayOffset + 1,
+  ));
+  const visibleMonthValue = localDateIso(visibleMonth).slice(0, 7);
+  const today = todayIso();
+
+  const moveMonth = (amount: number) => {
+    setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + amount, 1));
+  };
+
+  const chooseDate = (date: Date) => {
+    onChange(localDateIso(date));
+    closeCalendar(true);
+  };
+
+  return (
+    <div className={`field ${className}`}>
+      <span>{label}</span>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`date-control__trigger ${open ? 'date-control__trigger--open' : ''}`}
+        aria-label={label}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? calendarId : undefined}
+        onClick={() => (open ? closeCalendar() : openCalendar())}
+      >
+        <span className={value ? '' : 'is-placeholder'}>{value ? formatDate(value, 'dd/MM/yyyy') : 'Selecione uma data'}</span>
+        <CalendarDays size={16} aria-hidden="true" />
+      </button>
+      {open && createPortal(
+        <div ref={calendarRef} id={calendarId} className="date-control__calendar" role="dialog" aria-label={`Calendário: ${label}`} style={calendarStyle}>
+          <header className="date-control__header">
+            <button type="button" onClick={() => moveMonth(-1)} aria-label="Mês anterior"><ChevronLeft size={17} /></button>
+            <strong>{monthLabel(visibleMonthValue)}</strong>
+            <button type="button" onClick={() => moveMonth(1)} aria-label="Próximo mês"><ChevronRight size={17} /></button>
+          </header>
+          <div className="date-control__weekdays" aria-hidden="true">
+            {['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}
+          </div>
+          <div className="date-control__days">
+            {days.map((date) => {
+              const iso = localDateIso(date);
+              const outside = date.getMonth() !== visibleMonth.getMonth();
+              return (
+                <button
+                  key={iso}
+                  type="button"
+                  className={`${outside ? 'is-outside' : ''} ${iso === value ? 'is-selected' : ''} ${iso === today ? 'is-today' : ''}`}
+                  aria-label={formatDate(iso, "dd 'de' MMMM 'de' yyyy")}
+                  aria-pressed={iso === value}
+                  onClick={() => chooseDate(date)}
+                >
+                  {date.getDate()}
+                </button>
+              );
+            })}
+          </div>
+          <footer className="date-control__footer">
+            {!required && value && <button type="button" onClick={() => { onChange(''); closeCalendar(true); }}>Limpar</button>}
+            <button type="button" className="date-control__today" onClick={() => chooseDate(new Date())}>Hoje</button>
+          </footer>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+};
+
 export const ProgressBar = ({ value, color = '#F3B45C' }: { value: number; color?: string }) => (
   <div className="progress" aria-label={`${Math.round(value * 100)}% concluído`}>
     <span style={{ width: `${Math.max(0, Math.min(100, value * 100))}%`, background: color }} />
@@ -129,4 +460,3 @@ export const CheckButton = ({ checked, onClick, label }: {
 export const Skeleton = ({ className = '' }: { className?: string }) => (
   <div className={`skeleton ${className}`} />
 );
-

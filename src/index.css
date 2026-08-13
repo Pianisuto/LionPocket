@@ -1019,8 +1019,12 @@ textarea:focus-visible {
 }
 
 .filter-select {
+  flex: 0 0 162px;
+}
+
+.filter-select .select-control__trigger {
   height: 42px;
-  padding: 0 34px 0 12px;
+  padding: 0 11px;
   color: #53625b;
   font-size: 10px;
   font-weight: 620;
@@ -1779,7 +1783,6 @@ textarea:focus-visible {
   padding: 24px;
   overflow: auto;
   background: rgba(8, 29, 21, 0.56);
-  backdrop-filter: blur(7px);
   animation: fade-in 140ms ease-out;
 }
 
@@ -1853,8 +1856,9 @@ textarea:focus-visible {
 }
 
 .field input,
-.field select,
 .field textarea,
+.field .select-control__trigger,
+.field .date-control__trigger,
 .money-input {
   width: 100%;
   color: #24352d;
@@ -1866,7 +1870,8 @@ textarea:focus-visible {
 }
 
 .field input,
-.field select {
+.field .select-control__trigger,
+.field .date-control__trigger {
   height: 42px;
   padding: 0 12px;
 }
@@ -1878,8 +1883,9 @@ textarea:focus-visible {
 }
 
 .field input:focus,
-.field select:focus,
 .field textarea:focus,
+.field .select-control__trigger:focus-visible,
+.field .date-control__trigger:focus-visible,
 .money-input:focus-within {
   border-color: #7b9a8c;
   background: #fff;
@@ -1888,9 +1894,247 @@ textarea:focus-visible {
 }
 
 .field input:disabled,
-.field select:disabled {
+.field .select-control__trigger:disabled {
   color: #9da5a1;
   background: #f2f3f1;
+}
+
+.select-control {
+  position: relative;
+  min-width: 0;
+}
+
+.select-control__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  color: #24352d;
+  text-align: left;
+  border: 1px solid #dfe4dd;
+  border-radius: 11px;
+  background: #fbfcfa;
+  cursor: pointer;
+}
+
+.select-control__trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-control__trigger svg {
+  flex: 0 0 auto;
+  color: #829089;
+  transition: transform 120ms ease;
+}
+
+.select-control--open .select-control__trigger svg {
+  transform: rotate(180deg);
+}
+
+.select-control__trigger:disabled {
+  cursor: not-allowed;
+}
+
+.select-control__menu {
+  position: fixed;
+  z-index: 1000;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid #dfe4dd;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(16, 48, 36, 0.16);
+}
+
+.select-control__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
+  color: #3d4e45;
+  font-size: 10px;
+  font-weight: 620;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.select-control__option:hover,
+.select-control__option:focus-visible {
+  color: var(--forest-900);
+  outline: 0;
+  background: #edf4ef;
+}
+
+.select-control__option[aria-selected="true"] {
+  color: var(--forest-800);
+  background: #e7f1eb;
+}
+
+.select-control__option svg {
+  flex: 0 0 auto;
+  color: var(--forest-700);
+}
+
+.date-control__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.date-control__trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.date-control__trigger .is-placeholder {
+  color: #929c97;
+}
+
+.date-control__trigger svg {
+  flex: 0 0 auto;
+  color: #829089;
+}
+
+.date-control__calendar {
+  position: fixed;
+  z-index: 1000;
+  padding: 9px;
+  border: 1px solid #dfe4dd;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 16px 38px rgba(16, 48, 36, 0.17);
+}
+
+.date-control__header {
+  display: grid;
+  grid-template-columns: 34px 1fr 34px;
+  align-items: center;
+  min-height: 38px;
+  margin-bottom: 3px;
+}
+
+.date-control__header strong {
+  font-size: 11px;
+  text-align: center;
+}
+
+.date-control__header button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #68766f;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.date-control__header button:hover,
+.date-control__header button:focus-visible {
+  color: var(--forest-900);
+  outline: 0;
+  background: #edf4ef;
+}
+
+.date-control__weekdays,
+.date-control__days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-control__weekdays span {
+  display: grid;
+  place-items: center;
+  height: 25px;
+  color: #929c97;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.date-control__days button {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  aspect-ratio: 1;
+  padding: 0;
+  color: #44544c;
+  font-size: 10px;
+  font-weight: 620;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.date-control__days button:hover,
+.date-control__days button:focus-visible {
+  color: var(--forest-900);
+  outline: 0;
+  background: #edf4ef;
+}
+
+.date-control__days button.is-outside {
+  color: #b6bdb9;
+}
+
+.date-control__days button.is-today {
+  box-shadow: inset 0 0 0 1px #7fa18f;
+}
+
+.date-control__days button.is-selected {
+  color: #fff;
+  background: var(--forest-800);
+  box-shadow: none;
+}
+
+.date-control__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 38px;
+  margin-top: 5px;
+  padding-top: 6px;
+  border-top: 1px solid #edf0eb;
+}
+
+.date-control__footer button {
+  min-width: 54px;
+  padding: 0 9px;
+  color: #69776f;
+  font-size: 9px;
+  font-weight: 700;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.date-control__footer button:hover,
+.date-control__footer button:focus-visible {
+  outline: 0;
+  background: #edf4ef;
+}
+
+.date-control__footer .date-control__today {
+  color: var(--forest-800);
+  background: var(--forest-100);
 }
 
 .money-input {

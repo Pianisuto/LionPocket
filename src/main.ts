@@ -9,9 +9,11 @@ if (started) {
   app.quit();
 }
 
-// Some Linux video drivers fail while Electron is starting. Software rendering
-// keeps the interface reliable and is more than enough for this application.
-app.disableHardwareAcceleration();
+// The GPU sandbox blocks the NVIDIA GBM driver on some Linux distributions.
+// Keep acceleration enabled and relax only the GPU process sandbox there.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('disable-gpu-sandbox');
+}
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {

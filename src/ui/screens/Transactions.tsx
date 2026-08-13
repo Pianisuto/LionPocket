@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, Check, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import type { Transaction, TransactionFilters } from '../../shared/types';
-import { EmptyState, SearchField } from '../components';
+import { EmptyState, SearchField, SelectControl } from '../components';
 import { currency, formatDate, statusLabel } from '../format';
 
 export const Transactions = ({
@@ -22,8 +22,8 @@ export const Transactions = ({
   const [items, setItems] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [kind, setKind] = useState<TransactionFilters['kind']>('all');
-  const [status, setStatus] = useState<TransactionFilters['status']>('all');
+  const [kind, setKind] = useState<NonNullable<TransactionFilters['kind']>>('all');
+  const [status, setStatus] = useState<NonNullable<TransactionFilters['status']>>('all');
 
   useEffect(() => {
     setLoading(true);
@@ -60,12 +60,18 @@ export const Transactions = ({
 
       <div className="toolbar">
         <SearchField value={search} onChange={setSearch} placeholder="Buscar descrição ou categoria" />
-        <select className="filter-select" value={kind} onChange={(event) => setKind(event.target.value as TransactionFilters['kind'])}>
-          <option value="all">Entradas e saídas</option><option value="income">Só entradas</option><option value="expense">Só saídas</option>
-        </select>
-        <select className="filter-select" value={status} onChange={(event) => setStatus(event.target.value as TransactionFilters['status'])}>
-          <option value="all">Todas as situações</option><option value="planned">Planejado</option><option value="paid">Pago</option><option value="received">Recebido</option><option value="cancelled">Cancelado</option>
-        </select>
+        <SelectControl className="filter-select" ariaLabel="Filtrar por tipo" value={kind} onChange={(value) => setKind(value as NonNullable<TransactionFilters['kind']>)} options={[
+          { value: 'all', label: 'Entradas e saídas' },
+          { value: 'income', label: 'Só entradas' },
+          { value: 'expense', label: 'Só saídas' },
+        ]} />
+        <SelectControl className="filter-select" ariaLabel="Filtrar por situação" value={status} onChange={(value) => setStatus(value as NonNullable<TransactionFilters['status']>)} options={[
+          { value: 'all', label: 'Todas as situações' },
+          { value: 'planned', label: 'Planejado' },
+          { value: 'paid', label: 'Pago' },
+          { value: 'received', label: 'Recebido' },
+          { value: 'cancelled', label: 'Cancelado' },
+        ]} />
         <button className="button button--primary" onClick={onAdd}><Plus size={18} /> Novo lançamento</button>
       </div>
 
@@ -95,4 +101,3 @@ export const Transactions = ({
     </section>
   );
 };
-
