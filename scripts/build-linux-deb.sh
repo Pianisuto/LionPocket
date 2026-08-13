@@ -28,6 +28,7 @@ mkdir -p \
   "$output_dir"
 
 cp -a "$app_dir/." "$stage_dir/opt/LionPocket/"
+chmod 0755 "$stage_dir/opt/LionPocket"
 chmod 4755 "$stage_dir/opt/LionPocket/chrome-sandbox"
 ln -s /opt/LionPocket/lionpocket "$stage_dir/usr/bin/lionpocket"
 install -m 0644 "$project_dir/assets/icon.png" \
@@ -61,6 +62,7 @@ EOF
 
 chmod 0755 "$stage_dir/DEBIAN"
 chmod 0644 "$stage_dir/DEBIAN/control"
+chmod 0644 "$stage_dir/usr/share/applications/lionpocket.desktop"
 dpkg-deb --root-owner-group --build "$stage_dir" "$package_path"
 
 echo "Instalador criado em: $package_path"
