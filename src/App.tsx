@@ -1,0 +1,289 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  CalendarSync,
+  CreditCard,
+  LayoutDashboard,
+  Plus,
+  ReceiptText,
+  Settings as SettingsIcon,
+  Target,
+  X,
+} from 'lucide-react';
+import type {
+  Catalogs,
+  Goal,
+  Overview,
+  RecurringExpense,
+  Transaction,
+} from './shared/types';
+import { LionLogo, MonthPicker } from './ui/components';
+import { GoalForm, InstallmentForm, RecurringForm, TransactionForm } from './ui/forms';
+import { Dashboard } from './ui/screens/Dashboard';
+import { Goals } from './ui/screens/Goals';
+import { Installments } from './ui/screens/Installments';
+import { Recurring } from './ui/screens/Recurring';
+import { Settings } from './ui/screens/Settings';
+import { Transactions } from './ui/screens/Transactions';
+
+type View = 'dashboard' | 'transactions' | 'recurring' | 'installments' | 'goals' | 'settings';
+type ModalState =
+  | { type: 'transaction'; item?: Transaction | null }
+  | { type: 'recurring'; item?: RecurringExpense | null }
+  | { type: 'installment' }
+  | { type: 'goal'; item?: Goal | null }
+  | null;
+
+const emptyCatalogs: Catalogs = { categories: [], paymentMethods: [], cards: [] };
+
+const views: Array<{ id: View; label: string; icon: React.ReactNode }> = [
+  { id: 'dashboard', label: 'Visão geral', icon: <LayoutDashboard size={20} /> },
+  { id: 'transactions', label: 'Lançamentos', icon: <ReceiptText size={20} /> },
+  { id: 'recurring', label: 'Despesas fixas', icon: <CalendarSync size={20} /> },
+  { id: 'installments', label: 'Parcelas', icon: <CreditCard size={20} /> },
+  { id: 'goals', label: 'Objetivos', icon: <Target size={20} /> },
+];
+
+const pageCopy: Record<View, { title: string; subtitle: string }> = {
+  dashboard: { title: 'Visão geral', subtitle: 'Um resumo claro do seu mês.' },
+  transactions: { title: 'Lançamentos', subtitle: 'Tudo que entra e sai, no mesmo lugar.' },
+  recurring: { title: 'Despesas fixas', subtitle: 'As contas que acompanham você todo mês.' },
+  installments: { title: 'Compras parceladas', subtitle: 'Compromissos futuros sem surpresas.' },
+  goals: { title: 'Objetivos', subtitle: 'Transforme vontade em um plano possível.' },
+  settings: { title: 'Configurações', subtitle: 'Dados, cópias e listas do seu jeito.' },
+};
+
+export default function App() {
+  const [view, setView] = useState<View>('dashboard');
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [catalogs, setCatalogs] = useState<Catalogs>(emptyCatalogs);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [modal, setModal] = useState<ModalState>(null);
+  const [toast, setToast] = useState('');
+
+  const notify = useCallback((message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(''), 3500);
+  }, []);
+
+  const refreshCatalogs = useCallback(async () => {
+    setCatalogs(await window.lionPocket.getCatalogs());
+  }, []);
+
+  useEffect(() => {
+    refreshCatalogs().catch(() => notify('Não foi possível carregar as listas.'));
+  }, [refreshCatalogs, notify]);
+
+  useEffect(() => {
+    let active = true;
+    setOverviewLoading(true);
+    window.lionPocket
+      .getOverview(month)
+      .then((data) => {
+        if (active) setOverview(data);
+      })
+      .catch(() => notify('Não foi possível carregar o resumo.'))
+      .finally(() => {
+        if (active) setOverviewLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [month, refreshKey, notify]);
+
+  const changed = useCallback(() => setRefreshKey((value) => value + 1), []);
+  const defaultDate = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return today.startsWith(month) ? today : `${month}-01`;
+  }, [month]);
+
+  const safeAction = async (action: () => Promise<void>, successMessage: string) => {
+    try {
+      await action();
+      setModal(null);
+      changed();
+      notify(successMessage);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Algo não saiu como esperado.');
+    }
+  };
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <LionLogo />
+        <nav className="sidebar__nav" aria-label="Navegação principal">
+          <span className="sidebar__label">Meu dinheiro</span>
+          {views.map((item) => (
+            <button
+              key={item.id}
+              className={view === item.id ? 'active' : ''}
+              onClick={() => setView(item.id)}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar__bottom">
+          <button
+            className={view === 'settings' ? 'active' : ''}
+            onClick={() => setView('settings')}
+          >
+            <SettingsIcon size={20} />
+            <span>Configurações</span>
+          </button>
+          <div className="local-badge">
+            <span className="local-badge__dot" />
+            <div>
+              <strong>Dados locais</strong>
+              <small>Somente neste computador</small>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <header className="topbar">
+          <div>
+            <h1>{pageCopy[view].title}</h1>
+            <p>{pageCopy[view].subtitle}</p>
+          </div>
+          <div className="topbar__actions">
+            <MonthPicker month={month} onChange={setMonth} />
+            {view !== 'settings' && (
+              <button
+                className="button button--primary button--compact"
+                onClick={() => setModal({ type: 'transaction' })}
+              >
+                <Plus size={18} /> Adicionar
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="page-content">
+          {view === 'dashboard' && (
+            <Dashboard
+              overview={overview}
+              loading={overviewLoading}
+              onAddTransaction={() => setModal({ type: 'transaction' })}
+              onNavigate={(next) => setView(next as View)}
+            />
+          )}
+          {view === 'transactions' && (
+            <Transactions
+              month={month}
+              refreshKey={refreshKey}
+              onAdd={() => setModal({ type: 'transaction' })}
+              onEdit={(item) => setModal({ type: 'transaction', item })}
+              onChanged={changed}
+              notify={notify}
+            />
+          )}
+          {view === 'recurring' && (
+            <Recurring
+              refreshKey={refreshKey}
+              onAdd={() => setModal({ type: 'recurring' })}
+              onEdit={(item) => setModal({ type: 'recurring', item })}
+              onChanged={changed}
+              notify={notify}
+            />
+          )}
+          {view === 'installments' && (
+            <Installments
+              refreshKey={refreshKey}
+              onAdd={() => setModal({ type: 'installment' })}
+              onChanged={changed}
+              notify={notify}
+            />
+          )}
+          {view === 'goals' && (
+            <Goals
+              refreshKey={refreshKey}
+              onAdd={() => setModal({ type: 'goal' })}
+              onEdit={(item) => setModal({ type: 'goal', item })}
+              onChanged={changed}
+              notify={notify}
+            />
+          )}
+          {view === 'settings' && (
+            <Settings
+              catalogs={catalogs}
+              month={month}
+              refreshCatalogs={refreshCatalogs}
+              notify={(message) => {
+                notify(message);
+                changed();
+              }}
+            />
+          )}
+        </div>
+      </main>
+
+      {modal?.type === 'transaction' && (
+        <TransactionForm
+          transaction={modal.item}
+          catalogs={catalogs}
+          defaultDate={defaultDate}
+          onClose={() => setModal(null)}
+          onSave={(input) =>
+            safeAction(
+              () => window.lionPocket.saveTransaction(input).then(() => undefined),
+              input.id ? 'Lançamento atualizado.' : 'Lançamento adicionado.',
+            )
+          }
+        />
+      )}
+      {modal?.type === 'recurring' && (
+        <RecurringForm
+          item={modal.item}
+          catalogs={catalogs}
+          onClose={() => setModal(null)}
+          onSave={(input) =>
+            safeAction(
+              () => window.lionPocket.saveRecurringExpense(input).then(() => undefined),
+              input.id ? 'Despesa fixa atualizada.' : 'Despesa fixa criada.',
+            )
+          }
+        />
+      )}
+      {modal?.type === 'installment' && (
+        <InstallmentForm
+          catalogs={catalogs}
+          onClose={() => setModal(null)}
+          onSave={(input) =>
+            safeAction(
+              () => window.lionPocket.createInstallmentPurchase(input).then(() => undefined),
+              'Parcelas criadas com sucesso.',
+            )
+          }
+        />
+      )}
+      {modal?.type === 'goal' && (
+        <GoalForm
+          goal={modal.item}
+          catalogs={catalogs}
+          onClose={() => setModal(null)}
+          onSave={(input) =>
+            safeAction(
+              () => window.lionPocket.saveGoal(input).then(() => undefined),
+              input.id ? 'Objetivo atualizado.' : 'Objetivo criado.',
+            )
+          }
+        />
+      )}
+
+      {toast && (
+        <div className="toast">
+          <span>{toast}</span>
+          <button onClick={() => setToast('')}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
