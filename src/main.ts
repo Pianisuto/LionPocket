@@ -9,10 +9,29 @@ if (started) {
   app.quit();
 }
 
+// Some Linux video drivers fail while Electron is starting. Software rendering
+// keeps the interface reliable and is more than enough for this application.
+app.disableHardwareAcceleration();
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 let database: LionPocketDatabase;
+let mainWindow: BrowserWindow | null = null;
+
+const showMainWindow = () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+};
+
+app.on('second-instance', showMainWindow);
 
 const createWindow = () => {
-  const mainWindow = new BrowserWindow({
+  const createdWindow = new BrowserWindow({
     title: 'LionPocket',
     width: 1440,
     height: 920,
@@ -28,13 +47,17 @@ const createWindow = () => {
     },
   });
 
-  mainWindow.setMenuBarVisibility(false);
-  mainWindow.once('ready-to-show', () => mainWindow.show());
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  mainWindow.webContents.once('did-finish-load', () => {
-    mainWindow.webContents.setZoomFactor(1);
+  mainWindow = createdWindow;
+  createdWindow.setMenuBarVisibility(false);
+  createdWindow.once('ready-to-show', showMainWindow);
+  createdWindow.once('closed', () => {
+    if (mainWindow === createdWindow) mainWindow = null;
   });
-  mainWindow.webContents.on('before-input-event', (event, input) => {
+  createdWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  createdWindow.webContents.once('did-finish-load', () => {
+    createdWindow.webContents.setZoomFactor(1);
+  });
+  createdWindow.webContents.on('before-input-event', (event, input) => {
     const modifierPressed = input.control || input.meta;
     if (!modifierPressed || input.alt || input.type !== 'keyDown') return;
 
@@ -44,22 +67,22 @@ const createWindow = () => {
     if (!zoomIn && !zoomOut && !resetZoom) return;
 
     event.preventDefault();
-    const currentZoom = mainWindow.webContents.getZoomFactor();
+    const currentZoom = createdWindow.webContents.getZoomFactor();
     if (resetZoom) {
-      mainWindow.webContents.setZoomFactor(1);
+      createdWindow.webContents.setZoomFactor(1);
       return;
     }
 
     const direction = zoomIn ? 0.1 : -0.1;
     const nextZoom = Math.min(2, Math.max(0.6, Math.round((currentZoom + direction) * 10) / 10));
-    mainWindow.webContents.setZoomFactor(nextZoom);
+    createdWindow.webContents.setZoomFactor(nextZoom);
   });
 
   // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    createdWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(
+    createdWindow.loadFile(
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
     );
   }
