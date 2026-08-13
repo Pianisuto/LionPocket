@@ -30,6 +30,8 @@ npm test
 npm run make
 ```
 
-No Linux, `npm run make` gera uma versão portátil em ZIP. No Windows, o mesmo comando gera o instalador e também uma versão portátil. O instalador do Windows deve ser criado e testado no próprio Windows.
+No Linux, `npm run make:linux` gera um instalador `.deb`. Abra esse arquivo com dois cliques, instale e procure por **LionPocket** no menu de aplicativos.
+
+O comando `npm run make` também gera a versão portátil em ZIP. No Windows, ele gera o instalador e uma versão portátil. O instalador do Windows deve ser criado e testado no próprio Windows.
 
 Os dados usados durante o desenvolvimento ficam na pasta de dados do Electron e não fazem parte do repositório.
