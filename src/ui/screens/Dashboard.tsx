@@ -7,7 +7,6 @@ import {
   PiggyBank,
   Plus,
   ReceiptText,
-  Sparkles,
   Target,
   TrendingUp,
   WalletCards,
@@ -107,17 +106,6 @@ export const Dashboard = ({
 
   return (
     <div className="dashboard">
-      <section className="welcome-banner">
-        <div>
-          <span className="eyebrow"><Sparkles size={15} /> Visão do mês</span>
-          <h2>Seu dinheiro está sob controle.</h2>
-          <p>Planeje com calma, confirme o que aconteceu e deixe o LionPocket cuidar das contas.</p>
-        </div>
-        <button className="button button--sun" onClick={onAddTransaction}><Plus size={18} /> Novo lançamento</button>
-        <div className="welcome-banner__orb welcome-banner__orb--one" />
-        <div className="welcome-banner__orb welcome-banner__orb--two" />
-      </section>
-
       <section className="metric-grid">
         <MetricCard label="Entradas planejadas" value={summary.plannedIncome} hint={`${currency.format(summary.receivedIncome)} já recebidos`} tone="income" icon={<ArrowUpRight size={20} />} />
         <MetricCard label="Saídas planejadas" value={summary.plannedExpenses} hint={`${currency.format(summary.paidExpenses)} já pagos`} tone="expense" icon={<ReceiptText size={20} />} />
@@ -137,7 +125,7 @@ export const Dashboard = ({
         <section className="panel spending-panel">
           <header className="panel__header"><div><span className="eyebrow">Distribuição</span><h3>Para onde vai</h3></div></header>
           {overview.categoryBreakdown.length ? (
-            <>
+            <div className="spending-body">
               <div className="donut-wrap">
                 <div className="donut" style={{ background: `conic-gradient(${gradient})` }}><div><span>Total</span><strong>{compactCurrency.format(totalCategories)}</strong></div></div>
               </div>
@@ -146,13 +134,13 @@ export const Dashboard = ({
                   <div key={item.name}><span><i style={{ background: item.color }} />{item.name}</span><strong>{currency.format(item.amount)}</strong></div>
                 ))}
               </div>
-            </>
+            </div>
           ) : <EmptyState icon={<CircleDollarSign />} title="Tudo tranquilo por aqui" description="As categorias aparecem quando você adiciona suas saídas." />}
         </section>
 
         <section className="panel">
           <header className="panel__header">
-            <div><span className="eyebrow">Próximos dias</span><h3>Contas a caminho</h3></div>
+            <div><span className="eyebrow">A pagar no mês</span><h3>Contas a caminho</h3></div>
             <button className="text-button" onClick={() => onNavigate('transactions')}>Ver todas <ChevronRight size={16} /></button>
           </header>
           <div className="upcoming-list">
@@ -162,7 +150,7 @@ export const Dashboard = ({
                 <div><strong>{item.description}</strong><span>{item.categoryName ?? 'Sem categoria'}</span></div>
                 <strong>{currency.format(item.plannedAmount)}</strong>
               </div>
-            )) : <EmptyState icon={<CalendarClock />} title="Nenhuma conta próxima" description="Os próximos vencimentos aparecerão aqui." />}
+            )) : <EmptyState icon={<CalendarClock />} title="Nada em aberto neste mês" description="As saídas ainda não pagas deste mês aparecem aqui." />}
           </div>
         </section>
 

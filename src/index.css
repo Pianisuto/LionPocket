@@ -53,7 +53,6 @@
   --violet-wash: rgba(176, 133, 255, 0.14);
 
   --gradient-primary: linear-gradient(135deg, #ff5ca4, #c2185b);
-  --gradient-mane: linear-gradient(135deg, #ff7cb7, #d21e6f 55%, #8f0f4a);
 
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.4);
@@ -585,31 +584,14 @@ strong,
   background: var(--surface-2);
 }
 
-.button--soft,
-.button--sun {
+.button--soft {
   color: var(--primary-ink);
   border-color: var(--primary-wash-strong);
   background: var(--primary-wash);
 }
 
-.button--soft:hover,
-.button--sun:hover {
+.button--soft:hover {
   background: var(--primary-wash-strong);
-}
-
-/* Fica sempre sobre a faixa rosa, então o fundo é branco nos dois temas —
-   e a cor do texto precisa ser fixa, não seguir o token do tema. */
-.button--sun {
-  height: 44px;
-  color: #35061d;
-  border-color: transparent;
-  background: #fff;
-  box-shadow: var(--shadow-sm);
-}
-
-.button--sun:hover {
-  background: #fff;
-  filter: brightness(0.96);
 }
 
 .text-button {
@@ -914,9 +896,11 @@ strong,
   color: var(--text-muted);
 }
 
+/* Popovers vão para o topo da pilha: eles precisam aparecer por cima do
+   modal (500), que é justamente onde ficam quase todos os formulários. */
 .select-control__menu {
   position: fixed;
-  z-index: 400;
+  z-index: 900;
   padding: 6px;
   overflow-y: auto;
   border: 1px solid var(--line-2);
@@ -961,7 +945,7 @@ strong,
 
 .date-control__calendar {
   position: fixed;
-  z-index: 400;
+  z-index: 900;
   padding: 14px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-lg);
@@ -1252,89 +1236,6 @@ strong,
 }
 
 /* --------------------------------------------------------------------------
-   Faixa de boas-vindas — o elemento mais "Léo" da tela
-   -------------------------------------------------------------------------- */
-
-.welcome-banner {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 26px 30px 30px;
-  overflow: hidden;
-  color: #fff;
-  border-radius: var(--radius-xl);
-  background: var(--gradient-mane);
-  box-shadow: var(--shadow-primary);
-}
-
-.welcome-banner > div:first-child {
-  position: relative;
-  z-index: 2;
-  max-width: 620px;
-}
-
-.welcome-banner .eyebrow {
-  color: rgba(255, 255, 255, 0.82);
-}
-
-.welcome-banner h2 {
-  margin-top: 9px;
-  font-size: 26px;
-  letter-spacing: -0.03em;
-}
-
-.welcome-banner p {
-  margin-top: 7px;
-  max-width: 54ch;
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 13.5px;
-  line-height: 1.55;
-}
-
-.welcome-banner .button {
-  position: relative;
-  z-index: 2;
-  flex: 0 0 auto;
-}
-
-/* Recorte da juba: os tufos redondos do Léo viram a borda de baixo. */
-.welcome-banner::after {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 14px;
-  background:
-    radial-gradient(circle at 11px 11px, var(--bg) 11px, transparent 12px) repeat-x
-    0 0 / 22px 22px;
-  content: '';
-}
-
-.welcome-banner__orb {
-  position: absolute;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.11);
-  pointer-events: none;
-}
-
-.welcome-banner__orb--one {
-  top: -70px;
-  right: 120px;
-  width: 210px;
-  height: 210px;
-}
-
-.welcome-banner__orb--two {
-  right: -40px;
-  bottom: -90px;
-  width: 240px;
-  height: 240px;
-  background: rgba(255, 255, 255, 0.07);
-}
-
-/* --------------------------------------------------------------------------
    Métricas
    -------------------------------------------------------------------------- */
 
@@ -1419,9 +1320,12 @@ strong,
   --metric-wash: var(--violet-wash);
 }
 
+/* Colunas fluidas com teto de três: cada faixa nunca fica menor que
+   (100% - vãos) / 3, então nem uma tela ultralarga quebra em quatro colunas —
+   e o mínimo de 320px derruba para duas ou uma quando o espaço aperta. */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(max(320px, (100% - 32px) / 3), 1fr));
   gap: 16px;
 }
 
@@ -1512,30 +1416,75 @@ strong,
   text-align: center;
 }
 
+/* Vira contexto de container para o donut poder crescer junto com a coluna. */
 .spending-panel {
   align-items: center;
+  container-type: inline-size;
+}
+
+/* O centralizado vale para o donut, não para o cabeçalho: ele continua
+   alinhado à esquerda como o dos painéis vizinhos. */
+.spending-panel .panel__header {
+  width: 100%;
+}
+
+/* Empilhado por padrão: o donut absorve a folga vertical e a legenda encosta
+   na base, em vez de deixar um vazio no pé do cartão. */
+.spending-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
 }
 
 .donut-wrap {
   display: grid;
+  flex: 1;
   place-items: center;
+  width: 100%;
+  min-height: 180px;
   padding: 4px 0;
 }
 
+/* Acompanha a largura da coluna, com piso e teto para não virar um ponto
+   numa tela estreita nem um alvo gigante numa ultralarga. */
 .donut {
   position: relative;
   display: grid;
   place-items: center;
-  width: 170px;
-  height: 170px;
+  width: clamp(160px, 36cqi, 230px);
+  aspect-ratio: 1;
   border-radius: 50%;
+}
+
+/* Cabendo lado a lado, a legenda vai para a esquerda e o donut para a
+   direita; abaixo disso o flex-direction: column acima assume de volta. */
+@container (min-width: 440px) {
+  .spending-body {
+    flex-direction: row;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .category-legend {
+    order: -1;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .donut-wrap {
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 0;
+  }
 }
 
 .donut > div {
   display: grid;
   place-items: center;
-  width: 118px;
-  height: 118px;
+  width: 70%;
+  height: 70%;
   border-radius: 50%;
   background: var(--surface);
 }
@@ -3034,8 +2983,8 @@ strong,
   }
 }
 
+/* A grade do painel já se ajusta sozinha pelo auto-fit; aqui só as fixas. */
 @media (max-width: 1080px) {
-  .dashboard-grid,
   .settings-grid {
     grid-template-columns: minmax(0, 1fr);
   }
