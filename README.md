@@ -1,37 +1,96 @@
-# LionPocket
+<p align="center">
+  <img src="assets/icon.png" alt="Ícone do LionPocket" width="112" height="112">
+</p>
 
-Aplicativo desktop de finanças pessoais para Linux e Windows. Funciona sem internet e mantém os dados em um banco SQLite no próprio computador.
+<h1 align="center">LionPocket</h1>
 
-## O que já está incluído
+<p align="center">
+  Finanças pessoais simples, locais e bonitas.
+</p>
 
-- painel mensal e visão anual;
-- entradas e saídas planejadas ou realizadas;
-- despesas fixas criadas automaticamente por mês;
-- compras parceladas;
-- objetivos de compra e reserva;
+<p align="center">
+  <a href="https://github.com/Pianisuto/LionPocket/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/Pianisuto/LionPocket?display_name=tag&sort=semver"></a>
+  <a href="LICENSE"><img alt="Licença MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-f05a9d"></a>
+  <img alt="Linux e Windows" src="https://img.shields.io/badge/plataformas-Linux%20%7C%20Windows-6f5af0">
+  <img alt="Dados locais" src="https://img.shields.io/badge/dados-100%25%20locais-35b779">
+</p>
+
+O **LionPocket** é um aplicativo desktop de finanças pessoais para Linux e Windows. Ele funciona sem conta, sem assinatura e sem depender de internet: seus lançamentos ficam em um banco SQLite no próprio computador.
+
+## Recursos
+
+- painel mensal com resumo anual, saldo projetado e saldo realizado;
+- entradas e saídas planejadas, pagas ou recebidas;
+- preenchimento automático para lançamentos de meses anteriores;
+- sincronização entre valor planejado e valor real durante o backfill;
+- sugestões baseadas em lançamentos anteriores;
+- conclusão em lote de pendências de meses encerrados;
+- despesas fixas geradas automaticamente a cada mês;
+- acompanhamento de compras parceladas e objetivos financeiros;
 - categorias, formas de pagamento e cartões personalizáveis;
-- importação da planilha de planejamento financeiro;
-- cópia de segurança e exportação em CSV ou JSON.
+- importação de planilha e exportação em CSV ou JSON;
+- cópia de segurança local do banco de dados.
+
+## Instalação
+
+Baixe a versão mais recente na página de [Releases](https://github.com/Pianisuto/LionPocket/releases):
+
+- **Windows:** use `LionPocket-Instalador.exe` ou a versão portátil em ZIP;
+- **Linux (Debian/Ubuntu):** use o pacote `.deb`;
+- **Linux portátil:** extraia o ZIP e execute `lionpocket`.
+
+> O projeto ainda não possui assinatura de código. Por isso, Windows ou Linux podem pedir uma confirmação extra antes da primeira execução.
+
+## Privacidade
+
+O LionPocket não envia seus dados financeiros para servidores externos. O banco e os backups permanecem no seu computador. Ainda assim, mantenha cópias de segurança periódicas, especialmente antes de atualizar ou trocar de máquina.
 
 ## Desenvolvimento
 
-Requer Node.js 24 ou mais recente.
+Requisitos:
+
+- Node.js 24 ou mais recente;
+- npm;
+- dependências nativas de compilação exigidas pelo Electron no sistema utilizado.
 
 ```bash
-npm install
+git clone https://github.com/Pianisuto/LionPocket.git
+cd LionPocket
+npm ci
 npm start
 ```
 
-Verificações:
+Verificações do projeto:
 
 ```bash
-npm run typecheck
 npm test
+npm run typecheck
+npm run lint
+```
+
+Empacotamento:
+
+```bash
+# Instalador .deb e aplicativo Linux
+npm run make:linux
+
+# Artefatos suportados pelo sistema atual
 npm run make
 ```
 
-No Linux, `npm run make:linux` gera um instalador `.deb`. Abra esse arquivo com dois cliques, instale e procure por **LionPocket** no menu de aplicativos.
+O instalador do Windows é criado em um runner Windows pelo workflow [`build-windows.yml`](.github/workflows/build-windows.yml). Os artefatos gerados localmente ficam em `out/` e não fazem parte do repositório.
 
-O comando `npm run make` também gera a versão portátil em ZIP. No Windows, ele gera o instalador e uma versão portátil. O instalador do Windows deve ser criado e testado no próprio Windows.
+## Tecnologias
 
-Os dados usados durante o desenvolvimento ficam na pasta de dados do Electron e não fazem parte do repositório.
+- Electron e Electron Forge;
+- React e TypeScript;
+- SQLite;
+- Vite e Vitest.
+
+## Inspiração visual
+
+A interface foi inspirada na clareza, velocidade e linguagem visual do [t3.chat](https://t3.chat/), adaptadas para uma experiência local de finanças pessoais. LionPocket é um projeto independente e não possui afiliação, patrocínio ou endosso do t3.chat ou de seus criadores.
+
+## Licença
+
+Distribuído sob a [licença MIT](LICENSE). Copyright © 2026 Leonardo Vulczak.
