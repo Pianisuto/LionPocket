@@ -30,30 +30,62 @@ type Row = Record<string, string | number | null>;
 
 const now = () => new Date().toISOString();
 
+/** Cinza-ameixa: a cor de quem ainda não escolheu uma cor. */
+export const NEUTRAL_COLOR = '#9C8AA5';
+
 const seedCategories = [
-  ['Moradia', 'expense', '#7C8CF8'],
-  ['Contas da casa', 'expense', '#F0A45D'],
-  ['Alimentação', 'expense', '#57B894'],
-  ['Transporte', 'expense', '#5D9CEC'],
-  ['Moto', 'expense', '#8D77D9'],
-  ['Saúde', 'expense', '#E77D8F'],
-  ['Assinaturas', 'expense', '#BA7AC5'],
-  ['Lazer', 'expense', '#ED8F5A'],
-  ['Compras', 'expense', '#D6A64C'],
-  ['Educação', 'expense', '#4CA6A8'],
-  ['Pets/Animais', 'expense', '#AF8B63'],
-  ['Casa', 'expense', '#657D6B'],
-  ['Ferramentas/Projetos', 'expense', '#6378B8'],
-  ['Impostos/Taxas', 'expense', '#C06D68'],
-  ['Presentes/Apoio', 'expense', '#D27A9C'],
-  ['Outros', 'expense', '#86909C'],
-  ['Salário CLT', 'income', '#3B9970'],
-  ['Freelance/Programa', 'income', '#48A486'],
-  ['PIX/Apoio familiar', 'income', '#5AA6A0'],
-  ['Reembolso', 'income', '#61A5D6'],
-  ['Venda', 'income', '#7D9BC8'],
-  ['Outros', 'income', '#86909C'],
+  ['Moradia', 'expense', '#F2557F'],
+  ['Contas da casa', 'expense', '#FF9142'],
+  ['Alimentação', 'expense', '#FFC247'],
+  ['Transporte', 'expense', '#4CC9F0'],
+  ['Moto', 'expense', '#8B5CF6'],
+  ['Saúde', 'expense', '#FF6B9A'],
+  ['Assinaturas', 'expense', '#C77DFF'],
+  ['Lazer', 'expense', '#FF7D54'],
+  ['Compras', 'expense', '#E8467C'],
+  ['Educação', 'expense', '#2DD4BF'],
+  ['Pets/Animais', 'expense', '#F59E6B'],
+  ['Casa', 'expense', '#7C9CF5'],
+  ['Ferramentas/Projetos', 'expense', '#6366F1'],
+  ['Impostos/Taxas', 'expense', '#EF4444'],
+  ['Presentes/Apoio', 'expense', '#D946EF'],
+  ['Outros', 'expense', NEUTRAL_COLOR],
+  ['Salário CLT', 'income', '#34D399'],
+  ['Freelance/Programa', 'income', '#22D3EE'],
+  ['PIX/Apoio familiar', 'income', '#4ADE80'],
+  ['Reembolso', 'income', '#60A5FA'],
+  ['Venda', 'income', '#A78BFA'],
+  ['Outros', 'income', NEUTRAL_COLOR],
 ] as const;
+
+/**
+ * Paleta antiga (tema verde) → paleta nova. Bancos já existentes recebem as
+ * cores novas, mas só onde a cor ainda era a padrão: qualquer cor diferente
+ * disso foi escolhida por alguém e fica como está.
+ */
+const legacyCategoryColors: Record<string, string> = {
+  '#7C8CF8': '#F2557F',
+  '#F0A45D': '#FF9142',
+  '#57B894': '#FFC247',
+  '#5D9CEC': '#4CC9F0',
+  '#8D77D9': '#8B5CF6',
+  '#E77D8F': '#FF6B9A',
+  '#BA7AC5': '#C77DFF',
+  '#ED8F5A': '#FF7D54',
+  '#D6A64C': '#E8467C',
+  '#4CA6A8': '#2DD4BF',
+  '#AF8B63': '#F59E6B',
+  '#657D6B': '#7C9CF5',
+  '#6378B8': '#6366F1',
+  '#C06D68': '#EF4444',
+  '#D27A9C': '#D946EF',
+  '#3B9970': '#34D399',
+  '#48A486': '#22D3EE',
+  '#5AA6A0': '#4ADE80',
+  '#61A5D6': '#60A5FA',
+  '#7D9BC8': '#A78BFA',
+  '#86909C': NEUTRAL_COLOR,
+};
 
 const seedPaymentMethods = [
   'Cartão de crédito',
@@ -85,7 +117,7 @@ export class LionPocketDatabase {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         kind TEXT NOT NULL CHECK(kind IN ('income', 'expense')),
-        color TEXT NOT NULL DEFAULT '#86909C',
+        color TEXT NOT NULL DEFAULT '#9C8AA5',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(name, kind)
@@ -194,6 +226,13 @@ export class LionPocketDatabase {
       categoryStatement.run(randomUUID(), name, kind, color, timestamp, timestamp);
     }
 
+    const recolor = this.db.prepare(
+      'UPDATE categories SET color = ?, updated_at = ? WHERE color = ?',
+    );
+    for (const [legacy, replacement] of Object.entries(legacyCategoryColors)) {
+      recolor.run(replacement, timestamp, legacy);
+    }
+
     const methodStatement = this.db.prepare(`
       INSERT OR IGNORE INTO payment_methods(id, name, created_at, updated_at)
       VALUES (?, ?, ?, ?)
@@ -230,7 +269,7 @@ export class LionPocketDatabase {
         randomUUID(),
         input.name.trim(),
         input.kind ?? 'expense',
-        input.color ?? '#86909C',
+        input.color ?? NEUTRAL_COLOR,
         timestamp,
         timestamp,
       );
@@ -242,7 +281,7 @@ export class LionPocketDatabase {
     `).run(randomUUID(), input.name.trim(), timestamp, timestamp);
   }
 
-  findOrCreateCategory(name: string, kind: 'income' | 'expense', color = '#86909C') {
+  findOrCreateCategory(name: string, kind: 'income' | 'expense', color = NEUTRAL_COLOR) {
     const cleaned = name.trim();
     if (!cleaned) return null;
     const existing = this.db
@@ -856,7 +895,7 @@ export class LionPocketDatabase {
     const { start, end } = monthRange(month);
     const categoryRows = this.db.prepare(`
       SELECT COALESCE(c.name, 'Sem categoria') AS name,
-        COALESCE(c.color, '#86909C') AS color,
+        COALESCE(c.color, '${NEUTRAL_COLOR}') AS color,
         COALESCE(SUM(CASE WHEN t.status = 'paid' THEN COALESCE(t.actual_cents, t.planned_cents) ELSE t.planned_cents END), 0) AS amount
       FROM transactions t
       LEFT JOIN categories c ON c.id = t.category_id

@@ -189,6 +189,10 @@ export interface ImportResult {
   goals: number;
 }
 
+export interface WindowState {
+  maximized: boolean;
+}
+
 export interface LionPocketApi {
   getCatalogs(): Promise<Catalogs>;
   createCatalogItem(input: CatalogInput): Promise<void>;
@@ -211,5 +215,11 @@ export interface LionPocketApi {
   exportJson(): Promise<string | null>;
   importSpreadsheet(): Promise<ImportResult | null>;
   openExternal(url: string): Promise<void>;
+  minimizeWindow(): Promise<void>;
+  toggleMaximizeWindow(): Promise<boolean>;
+  closeWindow(): Promise<void>;
+  isWindowMaximized(): Promise<boolean>;
+  /** Avisa quando a janela é maximizada ou restaurada. Devolve o cancelamento. */
+  onWindowState(listener: (state: WindowState) => void): () => void;
 }
 

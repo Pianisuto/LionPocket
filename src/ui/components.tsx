@@ -4,26 +4,6 @@ import { createPortal } from 'react-dom';
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import { formatDate, monthLabel, todayIso } from './format';
 
-export const LionLogo = ({ compact = false }: { compact?: boolean }) => (
-  <div className={`brand ${compact ? 'brand--compact' : ''}`}>
-    <div className="brand__mark" aria-hidden="true">
-      <svg viewBox="0 0 48 48" role="img">
-        <path d="M9 19 4 9l11 5L24 5l9 9 11-5-5 10c2 3 3 7 3 11 0 10-8 15-18 15S6 40 6 30c0-4 1-8 3-11Z" fill="currentColor" />
-        <path d="M15 27c2-4 5-6 9-6s7 2 9 6c-1 7-4 11-9 11s-8-4-9-11Z" fill="#F8D77B" />
-        <circle cx="17" cy="24" r="2" fill="#12372A" />
-        <circle cx="31" cy="24" r="2" fill="#12372A" />
-        <path d="m21 30 3-2 3 2-3 3-3-3Z" fill="#12372A" />
-      </svg>
-    </div>
-    {!compact && (
-      <div>
-        <strong>LionPocket</strong>
-        <span>Seu dinheiro, do seu jeito</span>
-      </div>
-    )}
-  </div>
-);
-
 export const MonthPicker = ({
   month,
   onChange,
@@ -441,7 +421,7 @@ export const DateField = ({
   );
 };
 
-export const ProgressBar = ({ value, color = '#F3B45C' }: { value: number; color?: string }) => (
+export const ProgressBar = ({ value, color = 'var(--primary)' }: { value: number; color?: string }) => (
   <div className="progress" aria-label={`${Math.round(value * 100)}% concluído`}>
     <span style={{ width: `${Math.max(0, Math.min(100, value * 100))}%`, background: color }} />
   </div>

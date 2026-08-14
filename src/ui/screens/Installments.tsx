@@ -31,7 +31,7 @@ export const Installments = ({ refreshKey, onAdd, onChanged, notify }: {
           const progress = item.totalInstallments ? item.paidInstallments / item.totalInstallments : 0;
           return <article className="installment-row" key={item.id}>
             <div className="installment-row__icon"><CreditCard size={20} /></div>
-            <div className="installment-row__main"><div><strong>{item.description}</strong><span>{item.categoryName ?? 'Sem categoria'} · {item.cardName ?? 'Cartão não informado'}</span></div><ProgressBar value={progress} color="#7A8AF7" /><small>{item.paidInstallments} de {item.totalInstallments} parcelas pagas</small></div>
+            <div className="installment-row__main"><div><strong>{item.description}</strong><span>{item.categoryName ?? 'Sem categoria'} · {item.cardName ?? 'Cartão não informado'}</span></div><ProgressBar value={progress} color="var(--violet)" /><small>{item.paidInstallments} de {item.totalInstallments} parcelas pagas</small></div>
             <div className="installment-row__value"><strong>{currency.format(item.installmentAmount)}</strong><span>por parcela</span></div>
             <div className="installment-row__date"><span>Primeira parcela</span><strong>{formatDate(item.firstDueDate, 'dd/MM/yyyy')}</strong></div>
             <button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={17} /></button>

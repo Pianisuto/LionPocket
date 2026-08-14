@@ -64,7 +64,7 @@ const TransactionRow = ({ item }: { item: Transaction }) => {
   const isIncome = item.kind === 'income';
   return (
     <div className="mini-transaction">
-      <div className="category-dot" style={{ background: item.categoryColor ?? '#89918B' }}>
+      <div className="category-dot" style={{ background: item.categoryColor ?? 'var(--text-muted)' }}>
         {isIncome ? <ArrowUpRight size={17} /> : <ArrowDownRight size={17} />}
       </div>
       <div className="mini-transaction__copy">
@@ -103,7 +103,7 @@ export const Dashboard = ({
         result.progress = end;
         return result;
       }, { stops: [], progress: 0 }).stops.join(', ')
-    : '#E4E7DF 0 100%';
+    : 'var(--surface-3) 0 100%';
 
   return (
     <div className="dashboard">

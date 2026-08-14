@@ -16,7 +16,10 @@ import type {
   RecurringExpense,
   Transaction,
 } from './shared/types';
-import { LionLogo, MonthPicker } from './ui/components';
+import { MonthPicker } from './ui/components';
+import { Leo } from './ui/Leo';
+import { TitleBar } from './ui/TitleBar';
+import { useTheme } from './ui/theme';
 import { GoalForm, InstallmentForm, RecurringForm, TransactionForm } from './ui/forms';
 import { Dashboard } from './ui/screens/Dashboard';
 import { Goals } from './ui/screens/Goals';
@@ -44,7 +47,7 @@ const views: Array<{ id: View; label: string; icon: React.ReactNode }> = [
 ];
 
 const pageCopy: Record<View, { title: string; subtitle: string }> = {
-  dashboard: { title: 'Visão geral', subtitle: 'Um resumo claro do seu mês.' },
+  dashboard: { title: 'Visão geral', subtitle: 'O seu mês inteiro em uma olhada.' },
   transactions: { title: 'Lançamentos', subtitle: 'Tudo que entra e sai, no mesmo lugar.' },
   recurring: { title: 'Despesas fixas', subtitle: 'As contas que acompanham você todo mês.' },
   installments: { title: 'Compras parceladas', subtitle: 'Compromissos futuros sem surpresas.' },
@@ -53,6 +56,7 @@ const pageCopy: Record<View, { title: string; subtitle: string }> = {
 };
 
 export default function App() {
+  const { theme, toggleTheme } = useTheme();
   const [view, setView] = useState<View>('dashboard');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [catalogs, setCatalogs] = useState<Catalogs>(emptyCatalogs);
@@ -111,8 +115,10 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <TitleBar theme={theme} onToggleTheme={toggleTheme} subtitle="Seu dinheiro, do seu jeito" />
+
+      <div className="app-body">
       <aside className="sidebar">
-        <LionLogo />
         <nav className="sidebar__nav" aria-label="Navegação principal">
           <span className="sidebar__label">Meu dinheiro</span>
           {views.map((item) => (
@@ -221,6 +227,17 @@ export default function App() {
           )}
         </div>
       </main>
+      </div>
+
+      <Leo
+        overview={overview}
+        month={month}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onQuickAdd={() => setModal({ type: 'transaction' })}
+        onNavigate={(next) => setView(next as View)}
+        notify={notify}
+      />
 
       {modal?.type === 'transaction' && (
         <TransactionForm

@@ -1,6 +1,7 @@
 import { backup } from 'node:sqlite';
 import fs from 'node:fs/promises';
-import { dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import type { IpcMainInvokeEvent } from 'electron';
 import type {
   CatalogInput,
   GoalInput,
@@ -17,7 +18,25 @@ const csvCell = (value: unknown) => {
   return `"${text.replaceAll('"', '""')}"`;
 };
 
+/** A janela que fez a chamada — a barra de título é desenhada pelo próprio app. */
+const callerWindow = (event: IpcMainInvokeEvent) => BrowserWindow.fromWebContents(event.sender);
+
 export const registerIpcHandlers = (database: LionPocketDatabase) => {
+  ipcMain.handle('window:minimize', (event) => {
+    callerWindow(event)?.minimize();
+  });
+  ipcMain.handle('window:toggle-maximize', (event) => {
+    const window = callerWindow(event);
+    if (!window) return false;
+    if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+    return window.isMaximized();
+  });
+  ipcMain.handle('window:close', (event) => {
+    callerWindow(event)?.close();
+  });
+  ipcMain.handle('window:is-maximized', (event) => callerWindow(event)?.isMaximized() ?? false);
+
   ipcMain.handle('catalogs:get', () => database.getCatalogs());
   ipcMain.handle('catalogs:create', (_event, input: CatalogInput) => database.createCatalogItem(input));
   ipcMain.handle('overview:get', (_event, month: string) => database.getOverview(month));

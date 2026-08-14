@@ -82,7 +82,7 @@ export const Transactions = ({
             <div className={`data-table__row ${item.status === 'cancelled' ? 'is-muted' : ''}`} key={item.id}>
               <span className="date-cell"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
               <span className="transaction-name">
-                <i style={{ background: item.categoryColor ?? '#89918B' }}>{item.kind === 'income' ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}</i>
+                <i style={{ background: item.categoryColor ?? 'var(--text-muted)' }}>{item.kind === 'income' ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}</i>
                 <span><strong>{item.description}</strong><small>{item.installmentNumber ? `${item.installmentNumber} de ${item.installmentTotal} · ` : ''}{item.paymentMethodName ?? item.cardName ?? (item.kind === 'income' ? 'Entrada' : 'Saída')}</small></span>
               </span>
               <span>{item.categoryName ?? 'Sem categoria'}</span>

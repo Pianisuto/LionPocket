@@ -39,7 +39,10 @@ const createWindow = () => {
     height: 920,
     minWidth: 1080,
     minHeight: 720,
-    backgroundColor: '#F4F5EF',
+    // A barra de título é desenhada pelo próprio app (src/ui/TitleBar.tsx).
+    frame: false,
+    backgroundColor: '#150E14',
+    icon: path.join(__dirname, '../../assets/icon.png'),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -52,6 +55,16 @@ const createWindow = () => {
   mainWindow = createdWindow;
   createdWindow.setMenuBarVisibility(false);
   createdWindow.once('ready-to-show', showMainWindow);
+
+  // Mantém os botões da barra de título em sincronia quando a janela é
+  // maximizada por fora do app (atalho de teclado, arrastar para o topo…).
+  const sendWindowState = () => {
+    if (createdWindow.isDestroyed()) return;
+    createdWindow.webContents.send('window:state', { maximized: createdWindow.isMaximized() });
+  };
+  createdWindow.on('maximize', sendWindowState);
+  createdWindow.on('unmaximize', sendWindowState);
+
   createdWindow.once('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
   });
