@@ -32,6 +32,12 @@ const showMainWindow = () => {
 
 app.on('second-instance', showMainWindow);
 
+/** Empacotado o ícone vive em resources/; em desenvolvimento, em assets/. */
+const iconPath = () =>
+  app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.png')
+    : path.join(__dirname, '../../assets/icon.png');
+
 const createWindow = () => {
   const createdWindow = new BrowserWindow({
     title: 'LionPocket',
@@ -42,7 +48,7 @@ const createWindow = () => {
     // A barra de título é desenhada pelo próprio app (src/ui/TitleBar.tsx).
     frame: false,
     backgroundColor: '#150E14',
-    icon: path.join(__dirname, '../../assets/icon.png'),
+    icon: iconPath(),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -54,7 +60,12 @@ const createWindow = () => {
 
   mainWindow = createdWindow;
   createdWindow.setMenuBarVisibility(false);
+  // A janela nasce escondida para não piscar sem conteúdo. O 'ready-to-show'
+  // é o gatilho ideal, mas no app empacotado ele não chega a disparar em
+  // alguns compositores do Linux — sem a segunda rede, a janela nunca abria.
+  // 'showMainWindow' é idempotente, então o que vier primeiro resolve.
   createdWindow.once('ready-to-show', showMainWindow);
+  createdWindow.webContents.once('did-finish-load', showMainWindow);
 
   // Mantém os botões da barra de título em sincronia quando a janela é
   // maximizada por fora do app (atalho de teclado, arrastar para o topo…).

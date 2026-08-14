@@ -11,10 +11,19 @@ const config: ForgeConfig = {
     name: 'LionPocket',
     executableName: 'lionpocket',
     icon: 'assets/icon',
+    // O plugin-vite empacota só a saída do build, então assets/ não entra no
+    // asar. O ícone da janela precisa vir junto por fora dele.
+    extraResource: ['assets/icon.png'],
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      name: 'lionpocket',
+      setupExe: 'LionPocket-Instalador.exe',
+      // Sem isto o instalador sai com o ícone padrão do Electron, mesmo com o
+      // executável já usando o do app.
+      setupIcon: 'assets/icon.ico',
+    }),
     new MakerZIP({}, ['linux', 'win32']),
   ],
   plugins: [

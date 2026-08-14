@@ -60,8 +60,49 @@ Categories=Office;Finance;
 StartupWMClass=LionPocket
 EOF
 
+# Instalações anteriores feitas à mão ficavam em ~/.local e o atalho de lá tem
+# precedência sobre o do sistema: sem remover, o menu continua abrindo a versão
+# velha por mais que o pacote novo seja instalado. Só os caminhos exatos da
+# instalação antiga são apagados — ~/.config, onde mora o banco, não é tocado.
+cat > "$stage_dir/DEBIAN/preinst" <<'EOF'
+#!/bin/sh
+set -e
+
+for home in /home/*; do
+  [ -d "$home" ] || continue
+  rm -rf "$home/.local/opt/lionpocket" 2>/dev/null || true
+  rm -f "$home/.local/share/applications/lionpocket.desktop" 2>/dev/null || true
+  rm -f "$home/.local/share/icons/hicolor/"*"/apps/lionpocket.png" 2>/dev/null || true
+done
+
+exit 0
+EOF
+
+# Sem isto o app demora a aparecer na busca do sistema: o índice de atalhos e o
+# cache de ícones continuam com o estado anterior até algo mais os regenerar.
+cat > "$stage_dir/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+set -e
+
+update-desktop-database /usr/share/applications 2>/dev/null || true
+gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+
+exit 0
+EOF
+
+cat > "$stage_dir/DEBIAN/postrm" <<'EOF'
+#!/bin/sh
+set -e
+
+update-desktop-database /usr/share/applications 2>/dev/null || true
+gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+
+exit 0
+EOF
+
 chmod 0755 "$stage_dir/DEBIAN"
 chmod 0644 "$stage_dir/DEBIAN/control"
+chmod 0755 "$stage_dir/DEBIAN/preinst" "$stage_dir/DEBIAN/postinst" "$stage_dir/DEBIAN/postrm"
 chmod 0644 "$stage_dir/usr/share/applications/lionpocket.desktop"
 dpkg-deb --root-owner-group --build "$stage_dir" "$package_path"
 
