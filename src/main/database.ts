@@ -906,12 +906,15 @@ export class LionPocketDatabase {
       ORDER BY amount DESC
     `).all(start, end) as unknown as Row[];
 
+    // "Contas a caminho" são só o que se paga, e só dentro do mês aberto —
+    // como o resto do painel. Sem recorte por "hoje": uma conta vencida e não
+    // paga continua sendo uma conta a pagar, e some da lista ao ser quitada.
     const upcomingRows = this.db.prepare(`
       ${this.transactionSelect()}
-      WHERE t.deleted_at IS NULL AND t.status = 'planned' AND t.due_date >= ?
-        AND t.planned_cents > 0
+      WHERE t.deleted_at IS NULL AND t.kind = 'expense' AND t.status = 'planned'
+        AND t.due_date >= ? AND t.due_date < ? AND t.planned_cents > 0
       ORDER BY t.due_date LIMIT 5
-    `).all(new Date().toISOString().slice(0, 10)) as unknown as Row[];
+    `).all(start, end) as unknown as Row[];
 
     const recentRows = this.db.prepare(`
       ${this.transactionSelect()}

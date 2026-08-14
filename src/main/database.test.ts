@@ -74,3 +74,55 @@ describe('despesas fixas', () => {
     database.db.close();
   });
 });
+
+describe('contas a caminho', () => {
+  const plan = (
+    database: LionPocketDatabase,
+    kind: 'income' | 'expense',
+    description: string,
+    dueDate: string,
+    plannedAmount: number,
+  ) =>
+    database.saveTransaction({
+      kind,
+      description,
+      categoryId: null,
+      plannedAmount,
+      actualAmount: null,
+      dueDate,
+      settledDate: null,
+      status: 'planned',
+      paymentMethodId: null,
+      cardId: null,
+      notes: '',
+    });
+
+  it('mostra só despesas do mês aberto, sem entradas e sem outros meses', () => {
+    const database = createDatabase();
+
+    plan(database, 'expense', 'Internet', '2026-05-10', 120);
+    plan(database, 'expense', 'Luz', '2026-05-20', 600);
+    plan(database, 'income', 'Salário CLT', '2026-05-05', 1489);
+    plan(database, 'expense', 'Internet de junho', '2026-06-10', 120);
+    plan(database, 'expense', 'Internet de abril', '2026-04-10', 120);
+
+    const { upcoming } = database.getOverview('2026-05');
+
+    expect(upcoming.map((item) => item.description)).toEqual(['Internet', 'Luz']);
+
+    database.db.close();
+  });
+
+  it('deixa de listar a conta depois que ela é paga', () => {
+    const database = createDatabase();
+    const bill = plan(database, 'expense', 'Internet', '2026-05-10', 120);
+
+    expect(database.getOverview('2026-05').upcoming).toHaveLength(1);
+
+    database.settleTransaction(bill.id);
+
+    expect(database.getOverview('2026-05').upcoming).toEqual([]);
+
+    database.db.close();
+  });
+});

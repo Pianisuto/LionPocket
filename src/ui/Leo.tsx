@@ -87,9 +87,9 @@ const describeMonth = (overview: Overview | null) => {
 
 const describeUpcoming = (overview: Overview | null) => {
   const next = overview?.upcoming[0];
-  if (!next) return 'Nenhuma conta à vista. Aproveita o sossego.';
+  if (!next) return 'Nenhuma conta em aberto neste mês. Aproveita o sossego.';
   const rest = (overview?.upcoming.length ?? 0) - 1;
-  const tail = rest > 0 ? ` Depois dela vêm mais ${rest}.` : ' E é só essa por enquanto.';
+  const tail = rest > 0 ? ` Depois dela vêm mais ${rest} no mês.` : ' E é a única do mês.';
   return `A próxima é ${next.description}: ${currency.format(next.plannedAmount)} em ${formatDate(next.dueDate)}.${tail}`;
 };
 
