@@ -43,7 +43,9 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
         <span className={`status-pill ${item.active ? 'status-pill--received' : 'status-pill--cancelled'}`}>{item.active ? 'Ativa' : 'Pausada'}</span>
       </div>
       <h3>{item.description}</h3>
-      <p>{item.categoryName ?? 'Sem categoria'} · {item.kind === 'income' ? 'recebe dia' : 'vence dia'} {item.dueDay}</p>
+      <p>{item.categoryName ?? 'Sem categoria'} · {item.cardId && item.chargeDay
+        ? `cobra dia ${item.chargeDay} no ${item.cardName ?? 'cartão'} · fatura vence dia ${item.dueDay}`
+        : `${item.kind === 'income' ? 'recebe dia' : 'vence dia'} ${item.dueDay}`}</p>
       <strong className={`item-card__amount ${item.kind === 'income' ? 'money-positive' : ''}`}>{item.kind === 'income' ? '+' : '−'} {currency.format(item.plannedAmount)}<small>/mês</small></strong>
       <div className="item-card__footer"><span>{item.paymentMethodName ?? (item.kind === 'income' ? 'Recebimento não informado' : 'Pagamento não informado')}</span><div><button className="icon-button" onClick={() => toggle(item)} title={item.active ? 'Pausar' : 'Ativar'}><Power size={16} /></button><button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button><button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={16} /></button></div></div>
     </article>

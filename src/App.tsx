@@ -21,7 +21,7 @@ import { Leo } from './ui/Leo';
 import { TitleBar } from './ui/TitleBar';
 import { useTheme } from './ui/theme';
 import { GoalForm, InstallmentForm, RecurringForm, TransactionForm } from './ui/forms';
-import { currentMonthIso, todayIso } from './ui/format';
+import { currentMonthIso, monthLabel, todayIso } from './ui/format';
 import { Dashboard } from './ui/screens/Dashboard';
 import { Goals } from './ui/screens/Goals';
 import { Installments } from './ui/screens/Installments';
@@ -275,7 +275,9 @@ export default function App() {
           onSave={(input, options) =>
             safeAction(
               () => window.lionPocket.saveTransaction(input).then(() => undefined),
-              input.id ? 'Lançamento atualizado.' : 'Lançamento adicionado.',
+              input.cardId
+                ? `${input.id ? 'Compra atualizada' : 'Compra adicionada'} na fatura de ${monthLabel(input.dueDate.slice(0, 7))}.`
+                : input.id ? 'Lançamento atualizado.' : 'Lançamento adicionado.',
               options?.keepOpen,
             )
           }

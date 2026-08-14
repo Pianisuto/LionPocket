@@ -13,6 +13,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
   const [type, setType] = useState<CatalogInput['type']>('category');
   const [kind, setKind] = useState<MoneyKind>('expense');
   const [cardDueDay, setCardDueDay] = useState('10');
+  const [cardClosingDay, setCardClosingDay] = useState('14');
   const [editingCardId, setEditingCardId] = useState('');
   const [deletingCatalogId, setDeletingCatalogId] = useState('');
   const [busy, setBusy] = useState('');
@@ -31,6 +32,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
       name: newName,
       kind,
       dueDay: type === 'card' ? Number(cardDueDay) : undefined,
+      closingDay: type === 'card' ? Number(cardClosingDay) : undefined,
     });
     setNewName('');
     setEditingCardId('');
@@ -47,6 +49,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
     setEditingCardId(card.id);
     setNewName(card.name);
     setCardDueDay(String(card.dueDay));
+    setCardClosingDay(card.closingDay === null ? '' : String(card.closingDay));
   };
   const cancelCardEdit = () => {
     setEditingCardId('');
@@ -86,10 +89,11 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
 
       <div className="panel settings-panel settings-panel--wide">
         <header className="panel__header"><div><h3>Listas personalizadas</h3><p>Adicione categorias, formas de pagamento e cartões aos formulários.</p></div></header>
-        <form className="catalog-form" onSubmit={addCatalog}>
+        <form className={`catalog-form ${type === 'card' ? 'catalog-form--card' : ''}`} onSubmit={addCatalog}>
           <SelectField label="Tipo de lista" value={type} onChange={chooseType} options={[{ value: 'category', label: 'Categoria' }, { value: 'paymentMethod', label: 'Forma de pagamento' }, { value: 'card', label: 'Cartão' }]} />
           {type === 'category' && <SelectField label="Usada em" value={kind} onChange={(value) => setKind(value as MoneyKind)} options={[{ value: 'expense', label: 'Saídas' }, { value: 'income', label: 'Entradas' }]} />}
           <label className="field catalog-form__name"><span>Nome</span><input required value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Digite o nome" /></label>
+          {type === 'card' && <label className="field"><span>Dia do fechamento</span><input required min="1" max="31" type="number" value={cardClosingDay} onChange={(event) => setCardClosingDay(event.target.value)} /></label>}
           {type === 'card' && <label className="field"><span>Dia do vencimento</span><input required min="1" max="31" type="number" value={cardDueDay} onChange={(event) => setCardDueDay(event.target.value)} /></label>}
           <div className="catalog-form__actions">
             {editingCardId && <button type="button" className="button button--ghost" onClick={cancelCardEdit}>Cancelar</button>}
@@ -119,7 +123,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
           </div>
           <div><h4>Formas e cartões</h4><div className="tag-list">{catalogs.paymentMethods.map((item) => <span key={item.id}>{item.name}</span>)}{catalogs.cards.map((item) => (
             <span className="tag-card" key={item.id}>
-              {item.name} · vence dia {item.dueDay}
+              {item.name} · {item.closingDay === null ? 'fechamento não configurado' : `fecha dia ${item.closingDay}`} · vence dia {item.dueDay}
               <button type="button" className="tag-item__action" onClick={() => editCard(item)} title={`Editar ${item.name}`} aria-label={`Editar cartão ${item.name}`}><Pencil size={12} /></button>
               <button
                 type="button"

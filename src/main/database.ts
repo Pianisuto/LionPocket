@@ -22,10 +22,12 @@ import type {
 import {
   addMonths,
   calculateGoal,
+  cardStatementDueDate,
   currentMonthIso,
   dateForMonthDay,
   fromCents,
   monthRange,
+  nextCardDueDate,
   settlementDateFor,
   toCents,
   todayIso,
@@ -145,6 +147,7 @@ export class LionPocketDatabase {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         due_day INTEGER NOT NULL DEFAULT 10,
+        closing_day INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -157,8 +160,10 @@ export class LionPocketDatabase {
         start_month TEXT NOT NULL,
         category_id TEXT REFERENCES categories(id),
         payment_method_id TEXT REFERENCES payment_methods(id),
+        card_id TEXT REFERENCES cards(id),
         planned_cents INTEGER NOT NULL DEFAULT 0,
         due_day INTEGER NOT NULL DEFAULT 1,
+        charge_day INTEGER,
         notes TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -189,6 +194,7 @@ export class LionPocketDatabase {
         category_id TEXT REFERENCES categories(id),
         planned_cents INTEGER NOT NULL DEFAULT 0,
         actual_cents INTEGER,
+        purchase_date TEXT,
         due_date TEXT NOT NULL,
         settled_date TEXT,
         status TEXT NOT NULL DEFAULT 'planned',
@@ -235,6 +241,18 @@ export class LionPocketDatabase {
     if (!cardColumns.some((column) => column.name === 'due_day')) {
       this.db.exec('ALTER TABLE cards ADD COLUMN due_day INTEGER NOT NULL DEFAULT 10');
     }
+    if (!cardColumns.some((column) => column.name === 'closing_day')) {
+      // Não inventamos o fechamento dos cartões já existentes. Até ele ser
+      // configurado, o formulário conserva a regra antiga baseada no vencimento.
+      this.db.exec('ALTER TABLE cards ADD COLUMN closing_day INTEGER');
+    }
+    const transactionColumns = this.db
+      .prepare('PRAGMA table_info(transactions)')
+      .all() as unknown as Row[];
+    if (!transactionColumns.some((column) => column.name === 'purchase_date')) {
+      // Lçamentos antigos ficam intocados e continuam no mesmo mês/fatura.
+      this.db.exec('ALTER TABLE transactions ADD COLUMN purchase_date TEXT');
+    }
     const installmentColumns = this.db
       .prepare('PRAGMA table_info(installment_purchases)')
       .all() as unknown as Row[];
@@ -256,12 +274,20 @@ export class LionPocketDatabase {
     if (!recurringColumns.some((column) => column.name === 'start_month')) {
       this.db.exec('ALTER TABLE recurring_expenses ADD COLUMN start_month TEXT');
     }
+    if (!recurringColumns.some((column) => column.name === 'card_id')) {
+      this.db.exec('ALTER TABLE recurring_expenses ADD COLUMN card_id TEXT REFERENCES cards(id)');
+    }
+    if (!recurringColumns.some((column) => column.name === 'charge_day')) {
+      this.db.exec('ALTER TABLE recurring_expenses ADD COLUMN charge_day INTEGER');
+    }
     this.db.prepare(`
       UPDATE recurring_expenses
       SET start_month = substr(created_at, 1, 7)
       WHERE start_month IS NULL OR start_month NOT GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'
     `).run();
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (4, datetime('now'))");
+    this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (6, datetime('now'))");
+    this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (7, datetime('now'))");
   }
 
   private seed() {
@@ -307,7 +333,7 @@ export class LionPocketDatabase {
       .prepare('SELECT id, name FROM payment_methods ORDER BY name COLLATE NOCASE')
       .all() as unknown as SimpleCatalogItem[];
     const cards = this.db
-      .prepare('SELECT id, name, due_day AS dueDay FROM cards ORDER BY name COLLATE NOCASE')
+      .prepare('SELECT id, name, due_day AS dueDay, closing_day AS closingDay FROM cards ORDER BY name COLLATE NOCASE')
       .all() as unknown as CreditCard[];
     return { categories, paymentMethods, cards };
   }
@@ -330,15 +356,18 @@ export class LionPocketDatabase {
     }
     if (input.type === 'card') {
       const dueDay = Math.min(31, Math.max(1, Math.round(input.dueDay ?? 10)));
+      const closingDay = input.closingDay === null || input.closingDay === undefined
+        ? null
+        : Math.min(31, Math.max(1, Math.round(input.closingDay)));
       if (input.id) {
         this.db.prepare(`
-          UPDATE cards SET name = ?, due_day = ?, updated_at = ? WHERE id = ?
-        `).run(input.name.trim(), dueDay, timestamp, input.id);
+          UPDATE cards SET name = ?, due_day = ?, closing_day = ?, updated_at = ? WHERE id = ?
+        `).run(input.name.trim(), dueDay, closingDay, timestamp, input.id);
       } else {
         this.db.prepare(`
-          INSERT OR IGNORE INTO cards(id, name, due_day, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(randomUUID(), input.name.trim(), dueDay, timestamp, timestamp);
+          INSERT OR IGNORE INTO cards(id, name, due_day, closing_day, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(randomUUID(), input.name.trim(), dueDay, closingDay, timestamp, timestamp);
       }
       return;
     }
@@ -357,6 +386,7 @@ export class LionPocketDatabase {
         this.db.prepare('UPDATE goals SET category_id = NULL WHERE category_id = ?').run(id);
         this.db.prepare('DELETE FROM categories WHERE id = ?').run(id);
       } else {
+        this.db.prepare('UPDATE recurring_expenses SET card_id = NULL, charge_day = NULL WHERE card_id = ?').run(id);
         this.db.prepare('UPDATE installment_purchases SET card_id = NULL WHERE card_id = ?').run(id);
         this.db.prepare('UPDATE transactions SET card_id = NULL WHERE card_id = ?').run(id);
         this.db.prepare('DELETE FROM cards WHERE id = ?').run(id);
@@ -407,7 +437,7 @@ export class LionPocketDatabase {
     if (existing) return String(existing.id);
     const id = randomUUID();
     const timestamp = now();
-    this.db.prepare('INSERT INTO cards(id, name, due_day, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(
+    this.db.prepare('INSERT INTO cards(id, name, due_day, closing_day, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)').run(
       id,
       cleaned,
       10,
@@ -427,6 +457,7 @@ export class LionPocketDatabase {
       categoryColor: row.categoryColor ? String(row.categoryColor) : null,
       plannedAmount: fromCents(Number(row.plannedCents)) ?? 0,
       actualAmount: fromCents(row.actualCents === null ? null : Number(row.actualCents)),
+      purchaseDate: row.purchaseDate ? String(row.purchaseDate) : null,
       dueDate: String(row.dueDate),
       settledDate: row.settledDate ? String(row.settledDate) : null,
       status: row.status as Transaction['status'],
@@ -447,7 +478,8 @@ export class LionPocketDatabase {
       SELECT t.id, t.kind, t.description,
         t.category_id AS categoryId, c.name AS categoryName, c.color AS categoryColor,
         t.planned_cents AS plannedCents, t.actual_cents AS actualCents,
-        t.due_date AS dueDate, t.settled_date AS settledDate, t.status,
+        t.purchase_date AS purchaseDate, t.due_date AS dueDate,
+        t.settled_date AS settledDate, t.status,
         t.payment_method_id AS paymentMethodId, pm.name AS paymentMethodName,
         t.card_id AS cardId, ca.name AS cardName, t.notes,
         t.source_type AS sourceType, t.source_id AS sourceId,
@@ -469,7 +501,7 @@ export class LionPocketDatabase {
       ${alias}.source_type != 'recurring' OR ${alias}.source_id IS NULL OR NOT EXISTS (
         SELECT 1 FROM recurring_expenses recurring_scope
         WHERE recurring_scope.id = ${alias}.source_id
-          AND substr(${alias}.due_date, 1, 7) < COALESCE(
+          AND COALESCE(substr(${alias}.purchase_date, 1, 7), substr(${alias}.due_date, 1, 7)) < COALESCE(
             recurring_scope.start_month,
             substr(recurring_scope.created_at, 1, 7)
           )
@@ -477,10 +509,29 @@ export class LionPocketDatabase {
     )`;
   }
 
+  private recurringOccurrence(item: Row, chargeMonth: string) {
+    if (item.card_id && item.charge_day !== null) {
+      const purchaseDate = dateForMonthDay(chargeMonth, Number(item.charge_day));
+      const cardDueDay = Number(item.cardDueDay ?? item.due_day);
+      const dueDate = item.cardClosingDay === null
+        ? nextCardDueDate(purchaseDate, cardDueDay)
+        : cardStatementDueDate(purchaseDate, Number(item.cardClosingDay), cardDueDay);
+      return { purchaseDate, dueDate, cardId: String(item.card_id) };
+    }
+    return {
+      purchaseDate: null,
+      dueDate: dateForMonthDay(chargeMonth, Number(item.due_day)),
+      cardId: null,
+    };
+  }
+
   ensureRecurringForMonth(month: string) {
     const recurring = this.db.prepare(`
-      SELECT * FROM recurring_expenses
-      WHERE active = 1 AND deleted_at IS NULL AND COALESCE(start_month, substr(created_at, 1, 7)) <= ?
+      SELECT r.*, ca.due_day AS cardDueDay, ca.closing_day AS cardClosingDay
+      FROM recurring_expenses r
+      LEFT JOIN cards ca ON ca.id = r.card_id
+      WHERE r.active = 1 AND r.deleted_at IS NULL
+        AND COALESCE(r.start_month, substr(r.created_at, 1, 7)) <= ?
     `).all(month) as unknown as Row[];
     const { start, end } = monthRange(month);
     const existing = this.db.prepare(`
@@ -491,26 +542,38 @@ export class LionPocketDatabase {
     `);
     const statement = this.db.prepare(`
       INSERT OR IGNORE INTO transactions(
-        id, kind, description, category_id, planned_cents, due_date, status,
-        payment_method_id, notes, source_type, source_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'planned', ?, ?, 'recurring', ?, ?, ?)
+        id, kind, description, category_id, planned_cents, purchase_date, due_date, status,
+        payment_method_id, card_id, notes, source_type, source_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?, ?, 'recurring', ?, ?, ?)
     `);
     const timestamp = now();
     for (const item of recurring) {
       if (existing.get(item.id, start, end)) continue;
-      statement.run(
-        randomUUID(),
-        item.kind,
-        item.description,
-        item.category_id,
-        item.planned_cents,
-        dateForMonthDay(month, Number(item.due_day)),
-        item.payment_method_id,
-        item.notes,
-        item.id,
-        timestamp,
-        timestamp,
-      );
+      const recurringStartMonth = String(item.start_month ?? String(item.created_at).slice(0, 7));
+      // Uma cobrança pode vencer no mesmo mês, no seguinte ou, em ciclos
+      // que fecham depois do vencimento, até dois meses adiante.
+      for (let offset = 0; offset <= 2; offset += 1) {
+        const chargeMonth = addMonths(`${month}-01`, -offset).slice(0, 7);
+        if (chargeMonth < recurringStartMonth) continue;
+        const occurrence = this.recurringOccurrence(item, chargeMonth);
+        if (occurrence.dueDate.slice(0, 7) !== month) continue;
+        statement.run(
+          randomUUID(),
+          item.kind,
+          item.description,
+          item.category_id,
+          item.planned_cents,
+          occurrence.purchaseDate,
+          occurrence.dueDate,
+          item.payment_method_id,
+          occurrence.cardId,
+          item.notes,
+          item.id,
+          timestamp,
+          timestamp,
+        );
+        break;
+      }
     }
   }
 
@@ -553,7 +616,7 @@ export class LionPocketDatabase {
     if (input.id) {
       this.db.prepare(`
         UPDATE transactions SET kind = ?, description = ?, category_id = ?, planned_cents = ?,
-          actual_cents = ?, due_date = ?, settled_date = ?, status = ?, payment_method_id = ?,
+          actual_cents = ?, purchase_date = ?, due_date = ?, settled_date = ?, status = ?, payment_method_id = ?,
           card_id = ?, notes = ?, updated_at = ?
         WHERE id = ? AND deleted_at IS NULL
       `).run(
@@ -562,6 +625,7 @@ export class LionPocketDatabase {
         input.categoryId ?? null,
         toCents(input.plannedAmount) ?? 0,
         actualCents,
+        input.purchaseDate ?? null,
         input.dueDate,
         input.settledDate ?? null,
         input.status,
@@ -574,10 +638,10 @@ export class LionPocketDatabase {
     } else {
       this.db.prepare(`
         INSERT INTO transactions(
-          id, kind, description, category_id, planned_cents, actual_cents, due_date,
+          id, kind, description, category_id, planned_cents, actual_cents, purchase_date, due_date,
           settled_date, status, payment_method_id, card_id, notes, source_type,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)
       `).run(
         id,
         input.kind,
@@ -585,6 +649,7 @@ export class LionPocketDatabase {
         input.categoryId ?? null,
         toCents(input.plannedAmount) ?? 0,
         actualCents,
+        input.purchaseDate ?? null,
         input.dueDate,
         input.settledDate ?? null,
         input.status,
@@ -607,10 +672,10 @@ export class LionPocketDatabase {
     const timestamp = now();
     this.db.prepare(`
       INSERT OR IGNORE INTO transactions(
-        id, kind, description, category_id, planned_cents, actual_cents, due_date,
+        id, kind, description, category_id, planned_cents, actual_cents, purchase_date, due_date,
         settled_date, status, payment_method_id, card_id, notes, source_type, source_id,
         installment_number, installment_total, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?)
     `).run(
       randomUUID(),
       input.kind,
@@ -618,6 +683,7 @@ export class LionPocketDatabase {
       input.categoryId ?? null,
       toCents(input.plannedAmount) ?? 0,
       toCents(input.actualAmount),
+      input.purchaseDate ?? null,
       input.dueDate,
       input.settledDate ?? null,
       input.status,
@@ -726,12 +792,14 @@ export class LionPocketDatabase {
     const rows = this.db.prepare(`
       SELECT r.id, r.kind, r.active, r.description, r.category_id AS categoryId,
         c.name AS categoryName, r.payment_method_id AS paymentMethodId,
-        pm.name AS paymentMethodName, r.planned_cents AS plannedCents,
+        pm.name AS paymentMethodName, r.card_id AS cardId, ca.name AS cardName,
+        r.planned_cents AS plannedCents,
         r.due_day AS dueDay, COALESCE(r.start_month, substr(r.created_at, 1, 7)) AS startMonth,
-        r.notes
+        r.charge_day AS chargeDay, r.notes
       FROM recurring_expenses r
       LEFT JOIN categories c ON c.id = r.category_id
       LEFT JOIN payment_methods pm ON pm.id = r.payment_method_id
+      LEFT JOIN cards ca ON ca.id = r.card_id
       WHERE r.deleted_at IS NULL
       ORDER BY CASE r.kind WHEN 'income' THEN 0 ELSE 1 END,
         r.active DESC, r.due_day, r.description COLLATE NOCASE
@@ -746,8 +814,11 @@ export class LionPocketDatabase {
       categoryName: row.categoryName ? String(row.categoryName) : null,
       paymentMethodId: row.paymentMethodId ? String(row.paymentMethodId) : null,
       paymentMethodName: row.paymentMethodName ? String(row.paymentMethodName) : null,
+      cardId: row.cardId ? String(row.cardId) : null,
+      cardName: row.cardName ? String(row.cardName) : null,
       plannedAmount: fromCents(Number(row.plannedCents)) ?? 0,
       dueDay: Number(row.dueDay),
+      chargeDay: row.chargeDay === null ? null : Number(row.chargeDay),
       notes: String(row.notes ?? ''),
     }));
   }
@@ -756,8 +827,21 @@ export class LionPocketDatabase {
     const id = input.id ?? randomUUID();
     const timestamp = now();
     const plannedCents = toCents(input.plannedAmount) ?? 0;
-    const dueDay = Math.min(31, Math.max(1, input.dueDay));
     const kind = input.kind === 'income' ? 'income' : 'expense';
+    const requestedCardId = kind === 'expense' ? input.cardId ?? null : null;
+    const card = requestedCardId
+      ? this.db.prepare(`
+          SELECT id, due_day AS cardDueDay, closing_day AS cardClosingDay
+          FROM cards WHERE id = ?
+        `).get(requestedCardId) as Row | undefined
+      : undefined;
+    const cardId = card ? String(card.id) : null;
+    const chargeDay = cardId
+      ? Math.min(31, Math.max(1, Math.round(input.chargeDay ?? 1)))
+      : null;
+    const dueDay = card
+      ? Number(card.cardDueDay)
+      : Math.min(31, Math.max(1, input.dueDay));
     const description = input.description.trim();
     const requestedStartMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(input.startMonth)
       ? input.startMonth
@@ -789,7 +873,7 @@ export class LionPocketDatabase {
       try {
         this.db.prepare(`
           UPDATE recurring_expenses SET kind = ?, active = ?, description = ?, start_month = ?, category_id = ?,
-            payment_method_id = ?, planned_cents = ?, due_day = ?, notes = ?, updated_at = ?
+            payment_method_id = ?, card_id = ?, planned_cents = ?, due_day = ?, charge_day = ?, notes = ?, updated_at = ?
           WHERE id = ? AND deleted_at IS NULL
         `).run(
           kind,
@@ -798,34 +882,61 @@ export class LionPocketDatabase {
           startMonth,
           input.categoryId ?? null,
           input.paymentMethodId ?? null,
+          cardId,
           plannedCents,
           dueDay,
+          chargeDay,
           input.notes?.trim() ?? '',
           timestamp,
           id,
         );
 
         const pendingTransactions = this.db.prepare(`
-          SELECT id, due_date AS dueDate
+          SELECT id, purchase_date AS purchaseDate, due_date AS dueDate
           FROM transactions
           WHERE source_type = 'recurring' AND source_id = ? AND status = 'planned'
             AND actual_cents IS NULL AND settled_date IS NULL AND deleted_at IS NULL
-            AND due_date >= ?
-        `).all(id, `${startMonth}-01`) as unknown as Row[];
-        const updatePending = this.db.prepare(`
-          UPDATE transactions SET kind = ?, description = ?, category_id = ?, planned_cents = ?,
-            due_date = ?, payment_method_id = ?, notes = ?, updated_at = ?
-          WHERE id = ?
+          ORDER BY due_date
+        `).all(id) as unknown as Row[];
+        const parkPending = this.db.prepare(`
+          UPDATE transactions SET due_date = ?, updated_at = ? WHERE id = ?
         `);
         for (const transaction of pendingTransactions) {
-          const month = String(transaction.dueDate).slice(0, 7);
+          parkPending.run(`pending-${transaction.id}`, timestamp, transaction.id);
+        }
+        const updatePending = this.db.prepare(`
+          UPDATE transactions SET kind = ?, description = ?, category_id = ?, planned_cents = ?,
+            purchase_date = ?, due_date = ?, payment_method_id = ?, card_id = ?, notes = ?, updated_at = ?
+          WHERE id = ?
+        `);
+        const discardPending = this.db.prepare(`
+          UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ?
+        `);
+        const occurrenceSettings: Row = {
+          card_id: cardId,
+          charge_day: chargeDay,
+          due_day: dueDay,
+          cardDueDay: card?.cardDueDay ?? null,
+          cardClosingDay: card?.cardClosingDay ?? null,
+        };
+        for (const transaction of pendingTransactions) {
+          const chargeMonth = transaction.purchaseDate
+            ? String(transaction.purchaseDate).slice(0, 7)
+            : String(transaction.dueDate).slice(0, 7);
+          if (chargeMonth < startMonth) {
+            discardPending.run(timestamp, timestamp, transaction.id);
+            continue;
+          }
+          const occurrence = this.recurringOccurrence(occurrenceSettings, chargeMonth);
           updatePending.run(
             kind,
             description,
             input.categoryId ?? null,
             plannedCents,
-            dateForMonthDay(month, dueDay),
+            occurrence.purchaseDate,
+            occurrence.dueDate,
             input.paymentMethodId ?? null,
+            occurrence.cardId,
             input.notes?.trim() ?? '',
             timestamp,
             transaction.id,
@@ -839,9 +950,9 @@ export class LionPocketDatabase {
     } else {
       this.db.prepare(`
         INSERT INTO recurring_expenses(
-          id, kind, active, description, start_month, category_id, payment_method_id, planned_cents,
-          due_day, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, kind, active, description, start_month, category_id, payment_method_id, card_id,
+          planned_cents, due_day, charge_day, notes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         kind,
@@ -850,8 +961,10 @@ export class LionPocketDatabase {
         startMonth,
         input.categoryId ?? null,
         input.paymentMethodId ?? null,
+        cardId,
         plannedCents,
         dueDay,
+        chargeDay,
         input.notes?.trim() ?? '',
         timestamp,
         timestamp,
@@ -1201,7 +1314,8 @@ export class LionPocketDatabase {
       parameters.push(start, end);
     }
     return this.db.prepare(`
-      SELECT t.due_date AS data, t.kind AS tipo, t.description AS descricao,
+      SELECT t.purchase_date AS data_compra, t.due_date AS data,
+        t.kind AS tipo, t.description AS descricao,
         c.name AS categoria, t.planned_cents / 100.0 AS valor_planejado,
         t.actual_cents / 100.0 AS valor_real, t.status AS situacao,
         pm.name AS forma_pagamento, ca.name AS cartao, t.notes AS observacoes

@@ -109,6 +109,7 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
     if (selection.canceled || !selection.filePath) return null;
     const rows = database.exportTransactions(month);
     const headers = [
+      'data_compra',
       'data',
       'tipo',
       'descricao',

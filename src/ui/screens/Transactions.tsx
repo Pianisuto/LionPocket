@@ -8,7 +8,7 @@ type SortKey = 'date' | 'description' | 'category' | 'paymentMethod' | 'card' | 
 type SortDirection = 'asc' | 'desc';
 
 const sortLabels: Record<SortKey, string> = {
-  date: 'Data',
+  date: 'Vencimento',
   description: 'Lançamento',
   category: 'Categoria',
   paymentMethod: 'Pagamento',
@@ -222,7 +222,15 @@ export const Transactions = ({
               <span className="date-cell"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
               <span className="transaction-name">
                 <i style={{ background: item.categoryColor ?? 'var(--text-muted)' }}>{item.kind === 'income' ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}</i>
-                <span><strong>{item.description}</strong>{item.installmentNumber && <small>{item.installmentNumber} de {item.installmentTotal} parcelas</small>}</span>
+                <span>
+                  <strong>{item.description}</strong>
+                  {(item.purchaseDate || item.installmentNumber) && (
+                    <small>{[
+                      item.purchaseDate ? `Compra em ${formatDate(item.purchaseDate, 'dd/MM/yyyy')}` : null,
+                      item.installmentNumber ? `${item.installmentNumber} de ${item.installmentTotal} parcelas` : null,
+                    ].filter(Boolean).join(' · ')}</small>
+                  )}
+                </span>
               </span>
               <span>{item.categoryName ?? 'Sem categoria'}</span>
               <span>{item.paymentMethodName ?? 'Não informado'}</span>

@@ -15,6 +15,8 @@ export interface SimpleCatalogItem {
 
 export interface CreditCard extends SimpleCatalogItem {
   dueDay: number;
+  /** Nulo em cartões antigos, até a pessoa informar o fechamento. */
+  closingDay: number | null;
 }
 
 export interface Transaction {
@@ -26,6 +28,8 @@ export interface Transaction {
   categoryColor: string | null;
   plannedAmount: number;
   actualAmount: number | null;
+  /** Dia em que a compra foi feita. Usado para descobrir a fatura do cartão. */
+  purchaseDate: string | null;
   dueDate: string;
   settledDate: string | null;
   status: TransactionStatus;
@@ -47,6 +51,7 @@ export interface TransactionInput {
   categoryId?: string | null;
   plannedAmount: number;
   actualAmount?: number | null;
+  purchaseDate?: string | null;
   dueDate: string;
   settledDate?: string | null;
   status: TransactionStatus;
@@ -86,8 +91,12 @@ export interface RecurringExpense {
   categoryName: string | null;
   paymentMethodId: string | null;
   paymentMethodName: string | null;
+  cardId: string | null;
+  cardName: string | null;
   plannedAmount: number;
   dueDay: number;
+  /** Dia mensal em que a despesa é cobrada no cartão. */
+  chargeDay: number | null;
   notes: string;
 }
 
@@ -99,8 +108,10 @@ export interface RecurringExpenseInput {
   startMonth: string;
   categoryId?: string | null;
   paymentMethodId?: string | null;
+  cardId?: string | null;
   plannedAmount: number;
   dueDay: number;
+  chargeDay?: number | null;
   notes?: string;
 }
 
@@ -209,6 +220,7 @@ export interface CatalogInput {
   kind?: MoneyKind;
   color?: string;
   dueDay?: number;
+  closingDay?: number | null;
 }
 
 export interface ImportResult {

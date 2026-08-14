@@ -55,12 +55,14 @@ export const Modal = ({
   description,
   onClose,
   children,
+  medium = false,
   wide = false,
 }: {
   title: string;
   description?: string;
   onClose: () => void;
   children: ReactNode;
+  medium?: boolean;
   wide?: boolean;
 }) => {
   // Esc fecha. Quem estiver com um menu ou calendário aberto por cima marca o
@@ -77,7 +79,7 @@ export const Modal = ({
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.currentTarget === event.target) onClose();
     }}>
-      <section className={`modal ${wide ? 'modal--wide' : ''}`} role="dialog" aria-modal="true">
+      <section className={`modal ${wide ? 'modal--wide' : medium ? 'modal--medium' : ''}`} role="dialog" aria-modal="true">
         <header className="modal__header">
           <div>
             <h2>{title}</h2>
@@ -108,6 +110,20 @@ export type SelectOption = {
   value: string;
   label: string;
   disabled?: boolean;
+};
+
+const HelpTip = ({ label, children, align = 'end' }: {
+  label: string;
+  children: string;
+  align?: 'start' | 'end';
+}) => {
+  const tooltipId = useId();
+  return (
+    <span className={`help-tip help-tip--${align}`}>
+      <button type="button" className="help-tip__trigger" aria-label={`Ajuda sobre ${label}`} aria-describedby={tooltipId}>?</button>
+      <span id={tooltipId} className="help-tip__content" role="tooltip">{children}</span>
+    </span>
+  );
 };
 
 const findNextOption = (options: SelectOption[], current: number, direction: 1 | -1) => {
@@ -516,7 +532,7 @@ export const MonthField = ({
 
   return (
     <div className={`field ${className}`}>
-      <span>{label}{hint && <small> · {hint}</small>}</span>
+      <span className="field__label">{label}{hint && <HelpTip label={label} align={className.includes('form-grid__full') ? 'start' : 'end'}>{hint}</HelpTip>}</span>
       <button
         ref={triggerRef}
         type="button"

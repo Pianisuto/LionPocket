@@ -75,6 +75,88 @@ describe('despesas fixas', () => {
 
     database.db.close();
   });
+
+  it('coloca uma cobrança recorrente no mês da fatura do cartão', () => {
+    const database = createDatabase();
+    database.createCatalogItem({
+      type: 'card',
+      name: 'Nubank',
+      closingDay: 14,
+      dueDay: 21,
+    });
+    const card = database.getCatalogs().cards[0];
+    const credit = database.getCatalogs().paymentMethods.find((method) => method.name === 'Cartão de crédito');
+    const recurring = database.saveRecurringExpense({
+      kind: 'expense',
+      active: true,
+      description: 'ChatGPT',
+      startMonth: '2026-08',
+      categoryId: null,
+      paymentMethodId: credit?.id ?? null,
+      cardId: card.id,
+      plannedAmount: 110,
+      dueDay: card.dueDay,
+      chargeDay: 20,
+      notes: '',
+    });
+
+    expect(recurring).toMatchObject({
+      cardId: card.id,
+      cardName: 'Nubank',
+      chargeDay: 20,
+      dueDay: 21,
+    });
+    expect(database.listTransactions({ month: '2026-08' })).toEqual([]);
+    expect(database.listTransactions({ month: '2026-09' })[0]).toMatchObject({
+      description: 'ChatGPT',
+      purchaseDate: '2026-08-20',
+      dueDate: '2026-09-21',
+      cardId: card.id,
+    });
+    expect(database.listTransactions({ month: '2026-10' })[0]).toMatchObject({
+      purchaseDate: '2026-09-20',
+      dueDate: '2026-10-21',
+    });
+    database.db.close();
+  });
+
+  it('move para a fatura correta apenas o lançamento recorrente ainda planejado', () => {
+    const database = createDatabase();
+    const recurring = database.saveRecurringExpense({
+      kind: 'expense',
+      active: true,
+      description: 'Assinatura',
+      startMonth: '2026-08',
+      categoryId: null,
+      paymentMethodId: null,
+      plannedAmount: 50,
+      dueDay: 21,
+      notes: '',
+    });
+    const augustPending = database.listTransactions({ month: '2026-08' })[0];
+    database.createCatalogItem({
+      type: 'card',
+      name: 'Nubank',
+      closingDay: 14,
+      dueDay: 21,
+    });
+    const card = database.getCatalogs().cards[0];
+
+    database.saveRecurringExpense({
+      ...recurring,
+      cardId: card.id,
+      chargeDay: 20,
+    });
+
+    expect(database.listTransactions({ month: '2026-08' })).toEqual([]);
+    expect(database.listTransactions({ month: '2026-09' })[0]).toMatchObject({
+      id: augustPending.id,
+      purchaseDate: '2026-08-20',
+      dueDate: '2026-09-21',
+      cardId: card.id,
+    });
+    database.db.close();
+  });
 });
 
 describe('entradas fixas', () => {
@@ -197,19 +279,55 @@ describe('cartões e compras parceladas', () => {
     database.db.close();
   });
 
-  it('salva e permite alterar o dia de vencimento de um cartão', () => {
+  it('preserva cartão antigo sem fechamento e permite configurar o ciclo', () => {
     const database = createDatabase();
     database.createCatalogItem({ type: 'card', name: 'Nubank', dueDay: 7 });
     const card = database.getCatalogs().cards.find((item) => item.name === 'Nubank');
 
-    expect(card).toMatchObject({ name: 'Nubank', dueDay: 7 });
+    expect(card).toMatchObject({ name: 'Nubank', dueDay: 7, closingDay: null });
 
-    database.createCatalogItem({ id: card?.id, type: 'card', name: 'Nubank Roxinho', dueDay: 12 });
+    database.createCatalogItem({
+      id: card?.id,
+      type: 'card',
+      name: 'Nubank Roxinho',
+      dueDay: 21,
+      closingDay: 14,
+    });
     expect(database.getCatalogs().cards.find((item) => item.id === card?.id)).toMatchObject({
       name: 'Nubank Roxinho',
-      dueDay: 12,
+      dueDay: 21,
+      closingDay: 14,
     });
 
+    database.db.close();
+  });
+
+  it('guarda a data da compra sem tirar o lançamento do mês da fatura', () => {
+    const database = createDatabase();
+    database.createCatalogItem({
+      type: 'card',
+      name: 'Nubank',
+      dueDay: 21,
+      closingDay: 14,
+    });
+    const card = database.getCatalogs().cards[0];
+
+    database.saveTransaction({
+      kind: 'expense',
+      description: 'Compra depois do fechamento',
+      plannedAmount: 80,
+      purchaseDate: '2026-08-15',
+      dueDate: '2026-09-21',
+      status: 'planned',
+      cardId: card.id,
+    });
+
+    expect(database.listTransactions({ month: '2026-08' })).toEqual([]);
+    expect(database.listTransactions({ month: '2026-09' })[0]).toMatchObject({
+      purchaseDate: '2026-08-15',
+      dueDate: '2026-09-21',
+      cardId: card.id,
+    });
     database.db.close();
   });
 

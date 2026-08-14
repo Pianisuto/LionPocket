@@ -71,6 +71,28 @@ export const nextCardDueDate = (referenceDate: string, dueDay: number): string =
   return dateForMonthDay(addMonths(referenceDate, 1).slice(0, 7), dueDay);
 };
 
+/**
+ * Vencimento da fatura que recebe uma compra.
+ *
+ * Até o dia do fechamento, a compra entra na fatura que está fechando; depois
+ * dele, entra na seguinte. Quando o vencimento fica antes do fechamento no
+ * calendário (por exemplo, fecha 25 e vence 5), ele naturalmente cai no mês
+ * posterior.
+ */
+export const cardStatementDueDate = (
+  purchaseDate: string,
+  closingDay: number,
+  dueDay: number,
+): string => {
+  const purchaseMonth = purchaseDate.slice(0, 7);
+  const closingDate = dateForMonthDay(purchaseMonth, closingDay);
+  const dueAfterClosing = dueDay > closingDay;
+  const purchaseAfterClosing = purchaseDate > closingDate;
+  const monthOffset = (dueAfterClosing ? 0 : 1) + (purchaseAfterClosing ? 1 : 0);
+  const dueMonth = addMonths(`${purchaseMonth}-01`, monthOffset).slice(0, 7);
+  return dateForMonthDay(dueMonth, dueDay);
+};
+
 export const calculateGoal = (
   targetAmount: number,
   savedAmount: number,

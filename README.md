@@ -26,8 +26,10 @@ O **LionPocket** é um aplicativo desktop de finanças pessoais para Linux e Win
 - sugestões baseadas em lançamentos anteriores;
 - conclusão em lote de pendências de meses encerrados;
 - despesas fixas geradas automaticamente a cada mês;
+- recorrências no cartão calculadas pelo dia mensal da cobrança e pelo fechamento da fatura;
 - acompanhamento de compras parceladas e objetivos financeiros;
 - categorias, formas de pagamento e cartões personalizáveis;
+- ciclo do cartão com fechamento e vencimento, calculando a fatura pela data da compra;
 - importação de planilha e exportação em CSV ou JSON;
 - cópia de segurança local do banco de dados.
 

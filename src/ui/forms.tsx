@@ -14,7 +14,7 @@ import type {
   TransactionSuggestion,
 } from '../shared/types';
 import { DateField, Modal, MonthField, SelectField } from './components';
-import { currentMonthIso, currency, isPastDate, nextCardDueDate, settlementDateFor, todayIso } from './format';
+import { cardStatementDueDate, currentMonthIso, currency, dateForMonthDay, formatDate, isPastDate, nextCardDueDate, settlementDateFor, todayIso } from './format';
 
 const moneyValue = (value: number | null | undefined) => (value === null || value === undefined ? '' : String(value));
 
@@ -44,6 +44,9 @@ export const TransactionForm = ({
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? '');
   const [plannedAmount, setPlannedAmount] = useState(moneyValue(transaction?.plannedAmount));
   const [actualAmount, setActualAmount] = useState(moneyValue(transaction?.actualAmount));
+  const [purchaseDate, setPurchaseDate] = useState(
+    transaction ? transaction.purchaseDate ?? '' : todayIso(),
+  );
   const [dueDate, setDueDate] = useState(transaction?.dueDate ?? defaultDate);
   const [status, setStatus] = useState<TransactionStatus>(
     transaction?.status ?? statusForDate(transaction?.dueDate ?? defaultDate, transaction?.kind ?? 'expense'),
@@ -72,6 +75,8 @@ export const TransactionForm = ({
     () => catalogs.paymentMethods.find((method) => method.name.toLocaleLowerCase('pt-BR') === 'cartão de crédito'),
     [catalogs.paymentMethods],
   );
+  const selectedCard = catalogs.cards.find((item) => item.id === cardId);
+  const creditSelected = paymentMethodId === creditMethod?.id || Boolean(cardId);
   const settled = isSettled(status);
   const backfilling = isPastDate(dueDate);
 
@@ -102,6 +107,7 @@ export const TransactionForm = ({
     if (next === 'income') {
       setPaymentMethodId('');
       setCardId('');
+      setPurchaseDate('');
     }
     if (!statusChosen) setStatus(statusForDate(dueDate, next));
     else if (settled) setStatus(settledStatusFor(next));
@@ -120,7 +126,18 @@ export const TransactionForm = ({
     if (!nextCardId) return;
     if (creditMethod) setPaymentMethodId(creditMethod.id);
     const card = catalogs.cards.find((item) => item.id === nextCardId);
-    if (card) applyDueDate(nextCardDueDate(defaultDate, card.dueDay));
+    if (!card) return;
+    const effectivePurchaseDate = purchaseDate || todayIso();
+    if (!purchaseDate) setPurchaseDate(effectivePurchaseDate);
+    applyDueDate(card.closingDay === null
+      ? nextCardDueDate(effectivePurchaseDate, card.dueDay)
+      : cardStatementDueDate(effectivePurchaseDate, card.closingDay, card.dueDay));
+  };
+
+  const applyPurchaseDate = (value: string) => {
+    setPurchaseDate(value);
+    if (!value || !selectedCard || selectedCard.closingDay === null) return;
+    applyDueDate(cardStatementDueDate(value, selectedCard.closingDay, selectedCard.dueDay));
   };
 
   const applyPaymentMethod = (nextMethodId: string) => {
@@ -194,6 +211,7 @@ export const TransactionForm = ({
           categoryId: categoryId || null,
           plannedAmount: Number(plannedAmount),
           actualAmount: actualAmount === '' ? null : Number(actualAmount),
+          purchaseDate: cardId && purchaseDate ? purchaseDate : null,
           dueDate,
           settledDate: isSettled(finalStatus)
             ? transaction?.settledDate ?? settlementDateFor(dueDate)
@@ -234,7 +252,7 @@ export const TransactionForm = ({
           event.preventDefault();
           void persist(false);
         }}
-        className="form-grid"
+        className="form-grid form-grid--transaction"
       >
         <div className="segmented form-grid__full">
           <button type="button" className={kind === 'expense' ? 'active' : ''} onClick={() => applyKind('expense')}>Saída</button>
@@ -286,11 +304,41 @@ export const TransactionForm = ({
           { value: '', label: 'Sem categoria' },
           ...categories.map((category) => ({ value: category.id, label: category.name })),
         ]} />
-        <DateField label="Data prevista" value={dueDate} onChange={applyDueDate} required />
         <label className="field">
           <span>Valor planejado</span>
           <div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={plannedAmount} onChange={(event) => applyPlanned(event.target.value)} /></div>
         </label>
+
+        {kind === 'expense' && (
+          <SelectField label="Forma de pagamento" value={paymentMethodId} onChange={applyPaymentMethod} options={[
+            { value: '', label: 'Não informada' },
+            ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name })),
+          ]} />
+        )}
+        {kind === 'expense' && creditSelected && (
+          <SelectField label="Cartão" value={cardId} onChange={applyCard} options={[
+            { value: '', label: 'Nenhum' },
+            ...catalogs.cards.map((card) => ({ value: card.id, label: `${card.name} · ${card.closingDay === null ? 'sem fechamento' : `fecha ${card.closingDay}`} · vence ${card.dueDay}` })),
+          ]} />
+        )}
+
+        {cardId && <DateField label="Data da compra" value={purchaseDate} onChange={applyPurchaseDate} required={!transaction || Boolean(transaction.purchaseDate)} />}
+        <DateField label={cardId ? 'Vencimento da fatura' : 'Data prevista'} value={dueDate} onChange={applyDueDate} required />
+        {cardId && selectedCard && (
+          <div className={`card-cycle-note form-grid__full ${selectedCard.closingDay === null || !purchaseDate ? 'card-cycle-note--warning' : ''}`}>
+            {selectedCard.closingDay === null
+              ? <>Configure o fechamento do <strong>{selectedCard.name}</strong> para o app escolher a fatura automaticamente. O vencimento ainda pode ser ajustado acima.</>
+              : !purchaseDate
+                ? <>Este é um lançamento antigo sem data da compra. O vencimento foi preservado; ao informar a compra, o app recalcula a fatura.</>
+                : <>Compra em <strong>{formatDate(purchaseDate, 'dd/MM/yyyy')}</strong> · fatura com vencimento em <strong>{formatDate(dueDate, 'dd/MM/yyyy')}</strong>. O mês da tela será o mês desse vencimento.</>}
+          </div>
+        )}
+
+        <SelectField label="Situação" value={status} onChange={(value) => applyStatus(value as TransactionStatus)} options={[
+          { value: 'planned', label: 'Planejado' },
+          { value: settledStatusFor(kind), label: kind === 'income' ? 'Recebido' : 'Pago' },
+          { value: 'cancelled', label: 'Cancelado' },
+        ]} />
         <label className="field">
           <span>
             Valor real{' '}
@@ -300,22 +348,9 @@ export const TransactionForm = ({
           </span>
           <div className="money-input"><span>R$</span><input min="0" step="0.01" type="number" value={actualAmount} onChange={(event) => applyActual(event.target.value)} /></div>
         </label>
-        <SelectField label="Situação" value={status} onChange={(value) => applyStatus(value as TransactionStatus)} options={[
-          { value: 'planned', label: 'Planejado' },
-          { value: settledStatusFor(kind), label: kind === 'income' ? 'Recebido' : 'Pago' },
-          { value: 'cancelled', label: 'Cancelado' },
-        ]} />
-        <SelectField label="Forma de pagamento" value={paymentMethodId} onChange={applyPaymentMethod} disabled={kind === 'income'} options={[
-          { value: '', label: 'Não informada' },
-          ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name })),
-        ]} />
-        <SelectField label="Cartão" value={cardId} onChange={applyCard} disabled={kind === 'income'} options={[
-          { value: '', label: 'Nenhum' },
-          ...catalogs.cards.map((card) => ({ value: card.id, label: `${card.name} · vence dia ${card.dueDay}` })),
-        ]} />
         <label className="field form-grid__full">
           <span>Observações</span>
-          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Algo importante sobre este lançamento?" rows={3} />
+          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Algo importante sobre este lançamento?" rows={2} />
         </label>
         <div className="modal__actions form-grid__full">
           {savedCount > 0 && <span className="modal__actions-note">{savedCount} {savedCount === 1 ? 'lançamento salvo' : 'lançamentos salvos'} nesta sessão</span>}
@@ -339,13 +374,21 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
   onSave: (input: RecurringExpenseInput) => Promise<unknown>;
   onClose: () => void;
 }) => {
+  const creditMethod = useMemo(
+    () => catalogs.paymentMethods.find((method) => method.name.toLocaleLowerCase('pt-BR') === 'cartão de crédito'),
+    [catalogs.paymentMethods],
+  );
   const [kind, setKind] = useState<MoneyKind>(item?.kind ?? 'expense');
   const [description, setDescription] = useState(item?.description ?? '');
   const [startMonth, setStartMonth] = useState(item?.startMonth ?? (defaultStartMonth < currentMonthIso() ? currentMonthIso() : defaultStartMonth));
   const [categoryId, setCategoryId] = useState(item?.categoryId ?? '');
   const [paymentMethodId, setPaymentMethodId] = useState(item?.paymentMethodId ?? '');
+  const [cardId, setCardId] = useState(
+    item?.cardId ?? (item?.paymentMethodId === creditMethod?.id ? catalogs.cards[0]?.id ?? '' : ''),
+  );
   const [amount, setAmount] = useState(moneyValue(item?.plannedAmount));
   const [dueDay, setDueDay] = useState(String(item?.dueDay ?? 10));
+  const [chargeDay, setChargeDay] = useState(item?.chargeDay === null || item?.chargeDay === undefined ? '' : String(item.chargeDay));
   const [active, setActive] = useState(item?.active ?? true);
   const [notes, setNotes] = useState(item?.notes ?? '');
   const [existingItems, setExistingItems] = useState<RecurringExpense[]>([]);
@@ -364,16 +407,42 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
           && candidate.description.trim().toLocaleLowerCase('pt-BR') === normalizedDescription,
       )
     : undefined;
+  const creditSelected = kind === 'expense' && paymentMethodId === creditMethod?.id;
+  const selectedCard = catalogs.cards.find((card) => card.id === cardId);
+  const numericChargeDay = Number(chargeDay);
+  const firstChargeDate = selectedCard && numericChargeDay >= 1 && numericChargeDay <= 31
+    ? dateForMonthDay(startMonth, numericChargeDay)
+    : null;
+  const firstCardDueDate = selectedCard && firstChargeDate
+    ? selectedCard.closingDay === null
+      ? nextCardDueDate(firstChargeDate, selectedCard.dueDay)
+      : cardStatementDueDate(firstChargeDate, selectedCard.closingDay, selectedCard.dueDay)
+    : null;
+  const incompleteCardCycle = creditSelected && (!selectedCard || !firstChargeDate);
   const applyKind = (next: MoneyKind) => {
     setKind(next);
     setCategoryId('');
+    if (next === 'income') {
+      setPaymentMethodId('');
+      setCardId('');
+      setChargeDay('');
+    }
+  };
+  const applyPaymentMethod = (nextPaymentMethodId: string) => {
+    setPaymentMethodId(nextPaymentMethodId);
+    if (nextPaymentMethodId !== creditMethod?.id) {
+      setCardId('');
+      setChargeDay('');
+      return;
+    }
+    if (!cardId && catalogs.cards[0]) setCardId(catalogs.cards[0].id);
   };
   return (
-    <Modal title={item ? 'Editar recorrência' : 'Nova recorrência'} description="Ela será incluída automaticamente a partir do mês escolhido." onClose={onClose}>
+    <Modal title={item ? 'Editar recorrência' : 'Nova recorrência'} description="Informe quando ela acontece; no cartão, o app escolhe a fatura automaticamente." onClose={onClose} medium>
       <form className="form-grid" onSubmit={async (event) => {
         event.preventDefault();
-        if (duplicate) return;
-        await onSave({ id: item?.id, kind, description, startMonth, categoryId: categoryId || null, paymentMethodId: paymentMethodId || null, plannedAmount: Number(amount), dueDay: Number(dueDay), active, notes });
+        if (duplicate || incompleteCardCycle) return;
+        await onSave({ id: item?.id, kind, description, startMonth, categoryId: categoryId || null, paymentMethodId: paymentMethodId || null, cardId: creditSelected ? cardId || null : null, plannedAmount: Number(amount), dueDay: selectedCard?.dueDay ?? Number(dueDay), chargeDay: creditSelected ? Number(chargeDay) : null, active, notes });
       }}>
         <div className="segmented form-grid__full">
           <button type="button" className={kind === 'expense' ? 'active' : ''} onClick={() => applyKind('expense')}>Saída fixa</button>
@@ -381,13 +450,27 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
         </div>
         <label className="field form-grid__full"><span>Descrição</span><input required autoFocus aria-invalid={Boolean(duplicate)} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={kind === 'income' ? 'Ex.: Salário' : 'Ex.: Internet'} />{duplicate && <small className="field__error">Já existe uma {kind === 'income' ? 'entrada fixa' : 'saída fixa'} com esse nome. Edite a recorrência existente.</small>}</label>
         <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === kind).map((category) => ({ value: category.id, label: category.name }))]} />
-        <SelectField label={kind === 'income' ? 'Forma de recebimento' : 'Forma de pagamento'} value={paymentMethodId} onChange={setPaymentMethodId} options={[{ value: '', label: 'Não informada' }, ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name }))]} />
+        <SelectField label={kind === 'income' ? 'Forma de recebimento' : 'Forma de pagamento'} value={paymentMethodId} onChange={applyPaymentMethod} disabled={kind === 'income'} options={[{ value: '', label: 'Não informada' }, ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name }))]} />
         <label className="field"><span>Valor mensal</span><div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>
-        <label className="field"><span>{kind === 'income' ? 'Dia do recebimento' : 'Dia do vencimento'}</span><input required min="1" max="31" type="number" value={dueDay} onChange={(event) => setDueDay(event.target.value)} /></label>
-        <MonthField className="form-grid__full" label="Começar em" hint="não cria lançamentos nos meses anteriores" min={item ? undefined : currentMonthIso()} value={startMonth} onChange={setStartMonth} />
-        <label className="field form-grid__full"><span>Observações</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+        {creditSelected
+          ? <label className="field"><span>Dia mensal da cobrança</span><input required min="1" max="31" type="number" value={chargeDay} onChange={(event) => setChargeDay(event.target.value)} placeholder="Ex.: 20" /></label>
+          : <label className="field"><span>{kind === 'income' ? 'Dia do recebimento' : 'Dia do vencimento'}</span><input required min="1" max="31" type="number" value={dueDay} onChange={(event) => setDueDay(event.target.value)} /></label>}
+        {creditSelected && <SelectField label="Cartão" value={cardId} onChange={setCardId} options={[{ value: '', label: 'Selecione o cartão' }, ...catalogs.cards.map((card) => ({ value: card.id, label: `${card.name} · fecha ${card.closingDay ?? '?'} · vence ${card.dueDay}` }))]} />}
+        <MonthField className={creditSelected ? '' : 'form-grid__full'} label={creditSelected ? 'Primeira cobrança em' : 'Começar em'} hint={creditSelected ? 'Escolha o mês em que a cobrança começa. O app usa o fechamento e o vencimento do cartão para decidir em qual fatura ela aparece.' : 'O primeiro lançamento será criado neste mês; meses anteriores ficam intocados.'} min={item ? undefined : currentMonthIso()} value={startMonth} onChange={setStartMonth} />
+        {creditSelected && (
+          <div className={`card-cycle-note form-grid__full ${incompleteCardCycle || selectedCard?.closingDay === null ? 'card-cycle-note--warning' : ''}`}>
+            {!selectedCard
+              ? <>Selecione um cartão para calcular a primeira fatura.</>
+              : !firstChargeDate
+                ? <>Informe o dia em que essa despesa é cobrada mensalmente no cartão.</>
+                : selectedCard.closingDay === null
+                  ? <>O <strong>{selectedCard.name}</strong> ainda está sem fechamento configurado. O vencimento estimado da primeira fatura é <strong>{formatDate(firstCardDueDate, 'dd/MM/yyyy')}</strong>.</>
+                  : <>Primeira cobrança em <strong>{formatDate(firstChargeDate, 'dd/MM/yyyy')}</strong> · aparecerá na fatura com vencimento em <strong>{formatDate(firstCardDueDate, 'dd/MM/yyyy')}</strong>.</>}
+          </div>
+        )}
+        <label className="field form-grid__full"><span>Observações</span><textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
         <label className="toggle-row form-grid__full"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /><span><strong>{kind === 'income' ? 'Entrada ativa' : 'Saída ativa'}</strong><small>Inclui este lançamento nos próximos meses</small></span></label>
-        <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={Boolean(duplicate)}>Salvar recorrência</button></div>
+        <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={Boolean(duplicate) || incompleteCardCycle}>Salvar recorrência</button></div>
       </form>
     </Modal>
   );
@@ -407,7 +490,10 @@ export const InstallmentForm = ({ catalogs, onSave, onClose }: {
   const [current, setCurrent] = useState('1');
   const [currentDueDate, setCurrentDueDate] = useState(() => {
     const card = catalogs.cards[0];
-    return card ? nextCardDueDate(todayIso(), card.dueDay) : todayIso();
+    if (!card) return todayIso();
+    return card.closingDay === null
+      ? nextCardDueDate(todayIso(), card.dueDay)
+      : cardStatementDueDate(todayIso(), card.closingDay, card.dueDay);
   });
   const [notes, setNotes] = useState('');
   const totalAmount = Number(amount || 0) * Number(total || 0);
@@ -415,7 +501,9 @@ export const InstallmentForm = ({ catalogs, onSave, onClose }: {
   const applyCard = (nextCardId: string) => {
     setCardId(nextCardId);
     const card = catalogs.cards.find((item) => item.id === nextCardId);
-    if (card) setCurrentDueDate(nextCardDueDate(todayIso(), card.dueDay));
+    if (card) setCurrentDueDate(card.closingDay === null
+      ? nextCardDueDate(todayIso(), card.dueDay)
+      : cardStatementDueDate(todayIso(), card.closingDay, card.dueDay));
   };
   const applyTotal = (value: string) => {
     setTotal(value);
@@ -430,7 +518,7 @@ export const InstallmentForm = ({ catalogs, onSave, onClose }: {
       }}>
         <label className="field form-grid__full"><span>Compra</span><input required autoFocus value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Notebook" /></label>
         <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === 'expense').map((category) => ({ value: category.id, label: category.name }))]} />
-        <SelectField label="Cartão" value={cardId} onChange={applyCard} options={[{ value: '', label: 'Não informado' }, ...catalogs.cards.map((card) => ({ value: card.id, label: `${card.name} · vence dia ${card.dueDay}` }))]} />
+        <SelectField label="Cartão" value={cardId} onChange={applyCard} options={[{ value: '', label: 'Não informado' }, ...catalogs.cards.map((card) => ({ value: card.id, label: `${card.name} · ${card.closingDay === null ? 'sem fechamento' : `fecha ${card.closingDay}`} · vence ${card.dueDay}` }))]} />
         <label className="field"><span>Valor da parcela</span><div className="money-input"><span>R$</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>
         <label className="field"><span>Total de parcelas</span><input required min="1" max="120" type="number" value={total} onChange={(event) => applyTotal(event.target.value)} /></label>
         <label className="field"><span>Parcela deste mês</span><input required min="1" max={Math.max(1, Number(total || 1))} type="number" value={current} onChange={(event) => setCurrent(event.target.value)} /></label>
