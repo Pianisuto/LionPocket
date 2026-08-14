@@ -2,9 +2,12 @@ import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export {
+  cardStatementDueDate,
   currentMonthIso,
+  dateForMonthDay,
   isPastDate,
   localDateIso,
+  nextCardDueDate,
   settlementDateFor,
   todayIso,
 } from '../shared/finance';
@@ -47,4 +50,3 @@ export const statusLabel = (status: string) =>
 
 export const priorityLabel = (priority: string) =>
   ({ high: 'Alta', medium: 'Média', low: 'Baixa' })[priority] ?? priority;
-

@@ -21,7 +21,7 @@ import { Leo } from './ui/Leo';
 import { TitleBar } from './ui/TitleBar';
 import { useTheme } from './ui/theme';
 import { GoalForm, InstallmentForm, RecurringForm, TransactionForm } from './ui/forms';
-import { currentMonthIso, todayIso } from './ui/format';
+import { currentMonthIso, monthLabel, todayIso } from './ui/format';
 import { Dashboard } from './ui/screens/Dashboard';
 import { Goals } from './ui/screens/Goals';
 import { Installments } from './ui/screens/Installments';
@@ -42,7 +42,7 @@ const emptyCatalogs: Catalogs = { categories: [], paymentMethods: [], cards: [] 
 const views: Array<{ id: View; label: string; icon: React.ReactNode }> = [
   { id: 'dashboard', label: 'Visão geral', icon: <LayoutDashboard size={20} /> },
   { id: 'transactions', label: 'Lançamentos', icon: <ReceiptText size={20} /> },
-  { id: 'recurring', label: 'Despesas fixas', icon: <CalendarSync size={20} /> },
+  { id: 'recurring', label: 'Recorrências', icon: <CalendarSync size={20} /> },
   { id: 'installments', label: 'Parcelas', icon: <CreditCard size={20} /> },
   { id: 'goals', label: 'Objetivos', icon: <Target size={20} /> },
 ];
@@ -50,7 +50,7 @@ const views: Array<{ id: View; label: string; icon: React.ReactNode }> = [
 const pageCopy: Record<View, { title: string; subtitle: string }> = {
   dashboard: { title: 'Visão geral', subtitle: 'O seu mês inteiro em uma olhada.' },
   transactions: { title: 'Lançamentos', subtitle: 'Tudo que entra e sai, no mesmo lugar.' },
-  recurring: { title: 'Despesas fixas', subtitle: 'As contas que acompanham você todo mês.' },
+  recurring: { title: 'Recorrências', subtitle: 'Entradas e saídas que acompanham você todo mês.' },
   installments: { title: 'Compras parceladas', subtitle: 'Compromissos futuros sem surpresas.' },
   goals: { title: 'Objetivos', subtitle: 'Transforme vontade em um plano possível.' },
   settings: { title: 'Configurações', subtitle: 'Dados, cópias e listas do seu jeito.' },
@@ -195,6 +195,13 @@ export default function App() {
               loading={overviewLoading}
               onAddTransaction={() => setModal({ type: 'transaction' })}
               onNavigate={(next) => setView(next as View)}
+              onEditTransaction={(item) => setModal({ type: 'transaction', item })}
+              onSettleTransaction={(item) =>
+                safeAction(
+                  () => window.lionPocket.settleTransaction(item.id),
+                  item.kind === 'income' ? 'Entrada marcada como recebida.' : 'Conta marcada como paga.',
+                )
+              }
             />
           )}
           {view === 'transactions' && (
@@ -218,6 +225,7 @@ export default function App() {
           )}
           {view === 'installments' && (
             <Installments
+              month={month}
               refreshKey={refreshKey}
               onAdd={() => setModal({ type: 'installment' })}
               onChanged={changed}
@@ -267,7 +275,9 @@ export default function App() {
           onSave={(input, options) =>
             safeAction(
               () => window.lionPocket.saveTransaction(input).then(() => undefined),
-              input.id ? 'Lançamento atualizado.' : 'Lançamento adicionado.',
+              input.cardId
+                ? `${input.id ? 'Compra atualizada' : 'Compra adicionada'} na fatura de ${monthLabel(input.dueDate.slice(0, 7))}.`
+                : input.id ? 'Lançamento atualizado.' : 'Lançamento adicionado.',
               options?.keepOpen,
             )
           }
@@ -277,11 +287,12 @@ export default function App() {
         <RecurringForm
           item={modal.item}
           catalogs={catalogs}
+          defaultStartMonth={month}
           onClose={() => setModal(null)}
           onSave={(input) =>
             safeAction(
               () => window.lionPocket.saveRecurringExpense(input).then(() => undefined),
-              input.id ? 'Despesa fixa atualizada.' : 'Despesa fixa criada.',
+              input.id ? 'Recorrência atualizada.' : 'Recorrência criada.',
             )
           }
         />

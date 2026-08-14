@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   addMonths,
+  cardStatementDueDate,
   calculateGoal,
   dateForMonthDay,
   fromCents,
   isPastDate,
   localDateIso,
   monthRange,
+  nextCardDueDate,
   settlementDateFor,
   toCents,
 } from './finance';
@@ -24,6 +26,26 @@ describe('regras financeiras', () => {
   it('ajusta vencimentos para o último dia do mês', () => {
     expect(dateForMonthDay('2026-02', 31)).toBe('2026-02-28');
     expect(addMonths('2026-01-31', 1)).toBe('2026-02-28');
+  });
+
+  it('sugere o próximo vencimento do cartão sem usar uma data passada', () => {
+    expect(nextCardDueDate('2026-08-04', 10)).toBe('2026-08-10');
+    expect(nextCardDueDate('2026-08-14', 10)).toBe('2026-09-10');
+    expect(nextCardDueDate('2026-01-31', 31)).toBe('2026-01-31');
+    expect(nextCardDueDate('2026-02-15', 31)).toBe('2026-02-28');
+  });
+
+  it('coloca a compra na fatura certa usando fechamento e vencimento', () => {
+    expect(cardStatementDueDate('2026-08-10', 14, 21)).toBe('2026-08-21');
+    expect(cardStatementDueDate('2026-08-14', 14, 21)).toBe('2026-08-21');
+    expect(cardStatementDueDate('2026-08-15', 14, 21)).toBe('2026-09-21');
+    expect(cardStatementDueDate('2026-08-20', 25, 5)).toBe('2026-09-05');
+    expect(cardStatementDueDate('2026-08-26', 25, 5)).toBe('2026-10-05');
+  });
+
+  it('ajusta fechamento e vencimento ao tamanho do mês', () => {
+    expect(cardStatementDueDate('2026-02-10', 14, 31)).toBe('2026-02-28');
+    expect(cardStatementDueDate('2026-02-15', 14, 31)).toBe('2026-03-31');
   });
 
   it('usa a data local, e não UTC, para saber que dia é hoje', () => {
@@ -50,4 +72,3 @@ describe('regras financeiras', () => {
     expect(result.suggestedMonthlyAmount).toBe(180);
   });
 });
-

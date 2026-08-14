@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { GoalStatus, ImportResult, TransactionStatus } from '../shared/types';
 import { LionPocketDatabase } from './database';
+import { currentMonthIso } from '../shared/finance';
 import { readXlsx, type XlsxCellValue, type XlsxWorksheet } from './xlsx-reader';
 
 const monthSheets = [
@@ -103,16 +104,22 @@ export const importFinancialSpreadsheet = async (
   const fixed = workbook.getWorksheet('Fixas');
   if (fixed) {
     const existing = database.listRecurringExpenses();
+    const existingNames = new Set(
+      existing.map((item) => `${item.kind}:${item.description.trim().toLocaleLowerCase('pt-BR')}`),
+    );
     for (let row = 3; row <= 32; row += 1) {
       const description = text(fixed, row, 2);
       if (!description) continue;
       const dueDay = Math.max(1, Math.min(31, Math.round(number(fixed, row, 6) || 1)));
-      if (existing.some((item) => item.description === description && item.dueDay === dueDay)) continue;
+      const recurringKey = `expense:${description.trim().toLocaleLowerCase('pt-BR')}`;
+      if (existingNames.has(recurringKey)) continue;
       const categoryName = text(fixed, row, 3);
       const methodName = text(fixed, row, 4);
       database.saveRecurringExpense({
+        kind: 'expense',
         active: text(fixed, row, 1).toLocaleLowerCase('pt-BR') !== 'não',
         description,
+        startMonth: currentMonthIso(),
         categoryId: categoryName
           ? database.findOrCreateCategory(categoryName, 'expense')
           : null,
@@ -121,6 +128,7 @@ export const importFinancialSpreadsheet = async (
         dueDay,
         notes: text(fixed, row, 7),
       });
+      existingNames.add(recurringKey);
       result.recurringExpenses += 1;
     }
   }

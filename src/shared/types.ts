@@ -13,6 +13,12 @@ export interface SimpleCatalogItem {
   name: string;
 }
 
+export interface CreditCard extends SimpleCatalogItem {
+  dueDay: number;
+  /** Nulo em cartões antigos, até a pessoa informar o fechamento. */
+  closingDay: number | null;
+}
+
 export interface Transaction {
   id: string;
   kind: MoneyKind;
@@ -22,6 +28,8 @@ export interface Transaction {
   categoryColor: string | null;
   plannedAmount: number;
   actualAmount: number | null;
+  /** Dia em que a compra foi feita. Usado para descobrir a fatura do cartão. */
+  purchaseDate: string | null;
   dueDate: string;
   settledDate: string | null;
   status: TransactionStatus;
@@ -43,6 +51,7 @@ export interface TransactionInput {
   categoryId?: string | null;
   plannedAmount: number;
   actualAmount?: number | null;
+  purchaseDate?: string | null;
   dueDate: string;
   settledDate?: string | null;
   status: TransactionStatus;
@@ -74,25 +83,35 @@ export interface TransactionFilters {
 
 export interface RecurringExpense {
   id: string;
+  kind: MoneyKind;
   active: boolean;
   description: string;
+  startMonth: string;
   categoryId: string | null;
   categoryName: string | null;
   paymentMethodId: string | null;
   paymentMethodName: string | null;
+  cardId: string | null;
+  cardName: string | null;
   plannedAmount: number;
   dueDay: number;
+  /** Dia mensal em que a despesa é cobrada no cartão. */
+  chargeDay: number | null;
   notes: string;
 }
 
 export interface RecurringExpenseInput {
   id?: string;
+  kind: MoneyKind;
   active: boolean;
   description: string;
+  startMonth: string;
   categoryId?: string | null;
   paymentMethodId?: string | null;
+  cardId?: string | null;
   plannedAmount: number;
   dueDay: number;
+  chargeDay?: number | null;
   notes?: string;
 }
 
@@ -105,8 +124,12 @@ export interface InstallmentPurchase {
   cardName: string | null;
   installmentAmount: number;
   totalInstallments: number;
+  startingInstallment: number;
   paidInstallments: number;
   firstDueDate: string;
+  viewedInstallment: number;
+  viewedDueDate: string;
+  viewedStatus: TransactionStatus;
   status: 'active' | 'completed' | 'cancelled';
   notes: string;
 }
@@ -118,7 +141,8 @@ export interface InstallmentPurchaseInput {
   paymentMethodId?: string | null;
   installmentAmount: number;
   totalInstallments: number;
-  firstDueDate: string;
+  currentInstallment: number;
+  currentDueDate: string;
   notes?: string;
 }
 
@@ -186,14 +210,17 @@ export interface Overview {
 export interface Catalogs {
   categories: Category[];
   paymentMethods: SimpleCatalogItem[];
-  cards: SimpleCatalogItem[];
+  cards: CreditCard[];
 }
 
 export interface CatalogInput {
+  id?: string;
   type: 'category' | 'paymentMethod' | 'card';
   name: string;
   kind?: MoneyKind;
   color?: string;
+  dueDay?: number;
+  closingDay?: number | null;
 }
 
 export interface ImportResult {
@@ -210,6 +237,7 @@ export interface WindowState {
 export interface LionPocketApi {
   getCatalogs(): Promise<Catalogs>;
   createCatalogItem(input: CatalogInput): Promise<void>;
+  deleteCatalogItem(type: 'category' | 'card', id: string): Promise<void>;
   getOverview(month: string): Promise<Overview>;
   listTransactions(filters: TransactionFilters): Promise<Transaction[]>;
   saveTransaction(input: TransactionInput): Promise<Transaction>;
@@ -221,7 +249,7 @@ export interface LionPocketApi {
   listRecurringExpenses(): Promise<RecurringExpense[]>;
   saveRecurringExpense(input: RecurringExpenseInput): Promise<RecurringExpense>;
   deleteRecurringExpense(id: string): Promise<void>;
-  listInstallmentPurchases(): Promise<InstallmentPurchase[]>;
+  listInstallmentPurchases(month: string): Promise<InstallmentPurchase[]>;
   createInstallmentPurchase(input: InstallmentPurchaseInput): Promise<InstallmentPurchase>;
   deleteInstallmentPurchase(id: string): Promise<void>;
   listGoals(): Promise<Goal[]>;
@@ -239,4 +267,3 @@ export interface LionPocketApi {
   /** Avisa quando a janela é maximizada ou restaurada. Devolve o cancelamento. */
   onWindowState(listener: (state: WindowState) => void): () => void;
 }
-

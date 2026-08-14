@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarSync, Pencil, Plus, Power, Trash2 } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, CalendarSync, Pencil, Plus, Power, Trash2 } from 'lucide-react';
 import type { RecurringExpense } from '../../shared/types';
 import { EmptyState } from '../components';
 import { currency } from '../format';
@@ -17,41 +17,59 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
     setLoading(true);
     window.lionPocket.listRecurringExpenses().then(setItems).finally(() => setLoading(false));
   }, [refreshKey]);
-  const total = useMemo(() => items.filter((item) => item.active).reduce((sum, item) => sum + item.plannedAmount, 0), [items]);
+  const totals = useMemo(() => items.filter((item) => item.active).reduce((result, item) => {
+    result[item.kind] += item.plannedAmount;
+    return result;
+  }, { income: 0, expense: 0 }), [items]);
   const toggle = async (item: RecurringExpense) => {
     await window.lionPocket.saveRecurringExpense({ ...item, active: !item.active });
-    notify(item.active ? 'Despesa pausada.' : 'Despesa ativada.');
+    notify(item.active ? 'Recorrência pausada.' : 'Recorrência ativada.');
     onChanged();
   };
   const remove = async (item: RecurringExpense) => {
-    if (!window.confirm(`Excluir a despesa fixa “${item.description}”? Os meses anteriores serão preservados.`)) return;
+    if (!window.confirm(`Excluir a recorrência “${item.description}”? Os meses anteriores serão preservados.`)) return;
     await window.lionPocket.deleteRecurringExpense(item.id);
-    notify('Despesa fixa excluída.');
+    notify('Recorrência excluída.');
     onChanged();
   };
+  const groups = [
+    { kind: 'income' as const, label: 'Entradas fixas', items: items.filter((item) => item.kind === 'income') },
+    { kind: 'expense' as const, label: 'Saídas fixas', items: items.filter((item) => item.kind === 'expense') },
+  ];
+  const renderCard = (item: RecurringExpense) => (
+    <article className={`item-card ${!item.active ? 'item-card--disabled' : ''}`} key={item.id}>
+      <div className="item-card__header">
+        <div className={`item-card__icon ${item.kind === 'income' ? 'item-card__icon--income' : ''}`}>{item.kind === 'income' ? <ArrowUpRight size={20} /> : <ArrowDownRight size={20} />}</div>
+        <span className={`status-pill ${item.active ? 'status-pill--received' : 'status-pill--cancelled'}`}>{item.active ? 'Ativa' : 'Pausada'}</span>
+      </div>
+      <h3>{item.description}</h3>
+      <p>{item.categoryName ?? 'Sem categoria'} · {item.cardId && item.chargeDay
+        ? `cobra dia ${item.chargeDay} no ${item.cardName ?? 'cartão'} · fatura vence dia ${item.dueDay}`
+        : `${item.kind === 'income' ? 'recebe dia' : 'vence dia'} ${item.dueDay}`}</p>
+      <strong className={`item-card__amount ${item.kind === 'income' ? 'money-positive' : ''}`}>{item.kind === 'income' ? '+' : '−'} {currency.format(item.plannedAmount)}<small>/mês</small></strong>
+      <div className="item-card__footer"><span>{item.paymentMethodName ?? (item.kind === 'income' ? 'Recebimento não informado' : 'Pagamento não informado')}</span><div><button className="icon-button" onClick={() => toggle(item)} title={item.active ? 'Pausar' : 'Ativar'}><Power size={16} /></button><button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button><button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={16} /></button></div></div>
+    </article>
+  );
   return (
     <section className="page-section">
       <div className="feature-banner feature-banner--recurring">
         <div className="feature-banner__icon"><CalendarSync size={25} /></div>
-        <div><span>Previsibilidade</span><h3>{currency.format(total)} em despesas fixas ativas</h3><p>Estas contas entram automaticamente em cada mês e podem ser ajustadas depois.</p></div>
-        <button className="button button--primary" onClick={onAdd}><Plus size={18} /> Nova despesa fixa</button>
+        <div><span>Previsibilidade</span><h3 className="recurring-summary"><b><data className="money-positive" value={totals.income}>{currency.format(totals.income)}</data> em entradas</b><b><data className="money-negative" value={totals.expense}>{currency.format(totals.expense)}</data> em saídas</b></h3><p>Estes lançamentos entram automaticamente em cada mês e podem ser ajustados depois.</p></div>
+        <button className="button button--primary" onClick={onAdd}><Plus size={18} /> Nova recorrência</button>
       </div>
-      <div className="card-grid card-grid--three">
-        {!loading && items.map((item) => (
-          <article className={`item-card ${!item.active ? 'item-card--disabled' : ''}`} key={item.id}>
-            <div className="item-card__header">
-              <div className="item-card__icon"><CalendarSync size={20} /></div>
-              <span className={`status-pill ${item.active ? 'status-pill--received' : 'status-pill--cancelled'}`}>{item.active ? 'Ativa' : 'Pausada'}</span>
-            </div>
-            <h3>{item.description}</h3>
-            <p>{item.categoryName ?? 'Sem categoria'} · vence dia {item.dueDay}</p>
-            <strong className="item-card__amount">{currency.format(item.plannedAmount)}<small>/mês</small></strong>
-            <div className="item-card__footer"><span>{item.paymentMethodName ?? 'Forma não informada'}</span><div><button className="icon-button" onClick={() => toggle(item)} title={item.active ? 'Pausar' : 'Ativar'}><Power size={16} /></button><button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button><button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={16} /></button></div></div>
-          </article>
+      {!loading && items.length > 0 && <div className="recurring-groups">
+        {groups.map((group) => group.items.length > 0 && (
+          <section className="recurring-group" key={group.kind}>
+            <header className={`recurring-group__header recurring-group__header--${group.kind}`}>
+              {group.kind === 'income' ? <ArrowUpRight size={17} /> : <ArrowDownRight size={17} />}
+              <h2>{group.label}</h2>
+              <span>{group.items.length}</span>
+            </header>
+            <div className="card-grid card-grid--three">{group.items.map(renderCard)}</div>
+          </section>
         ))}
-      </div>
-      {!loading && items.length === 0 && <div className="panel"><EmptyState icon={<CalendarSync />} title="Cadastre o que se repete" description="Internet, aluguel e assinaturas podem entrar automaticamente todo mês." action={<button className="button button--soft" onClick={onAdd}><Plus size={16} /> Nova despesa fixa</button>} /></div>}
+      </div>}
+      {!loading && items.length === 0 && <div className="panel"><EmptyState icon={<CalendarSync />} title="Cadastre o que se repete" description="Salário, internet, aluguel e assinaturas podem entrar automaticamente todo mês." action={<button className="button button--soft" onClick={onAdd}><Plus size={16} /> Nova recorrência</button>} /></div>}
     </section>
   );
 };
-

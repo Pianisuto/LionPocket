@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Plus, ShieldCheck } from 'lucide-react';
+import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import type { CatalogInput, Catalogs, MoneyKind } from '../../shared/types';
 import { SelectField } from '../components';
 
@@ -12,6 +12,10 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
   const [newName, setNewName] = useState('');
   const [type, setType] = useState<CatalogInput['type']>('category');
   const [kind, setKind] = useState<MoneyKind>('expense');
+  const [cardDueDay, setCardDueDay] = useState('10');
+  const [cardClosingDay, setCardClosingDay] = useState('14');
+  const [editingCardId, setEditingCardId] = useState('');
+  const [deletingCatalogId, setDeletingCatalogId] = useState('');
   const [busy, setBusy] = useState('');
   const run = async (name: string, action: () => Promise<string | null | object>) => {
     setBusy(name);
@@ -22,11 +26,50 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
   };
   const addCatalog = async (event: React.FormEvent) => {
     event.preventDefault();
-    await window.lionPocket.createCatalogItem({ type, name: newName, kind });
+    await window.lionPocket.createCatalogItem({
+      id: editingCardId || undefined,
+      type,
+      name: newName,
+      kind,
+      dueDay: type === 'card' ? Number(cardDueDay) : undefined,
+      closingDay: type === 'card' ? Number(cardClosingDay) : undefined,
+    });
     setNewName('');
+    setEditingCardId('');
     await refreshCatalogs();
-    notify('Item adicionado à lista.');
+    notify(editingCardId ? 'Cartão atualizado.' : 'Item adicionado à lista.');
   };
+  const chooseType = (value: string) => {
+    setType(value as CatalogInput['type']);
+    setEditingCardId('');
+    setNewName('');
+  };
+  const editCard = (card: Catalogs['cards'][number]) => {
+    setType('card');
+    setEditingCardId(card.id);
+    setNewName(card.name);
+    setCardDueDay(String(card.dueDay));
+    setCardClosingDay(card.closingDay === null ? '' : String(card.closingDay));
+  };
+  const cancelCardEdit = () => {
+    setEditingCardId('');
+    setNewName('');
+  };
+  const deleteCatalogItem = async (itemType: 'category' | 'card', item: { id: string; name: string }) => {
+    const itemLabel = itemType === 'card' ? 'cartão' : 'categoria';
+    const unlinkLabel = itemType === 'card' ? 'sem cartão informado' : 'sem categoria';
+    if (!window.confirm(`Excluir ${itemLabel} “${item.name}”? Os lançamentos existentes serão preservados e ficarão ${unlinkLabel}.`)) return;
+    setDeletingCatalogId(item.id);
+    try {
+      await window.lionPocket.deleteCatalogItem(itemType, item.id);
+      if (editingCardId === item.id) cancelCardEdit();
+      await refreshCatalogs();
+      notify(`${itemType === 'card' ? 'Cartão' : 'Categoria'} excluída.`);
+    } finally {
+      setDeletingCatalogId('');
+    }
+  };
+  const categoryList = (categoryKind: MoneyKind) => catalogs.categories.filter((item) => item.kind === categoryKind);
   return (
     <section className="page-section settings-grid">
       <div className="panel settings-panel">
@@ -46,15 +89,52 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
 
       <div className="panel settings-panel settings-panel--wide">
         <header className="panel__header"><div><h3>Listas personalizadas</h3><p>Adicione categorias, formas de pagamento e cartões aos formulários.</p></div></header>
-        <form className="catalog-form" onSubmit={addCatalog}>
-          <SelectField label="Tipo de lista" value={type} onChange={(value) => setType(value as CatalogInput['type'])} options={[{ value: 'category', label: 'Categoria' }, { value: 'paymentMethod', label: 'Forma de pagamento' }, { value: 'card', label: 'Cartão' }]} />
+        <form className={`catalog-form ${type === 'card' ? 'catalog-form--card' : ''}`} onSubmit={addCatalog}>
+          <SelectField label="Tipo de lista" value={type} onChange={chooseType} options={[{ value: 'category', label: 'Categoria' }, { value: 'paymentMethod', label: 'Forma de pagamento' }, { value: 'card', label: 'Cartão' }]} />
           {type === 'category' && <SelectField label="Usada em" value={kind} onChange={(value) => setKind(value as MoneyKind)} options={[{ value: 'expense', label: 'Saídas' }, { value: 'income', label: 'Entradas' }]} />}
           <label className="field catalog-form__name"><span>Nome</span><input required value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Digite o nome" /></label>
-          <button className="button button--primary"><Plus size={17} /> Adicionar</button>
+          {type === 'card' && <label className="field"><span>Dia do fechamento</span><input required min="1" max="31" type="number" value={cardClosingDay} onChange={(event) => setCardClosingDay(event.target.value)} /></label>}
+          {type === 'card' && <label className="field"><span>Dia do vencimento</span><input required min="1" max="31" type="number" value={cardDueDay} onChange={(event) => setCardDueDay(event.target.value)} /></label>}
+          <div className="catalog-form__actions">
+            {editingCardId && <button type="button" className="button button--ghost" onClick={cancelCardEdit}>Cancelar</button>}
+            <button className="button button--primary">{editingCardId ? <Pencil size={17} /> : <Plus size={17} />}{editingCardId ? 'Salvar' : 'Adicionar'}</button>
+          </div>
         </form>
         <div className="catalog-columns">
-          <div><h4>Categorias de saída <span>{catalogs.categories.filter((item) => item.kind === 'expense').length}</span></h4><div className="tag-list">{catalogs.categories.filter((item) => item.kind === 'expense').map((item) => <span key={item.id}><i style={{ background: item.color }} />{item.name}</span>)}</div></div>
-          <div><h4>Formas e cartões</h4><div className="tag-list">{catalogs.paymentMethods.map((item) => <span key={item.id}>{item.name}</span>)}{catalogs.cards.map((item) => <span className="tag-card" key={item.id}>{item.name}</span>)}</div></div>
+          <div className="catalog-category-groups">
+            {(['income', 'expense'] as const).map((categoryKind) => (
+              <div key={categoryKind}>
+                <h4>Categorias de {categoryKind === 'income' ? 'entrada' : 'saída'} <span>{categoryList(categoryKind).length}</span></h4>
+                <div className="tag-list">{categoryList(categoryKind).map((item) => (
+                  <span key={item.id}>
+                    <i style={{ background: item.color }} />{item.name}
+                    <button
+                      type="button"
+                      className="tag-item__action tag-item__action--danger"
+                      disabled={deletingCatalogId === item.id}
+                      onClick={() => deleteCatalogItem('category', item)}
+                      title={`Excluir ${item.name}`}
+                      aria-label={`Excluir categoria ${item.name}`}
+                    ><Trash2 size={12} /></button>
+                  </span>
+                ))}</div>
+              </div>
+            ))}
+          </div>
+          <div><h4>Formas e cartões</h4><div className="tag-list">{catalogs.paymentMethods.map((item) => <span key={item.id}>{item.name}</span>)}{catalogs.cards.map((item) => (
+            <span className="tag-card" key={item.id}>
+              {item.name} · {item.closingDay === null ? 'fechamento não configurado' : `fecha dia ${item.closingDay}`} · vence dia {item.dueDay}
+              <button type="button" className="tag-item__action" onClick={() => editCard(item)} title={`Editar ${item.name}`} aria-label={`Editar cartão ${item.name}`}><Pencil size={12} /></button>
+              <button
+                type="button"
+                className="tag-item__action tag-item__action--danger"
+                disabled={deletingCatalogId === item.id}
+                onClick={() => deleteCatalogItem('card', item)}
+                title={`Excluir ${item.name}`}
+                aria-label={`Excluir cartão ${item.name}`}
+              ><Trash2 size={12} /></button>
+            </span>
+          ))}</div></div>
         </div>
       </div>
     </section>

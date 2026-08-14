@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import {
   ArrowDownRight,
   ArrowUpRight,
   CalendarClock,
+  Check,
   ChevronRight,
   CircleDollarSign,
   PiggyBank,
@@ -13,7 +15,7 @@ import {
 } from 'lucide-react';
 import type { Overview, Transaction } from '../../shared/types';
 import { EmptyState, ProgressBar, Skeleton } from '../components';
-import { compactCurrency, currency, formatDate } from '../format';
+import { compactCurrency, currency, formatDate, monthLabel } from '../format';
 
 const MetricCard = ({
   label,
@@ -41,28 +43,158 @@ const MetricCard = ({
 );
 
 const AnnualChart = ({ overview }: { overview: Overview }) => {
+  const [activeBar, setActiveBar] = useState<{ month: string; kind: 'income' | 'expense' } | null>(null);
   const values = overview.annual.flatMap((item) => [item.plannedIncome, item.plannedExpenses]);
   const max = Math.max(...values, 1);
   const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   return (
     <div className="annual-chart">
-      {overview.annual.map((item, index) => (
-        <div className="annual-chart__month" key={item.month} title={`${months[index]} — entradas ${currency.format(item.plannedIncome)}, saídas ${currency.format(item.plannedExpenses)}`}>
+      {overview.annual.map((item, index) => {
+        const activeKind = activeBar?.month === item.month ? activeBar.kind : null;
+        const activate = (kind: 'income' | 'expense') => setActiveBar({ month: item.month, kind });
+        const toggle = (kind: 'income' | 'expense') => setActiveBar((current) =>
+          current?.month === item.month && current.kind === kind ? null : { month: item.month, kind },
+        );
+        return <div className="annual-chart__month" key={item.month}>
           <div className="annual-chart__bars">
-            <span className="annual-chart__bar annual-chart__bar--income" style={{ height: `${Math.max(4, (item.plannedIncome / max) * 100)}%` }} />
-            <span className="annual-chart__bar annual-chart__bar--expense" style={{ height: `${Math.max(4, (item.plannedExpenses / max) * 100)}%` }} />
+            <button
+              type="button"
+              className="annual-chart__bar annual-chart__bar--income"
+              style={{ height: `${Math.max(4, (item.plannedIncome / max) * 100)}%` }}
+              aria-label={`${monthLabel(item.month)}: entradas ${currency.format(item.plannedIncome)}`}
+              onMouseEnter={() => activate('income')}
+              onMouseLeave={() => setActiveBar(null)}
+              onFocus={() => activate('income')}
+              onBlur={() => setActiveBar(null)}
+              onClick={() => toggle('income')}
+            />
+            <button
+              type="button"
+              className="annual-chart__bar annual-chart__bar--expense"
+              style={{ height: `${Math.max(4, (item.plannedExpenses / max) * 100)}%` }}
+              aria-label={`${monthLabel(item.month)}: saídas ${currency.format(item.plannedExpenses)}`}
+              onMouseEnter={() => activate('expense')}
+              onMouseLeave={() => setActiveBar(null)}
+              onFocus={() => activate('expense')}
+              onBlur={() => setActiveBar(null)}
+              onClick={() => toggle('expense')}
+            />
           </div>
           <small>{months[index]}</small>
-        </div>
-      ))}
+          {activeKind && (
+            <div className={`chart-tooltip chart-tooltip--annual ${index < 2 ? 'is-left' : ''} ${index > 9 ? 'is-right' : ''}`} role="tooltip">
+              <strong>{monthLabel(item.month)}</strong>
+              {activeKind === 'income'
+                ? <span><i className="legend-income" /> Entradas <b className="money-positive">{currency.format(item.plannedIncome)}</b></span>
+                : <span><i className="legend-expense" /> Saídas <b className="money-negative">{currency.format(item.plannedExpenses)}</b></span>}
+            </div>
+          )}
+        </div>;
+      })}
     </div>
   );
 };
 
-const TransactionRow = ({ item }: { item: Transaction }) => {
+const SpendingChart = ({ overview, total }: {
+  overview: Overview;
+  total: number;
+}) => {
+  const [activeCategory, setActiveCategory] = useState<number | null>(null);
+  let progress = 0;
+  const segments = overview.categoryBreakdown.map((item, index) => {
+    const percentage = total > 0 ? (item.amount / total) * 100 : 0;
+    const segment = { item, index, percentage, offset: progress };
+    progress += percentage;
+    return segment;
+  });
+  const gradient = segments
+    .map(({ item, percentage, offset }) => `${item.color} ${offset}% ${offset + percentage}%`)
+    .join(', ');
+  const selectedSegment = activeCategory === null ? null : segments[activeCategory];
+  const highlightGradient = selectedSegment
+    ? `conic-gradient(transparent 0 ${selectedSegment.offset}%, rgba(255, 255, 255, 0.16) ${selectedSegment.offset}% ${selectedSegment.offset + selectedSegment.percentage}%, transparent ${selectedSegment.offset + selectedSegment.percentage}% 100%)`
+    : 'none';
+  const tooltipPosition = selectedSegment ? (() => {
+    const angle = ((selectedSegment.offset + selectedSegment.percentage / 2) / 100) * Math.PI * 2 - Math.PI / 2;
+    const xDirection = Math.cos(angle);
+    const yDirection = Math.sin(angle);
+    const radius = 58;
+    const verticalTransform = yDirection > 0
+      ? 'translate(-50%, 10px)'
+      : 'translate(-50%, calc(-100% - 10px))';
+    const transform = Math.abs(xDirection) > Math.abs(yDirection) && xDirection > 0
+      ? 'translate(10px, -50%)'
+      : verticalTransform;
+    return {
+      left: `${50 + xDirection * radius}%`,
+      top: `${50 + yDirection * radius}%`,
+      transform,
+    };
+  })() : undefined;
+  return (
+    <div className="spending-body" onMouseLeave={() => setActiveCategory(null)}>
+      <div className="donut-wrap">
+        <div className="donut" style={{ background: `conic-gradient(${gradient})` }} aria-label={`Total distribuído: ${currency.format(total)}`}>
+          <svg className="donut__segments" viewBox="0 0 100 100" role="img" aria-label="Distribuição das saídas por categoria">
+            {segments.map(({ item, index, percentage, offset }) => (
+              <circle
+                className={`donut__segment ${activeCategory === index ? 'is-active' : ''}`}
+                key={item.name}
+                cx="50"
+                cy="50"
+                r="42"
+                pathLength="100"
+                stroke="rgba(255, 255, 255, 0.001)"
+                strokeDasharray={`${percentage} ${100 - percentage}`}
+                strokeDashoffset={-offset}
+                transform="rotate(-90 50 50)"
+                tabIndex={0}
+                role="button"
+                aria-label={`${item.name}: ${currency.format(item.amount)}`}
+                onMouseEnter={() => setActiveCategory(index)}
+                onMouseLeave={() => setActiveCategory(null)}
+                onFocus={() => setActiveCategory(index)}
+                onBlur={() => setActiveCategory(null)}
+              />
+            ))}
+          </svg>
+          <div
+            className={`donut__highlight ${selectedSegment ? 'is-visible' : ''}`}
+            style={{ background: highlightGradient }}
+            aria-hidden="true"
+          />
+          <div className="donut__center"><span>Total</span><strong>{compactCurrency.format(total)}</strong></div>
+          {selectedSegment && (
+            <div className="chart-tooltip chart-tooltip--donut" role="tooltip" style={tooltipPosition}>
+              <strong>{selectedSegment.item.name}</strong>
+              <span>{currency.format(selectedSegment.item.amount)}</span>
+              <small>{Math.round(selectedSegment.percentage)}% das saídas</small>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="category-legend">
+        {overview.categoryBreakdown.map((item, index) => (
+          <button
+            type="button"
+            key={item.name}
+            onMouseEnter={() => setActiveCategory(index)}
+            onFocus={() => setActiveCategory(index)}
+            onBlur={() => setActiveCategory(null)}
+            onClick={() => setActiveCategory((current) => current === index ? null : index)}
+          >
+            <span><i style={{ background: item.color }} />{item.name}</span><strong>{currency.format(item.amount)}</strong>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const TransactionRow = ({ item, onEdit }: { item: Transaction; onEdit: (item: Transaction) => void }) => {
   const isIncome = item.kind === 'income';
   return (
-    <div className="mini-transaction">
+    <button type="button" className="mini-transaction" onClick={() => onEdit(item)} aria-label={`Editar ${item.description}`}>
       <div className="category-dot" style={{ background: item.categoryColor ?? 'var(--text-muted)' }}>
         {isIncome ? <ArrowUpRight size={17} /> : <ArrowDownRight size={17} />}
       </div>
@@ -73,7 +205,7 @@ const TransactionRow = ({ item }: { item: Transaction }) => {
       <strong className={isIncome ? 'money-positive' : 'money-negative'}>
         {isIncome ? '+' : '−'} {currency.format(item.actualAmount ?? item.plannedAmount)}
       </strong>
-    </div>
+    </button>
   );
 };
 
@@ -82,27 +214,23 @@ export const Dashboard = ({
   loading,
   onAddTransaction,
   onNavigate,
+  onEditTransaction,
+  onSettleTransaction,
 }: {
   overview: Overview | null;
   loading: boolean;
   onAddTransaction: () => void;
   onNavigate: (view: string) => void;
+  onEditTransaction: (item: Transaction) => void;
+  onSettleTransaction: (item: Transaction) => Promise<boolean>;
 }) => {
+  const [settlingId, setSettlingId] = useState('');
   if (loading || !overview) {
     return <div className="dashboard-grid"><Skeleton className="skeleton--hero" /><Skeleton className="skeleton--hero" /><Skeleton className="skeleton--panel" /><Skeleton className="skeleton--panel" /></div>;
   }
 
   const { summary } = overview;
   const totalCategories = overview.categoryBreakdown.reduce((sum, item) => sum + item.amount, 0);
-  const gradient = overview.categoryBreakdown.length
-    ? overview.categoryBreakdown.reduce<{ stops: string[]; progress: number }>((result, item) => {
-        const start = result.progress;
-        const end = start + (item.amount / totalCategories) * 100;
-        result.stops.push(`${item.color} ${start}% ${end}%`);
-        result.progress = end;
-        return result;
-      }, { stops: [], progress: 0 }).stops.join(', ')
-    : 'var(--surface-3) 0 100%';
 
   return (
     <div className="dashboard">
@@ -125,16 +253,7 @@ export const Dashboard = ({
         <section className="panel spending-panel">
           <header className="panel__header"><div><span className="eyebrow">Distribuição</span><h3>Para onde vai</h3></div></header>
           {overview.categoryBreakdown.length ? (
-            <div className="spending-body">
-              <div className="donut-wrap">
-                <div className="donut" style={{ background: `conic-gradient(${gradient})` }}><div><span>Total</span><strong>{compactCurrency.format(totalCategories)}</strong></div></div>
-              </div>
-              <div className="category-legend">
-                {overview.categoryBreakdown.slice(0, 4).map((item) => (
-                  <div key={item.name}><span><i style={{ background: item.color }} />{item.name}</span><strong>{currency.format(item.amount)}</strong></div>
-                ))}
-              </div>
-            </div>
+            <SpendingChart overview={overview} total={totalCategories} />
           ) : <EmptyState icon={<CircleDollarSign />} title="Tudo tranquilo por aqui" description="As categorias aparecem quando você adiciona suas saídas." />}
         </section>
 
@@ -146,9 +265,24 @@ export const Dashboard = ({
           <div className="upcoming-list">
             {overview.upcoming.length ? overview.upcoming.map((item) => (
               <div className="upcoming-item" key={item.id}>
-                <div className="date-badge"><strong>{formatDate(item.dueDate, 'dd')}</strong><span>{formatDate(item.dueDate, 'MMM')}</span></div>
-                <div><strong>{item.description}</strong><span>{item.categoryName ?? 'Sem categoria'}</span></div>
-                <strong>{currency.format(item.plannedAmount)}</strong>
+                <button type="button" className="upcoming-item__open" onClick={() => onEditTransaction(item)} aria-label={`Editar ${item.description}`}>
+                  <span className="date-badge"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
+                  <span className="upcoming-item__copy"><strong>{item.description}</strong><small>{item.categoryName ?? 'Sem categoria'}</small></span>
+                  <strong>{currency.format(item.plannedAmount)}</strong>
+                </button>
+                <button
+                  type="button"
+                  className="icon-button icon-button--success upcoming-item__check"
+                  title="Marcar como paga"
+                  aria-label={`Marcar ${item.description} como paga`}
+                  disabled={settlingId === item.id}
+                  onClick={async () => {
+                    setSettlingId(item.id);
+                    try { await onSettleTransaction(item); } finally { setSettlingId(''); }
+                  }}
+                >
+                  <Check size={17} />
+                </button>
               </div>
             )) : <EmptyState icon={<CalendarClock />} title="Nada em aberto neste mês" description="As saídas ainda não pagas deste mês aparecem aqui." />}
           </div>
@@ -160,7 +294,7 @@ export const Dashboard = ({
             <button className="text-button" onClick={() => onNavigate('transactions')}>Abrir lista <ChevronRight size={16} /></button>
           </header>
           <div className="mini-list">
-            {overview.recent.length ? overview.recent.map((item) => <TransactionRow key={item.id} item={item} />) : <EmptyState icon={<ReceiptText />} title="Seu mês começa aqui" description="Adicione a primeira entrada ou saída para acompanhar o movimento." action={<button className="button button--soft" onClick={onAddTransaction}><Plus size={16} /> Adicionar</button>} />}
+            {overview.recent.length ? overview.recent.map((item) => <TransactionRow key={item.id} item={item} onEdit={onEditTransaction} />) : <EmptyState icon={<ReceiptText />} title="Seu mês começa aqui" description="Adicione a primeira entrada ou saída para acompanhar o movimento." action={<button className="button button--soft" onClick={onAddTransaction}><Plus size={16} /> Adicionar</button>} />}
           </div>
         </section>
 
@@ -172,11 +306,11 @@ export const Dashboard = ({
           {overview.goals.length ? (
             <div className="goal-mini-grid">
               {overview.goals.map((goal) => (
-                <article className="goal-mini" key={goal.id}>
+                <button type="button" className="goal-mini" key={goal.id} onClick={() => onNavigate('goals')} aria-label={`Abrir objetivo ${goal.name}`}>
                   <div className="goal-mini__icon"><Target size={20} /></div>
                   <div className="goal-mini__copy"><strong>{goal.name}</strong><span>{currency.format(goal.savedAmount)} de {currency.format(goal.targetAmount)}</span><ProgressBar value={goal.progress} /></div>
                   <strong>{Math.round(goal.progress * 100)}%</strong>
-                </article>
+                </button>
               ))}
             </div>
           ) : <EmptyState icon={<PiggyBank />} title="Um sonho cabe aqui" description="Crie um objetivo para acompanhar quanto já guardou e quanto ainda falta." action={<button className="button button--soft" onClick={() => onNavigate('goals')}><Plus size={16} /> Criar objetivo</button>} />}
