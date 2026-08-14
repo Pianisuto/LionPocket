@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDownRight, ArrowUpRight, Check, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Check, CheckCheck, History, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import type { Transaction, TransactionFilters } from '../../shared/types';
 import { EmptyState, SearchField, SelectControl } from '../components';
-import { currency, formatDate, statusLabel } from '../format';
+import { currency, currentMonthIso, formatDate, monthLabel, statusLabel } from '../format';
 
 export const Transactions = ({
   month,
@@ -37,9 +37,28 @@ export const Transactions = ({
     return result;
   }, { income: 0, expense: 0 }), [items]);
 
+  // O mês já virou: o que ficou como "planejado" quase sempre é só um registro
+  // que faltou marcar, e dá para resolver tudo de uma vez.
+  const closedMonth = month < currentMonthIso();
+  const pending = useMemo(() => items.filter((item) => item.status === 'planned'), [items]);
+  const pendingTotal = useMemo(
+    () => pending.reduce((sum, item) => sum + item.plannedAmount, 0),
+    [pending],
+  );
+
   const settle = async (item: Transaction) => {
     await window.lionPocket.settleTransaction(item.id);
     notify(item.kind === 'income' ? 'Entrada marcada como recebida.' : 'Conta marcada como paga.');
+    onChanged();
+  };
+
+  const settleAllPending = async () => {
+    const question = pending.length === 1
+      ? `Concluir “${pending[0].description}” usando o valor planejado como valor real?`
+      : `Concluir os ${pending.length} lançamentos pendentes de ${monthLabel(month)} usando o valor planejado como valor real?`;
+    if (!window.confirm(question)) return;
+    const settled = await window.lionPocket.settleTransactions(pending.map((item) => item.id));
+    notify(settled === 1 ? 'Lançamento concluído.' : `${settled} lançamentos concluídos.`);
     onChanged();
   };
 
@@ -52,6 +71,20 @@ export const Transactions = ({
 
   return (
     <section className="page-section">
+      {closedMonth && pending.length > 0 && !loading && (
+        <div className="feature-banner feature-banner--backfill">
+          <div className="feature-banner__icon"><History size={25} /></div>
+          <div>
+            <span>Mês já encerrado</span>
+            <h3>{pending.length === 1 ? '1 lançamento ainda em aberto' : `${pending.length} lançamentos ainda em aberto`}</h3>
+            <p>{monthLabel(month)} já passou. Some {currency.format(pendingTotal)} e provavelmente já aconteceu — dá para concluir tudo de uma vez.</p>
+          </div>
+          <button className="button button--primary" onClick={settleAllPending}>
+            <CheckCheck size={18} /> Concluir pendentes
+          </button>
+        </div>
+      )}
+
       <div className="summary-strip">
         <div><span>Entradas na lista</span><strong className="money-positive">{currency.format(totals.income)}</strong></div>
         <div><span>Saídas na lista</span><strong className="money-negative">{currency.format(totals.expense)}</strong></div>

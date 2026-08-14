@@ -6,6 +6,7 @@ import type {
   CatalogInput,
   GoalInput,
   InstallmentPurchaseInput,
+  MoneyKind,
   RecurringExpenseInput,
   TransactionFilters,
   TransactionInput,
@@ -48,6 +49,12 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
   );
   ipcMain.handle('transactions:delete', (_event, id: string) => database.deleteTransaction(id));
   ipcMain.handle('transactions:settle', (_event, id: string) => database.settleTransaction(id));
+  ipcMain.handle('transactions:settle-many', (_event, ids: string[]) =>
+    database.settleTransactions(ids),
+  );
+  ipcMain.handle('transactions:suggest', (_event, kind: MoneyKind, term: string) =>
+    database.suggestTransactions(kind, term),
+  );
   ipcMain.handle('recurring:list', () => database.listRecurringExpenses());
   ipcMain.handle('recurring:save', (_event, input: RecurringExpenseInput) =>
     database.saveRecurringExpense(input),

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
-import { formatDate, monthLabel, todayIso } from './format';
+import { currentMonthIso, formatDate, localDateIso, monthLabel, todayIso } from './format';
 
 export const MonthPicker = ({
   month,
@@ -21,7 +21,7 @@ export const MonthPicker = ({
       <button className="icon-button" onClick={() => move(-1)} aria-label="Mês anterior">
         <ChevronLeft size={18} />
       </button>
-      <button className="month-picker__label" onClick={() => onChange(new Date().toISOString().slice(0, 7))}>
+      <button className="month-picker__label" onClick={() => onChange(currentMonthIso())}>
         {monthLabel(month)}
       </button>
       <button className="icon-button" onClick={() => move(1)} aria-label="Próximo mês">
@@ -62,24 +62,36 @@ export const Modal = ({
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
-}) => (
-  <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
-    if (event.currentTarget === event.target) onClose();
-  }}>
-    <section className={`modal ${wide ? 'modal--wide' : ''}`} role="dialog" aria-modal="true">
-      <header className="modal__header">
-        <div>
-          <h2>{title}</h2>
-          {description && <p>{description}</p>}
-        </div>
-        <button className="icon-button" onClick={onClose} aria-label="Fechar">
-          <X size={20} />
-        </button>
-      </header>
-      {children}
-    </section>
-  </div>
-);
+}) => {
+  // Esc fecha. Quem estiver com um menu ou calendário aberto por cima marca o
+  // evento como tratado, então o formulário inteiro não some junto.
+  useEffect(() => {
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) onClose();
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.currentTarget === event.target) onClose();
+    }}>
+      <section className={`modal ${wide ? 'modal--wide' : ''}`} role="dialog" aria-modal="true">
+        <header className="modal__header">
+          <div>
+            <h2>{title}</h2>
+            {description && <p>{description}</p>}
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Fechar">
+            <X size={20} />
+          </button>
+        </header>
+        {children}
+      </section>
+    </div>
+  );
+};
 
 export const SearchField = ({ value, onChange, placeholder = 'Buscar' }: {
   value: string;
@@ -175,17 +187,21 @@ export const SelectControl = ({
       const target = event.target as Node;
       if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) closeMenu();
     };
+    // Na captura e marcando o evento: assim o Esc fecha só a lista, e não o
+    // formulário inteiro que está atrás dela.
     const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') closeMenu(true);
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeMenu(true);
     };
     document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handleEscape, true);
     window.addEventListener('resize', updateMenuPosition);
     window.addEventListener('scroll', updateMenuPosition, true);
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleEscape, true);
       window.removeEventListener('resize', updateMenuPosition);
       window.removeEventListener('scroll', updateMenuPosition, true);
     };
@@ -270,12 +286,6 @@ const parseLocalDate = (value: string) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const localDateIso = (date: Date) => [
-  date.getFullYear(),
-  String(date.getMonth() + 1).padStart(2, '0'),
-  String(date.getDate()).padStart(2, '0'),
-].join('-');
-
 export const DateField = ({
   label,
   value,
@@ -334,15 +344,17 @@ export const DateField = ({
       if (!triggerRef.current?.contains(target) && !calendarRef.current?.contains(target)) closeCalendar();
     };
     const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') closeCalendar(true);
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeCalendar(true);
     };
     document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handleEscape, true);
     window.addEventListener('resize', updateCalendarPosition);
     window.addEventListener('scroll', updateCalendarPosition, true);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleEscape, true);
       window.removeEventListener('resize', updateCalendarPosition);
       window.removeEventListener('scroll', updateCalendarPosition, true);
     };

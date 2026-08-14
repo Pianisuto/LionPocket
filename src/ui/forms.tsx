@@ -1,18 +1,30 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { History, Link2 } from 'lucide-react';
 import type {
   Catalogs,
   Goal,
   GoalInput,
   InstallmentPurchaseInput,
+  MoneyKind,
   RecurringExpense,
   RecurringExpenseInput,
   Transaction,
   TransactionInput,
+  TransactionStatus,
+  TransactionSuggestion,
 } from '../shared/types';
 import { DateField, Modal, SelectField } from './components';
-import { todayIso } from './format';
+import { currency, isPastDate, settlementDateFor, todayIso } from './format';
 
 const moneyValue = (value: number | null | undefined) => (value === null || value === undefined ? '' : String(value));
+
+const settledStatusFor = (kind: MoneyKind): TransactionStatus => (kind === 'income' ? 'received' : 'paid');
+
+const isSettled = (status: TransactionStatus) => status === 'paid' || status === 'received';
+
+/** A situação que combina com a data: o que venceu antes de hoje já aconteceu. */
+const statusForDate = (date: string, kind: MoneyKind): TransactionStatus =>
+  isPastDate(date) ? settledStatusFor(kind) : 'planned';
 
 export const TransactionForm = ({
   transaction,
@@ -24,73 +36,251 @@ export const TransactionForm = ({
   transaction?: Transaction | null;
   catalogs: Catalogs;
   defaultDate: string;
-  onSave: (input: TransactionInput) => Promise<void>;
+  onSave: (input: TransactionInput, options?: { keepOpen?: boolean }) => Promise<boolean>;
   onClose: () => void;
 }) => {
-  const [kind, setKind] = useState(transaction?.kind ?? 'expense');
+  const [kind, setKind] = useState<MoneyKind>(transaction?.kind ?? 'expense');
   const [description, setDescription] = useState(transaction?.description ?? '');
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? '');
   const [plannedAmount, setPlannedAmount] = useState(moneyValue(transaction?.plannedAmount));
   const [actualAmount, setActualAmount] = useState(moneyValue(transaction?.actualAmount));
   const [dueDate, setDueDate] = useState(transaction?.dueDate ?? defaultDate);
-  const [status, setStatus] = useState(transaction?.status ?? 'planned');
+  const [status, setStatus] = useState<TransactionStatus>(
+    transaction?.status ?? statusForDate(transaction?.dueDate ?? defaultDate, transaction?.kind ?? 'expense'),
+  );
+  // Enquanto ninguém escolher uma situação à mão, ela continua acompanhando a
+  // data — mexer no calendário deixa de exigir um segundo ajuste.
+  const [statusChosen, setStatusChosen] = useState(Boolean(transaction));
   const [paymentMethodId, setPaymentMethodId] = useState(transaction?.paymentMethodId ?? '');
   const [cardId, setCardId] = useState(transaction?.cardId ?? '');
   const [notes, setNotes] = useState(transaction?.notes ?? '');
   const [saving, setSaving] = useState(false);
-  const categories = catalogs.categories.filter((category) => category.kind === kind);
+  const [savedCount, setSavedCount] = useState(0);
+  // Planejado e real andam juntos até você digitar um valor real diferente.
+  // Na maioria dos lançamentos já acontecidos os dois são o mesmo número.
+  const [amountsLinked, setAmountsLinked] = useState(
+    !transaction || transaction.actualAmount === null || transaction.actualAmount === transaction.plannedAmount,
+  );
+  const [suggestions, setSuggestions] = useState<TransactionSuggestion[]>([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const descriptionId = useId();
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const categories = catalogs.categories.filter((category) => category.kind === kind);
+  const settled = isSettled(status);
+  const backfilling = isPastDate(dueDate);
+
+  useEffect(() => {
+    const term = description.trim();
+    if (!suggestionsOpen || term.length < 2) {
+      setSuggestions([]);
+      return undefined;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      window.lionPocket
+        .suggestTransactions(kind, term)
+        .then((items) => {
+          if (active) setSuggestions(items);
+        })
+        .catch(() => undefined);
+    }, 160);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [description, kind, suggestionsOpen]);
+
+  const applyKind = (next: MoneyKind) => {
+    setKind(next);
+    setCategoryId('');
+    if (next === 'income') {
+      setPaymentMethodId('');
+      setCardId('');
+    }
+    if (!statusChosen) setStatus(statusForDate(dueDate, next));
+    else if (settled) setStatus(settledStatusFor(next));
+  };
+
+  const applyDueDate = (value: string) => {
+    setDueDate(value);
+    if (statusChosen) return;
+    const nextStatus = statusForDate(value, kind);
+    setStatus(nextStatus);
+    if (amountsLinked) setActualAmount(isSettled(nextStatus) ? plannedAmount : '');
+  };
+
+  const applyStatus = (value: TransactionStatus) => {
+    setStatus(value);
+    setStatusChosen(true);
+    if (!amountsLinked) return;
+    setActualAmount(isSettled(value) ? plannedAmount : '');
+  };
+
+  const applyPlanned = (value: string) => {
+    setPlannedAmount(value);
+    if (amountsLinked && settled) setActualAmount(value);
+  };
+
+  const applyActual = (value: string) => {
+    setActualAmount(value);
+    if (plannedAmount === '') {
+      setPlannedAmount(value);
+      setAmountsLinked(true);
+      return;
+    }
+    setAmountsLinked(value === plannedAmount);
+  };
+
+  /** Repete um lançamento antigo: só completa o que ainda está em branco. */
+  const applySuggestion = (item: TransactionSuggestion) => {
+    setDescription(item.description);
+    setSuggestionsOpen(false);
+    if (item.categoryId && !categoryId) setCategoryId(item.categoryId);
+    if (item.paymentMethodId && !paymentMethodId && kind === 'expense') setPaymentMethodId(item.paymentMethodId);
+    if (item.cardId && !cardId && kind === 'expense') setCardId(item.cardId);
+    if (item.amount > 0 && plannedAmount === '') {
+      const value = String(item.amount);
+      setPlannedAmount(value);
+      if (amountsLinked && settled) setActualAmount(value);
+    }
+    descriptionRef.current?.focus();
+  };
+
+  /** Limpa só o que muda de um lançamento para o outro. */
+  const resetForNext = () => {
+    setDescription('');
+    setPlannedAmount('');
+    setActualAmount('');
+    setNotes('');
+    setAmountsLinked(true);
+    setSuggestionsOpen(false);
+    setSuggestions([]);
+    descriptionRef.current?.focus();
+  };
+
+  const persist = async (keepOpen: boolean) => {
     setSaving(true);
     try {
-      const finalStatus = kind === 'income' && status === 'paid' ? 'received' : status;
-      await onSave({
-        id: transaction?.id,
-        kind,
-        description,
-        categoryId: categoryId || null,
-        plannedAmount: Number(plannedAmount),
-        actualAmount: actualAmount === '' ? null : Number(actualAmount),
-        dueDate,
-        settledDate: ['paid', 'received'].includes(finalStatus) ? transaction?.settledDate ?? todayIso() : null,
-        status: finalStatus,
-        paymentMethodId: paymentMethodId || null,
-        cardId: cardId || null,
-        notes,
-      });
+      const finalStatus = settled ? settledStatusFor(kind) : status;
+      const saved = await onSave(
+        {
+          id: transaction?.id,
+          kind,
+          description,
+          categoryId: categoryId || null,
+          plannedAmount: Number(plannedAmount),
+          actualAmount: actualAmount === '' ? null : Number(actualAmount),
+          dueDate,
+          settledDate: isSettled(finalStatus)
+            ? transaction?.settledDate ?? settlementDateFor(dueDate)
+            : null,
+          status: finalStatus,
+          paymentMethodId: paymentMethodId || null,
+          cardId: cardId || null,
+          notes,
+        },
+        { keepOpen },
+      );
+      if (saved && keepOpen) {
+        setSavedCount((count) => count + 1);
+        resetForNext();
+      }
     } finally {
       setSaving(false);
     }
   };
 
+  const saveAndContinue = () => {
+    if (!formRef.current?.reportValidity()) return;
+    void persist(true);
+  };
+
   return (
-    <Modal title={transaction ? 'Editar lançamento' : 'Novo lançamento'} description="Registre o planejado agora e confirme o valor real quando acontecer." onClose={onClose} wide>
-      <form onSubmit={submit} className="form-grid">
+    <Modal
+      title={transaction ? 'Editar lançamento' : 'Novo lançamento'}
+      description={backfilling
+        ? 'A data já passou, então o lançamento entra como concluído. É só conferir os valores.'
+        : 'Registre o planejado agora e confirme o valor real quando acontecer.'}
+      onClose={onClose}
+      wide
+    >
+      <form
+        ref={formRef}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void persist(false);
+        }}
+        className="form-grid"
+      >
         <div className="segmented form-grid__full">
-          <button type="button" className={kind === 'expense' ? 'active' : ''} onClick={() => { setKind('expense'); setCategoryId(''); setStatus('planned'); }}>Saída</button>
-          <button type="button" className={kind === 'income' ? 'active' : ''} onClick={() => { setKind('income'); setCategoryId(''); setStatus('planned'); }}>Entrada</button>
+          <button type="button" className={kind === 'expense' ? 'active' : ''} onClick={() => applyKind('expense')}>Saída</button>
+          <button type="button" className={kind === 'income' ? 'active' : ''} onClick={() => applyKind('income')}>Entrada</button>
         </div>
-        <label className="field form-grid__full">
-          <span>Descrição</span>
-          <input required autoFocus value={description} onChange={(event) => setDescription(event.target.value)} placeholder={kind === 'expense' ? 'Ex.: Supermercado' : 'Ex.: Salário'} />
-        </label>
+        <div className="field form-grid__full field--suggest">
+          <span><label htmlFor={descriptionId}>Descrição</label></span>
+          <input
+            id={descriptionId}
+            ref={descriptionRef}
+            required
+            autoFocus
+            autoComplete="off"
+            role="combobox"
+            aria-expanded={suggestionsOpen && suggestions.length > 0}
+            aria-autocomplete="list"
+            value={description}
+            onChange={(event) => { setDescription(event.target.value); setSuggestionsOpen(true); }}
+            onFocus={() => setSuggestionsOpen(true)}
+            onBlur={() => setSuggestionsOpen(false)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && suggestionsOpen && suggestions.length) {
+                event.preventDefault();
+                setSuggestionsOpen(false);
+              }
+            }}
+            placeholder={kind === 'expense' ? 'Ex.: Supermercado' : 'Ex.: Salário'}
+          />
+          {suggestionsOpen && suggestions.length > 0 && (
+            <div className="suggest-menu" role="listbox" aria-label="Lançamentos parecidos">
+              <span className="suggest-menu__title"><History size={13} /> Você já lançou</span>
+              {suggestions.map((item) => (
+                <button
+                  key={item.description}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  className="suggest-menu__option"
+                  onMouseDown={(event) => { event.preventDefault(); applySuggestion(item); }}
+                >
+                  <strong>{item.description}</strong>
+                  <small>{[item.categoryName ?? 'Sem categoria', item.amount > 0 ? currency.format(item.amount) : null].filter(Boolean).join(' · ')}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[
           { value: '', label: 'Sem categoria' },
           ...categories.map((category) => ({ value: category.id, label: category.name })),
         ]} />
-        <DateField label="Data prevista" value={dueDate} onChange={setDueDate} required />
+        <DateField label="Data prevista" value={dueDate} onChange={applyDueDate} required />
         <label className="field">
           <span>Valor planejado</span>
-          <div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={plannedAmount} onChange={(event) => setPlannedAmount(event.target.value)} /></div>
+          <div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={plannedAmount} onChange={(event) => applyPlanned(event.target.value)} /></div>
         </label>
         <label className="field">
-          <span>Valor real <small>(opcional)</small></span>
-          <div className="money-input"><span>R$</span><input min="0" step="0.01" type="number" value={actualAmount} onChange={(event) => setActualAmount(event.target.value)} /></div>
+          <span>
+            Valor real{' '}
+            {settled && amountsLinked
+              ? <small className="field__linked"><Link2 size={12} /> igual ao planejado</small>
+              : <small>(opcional)</small>}
+          </span>
+          <div className="money-input"><span>R$</span><input min="0" step="0.01" type="number" value={actualAmount} onChange={(event) => applyActual(event.target.value)} /></div>
         </label>
-        <SelectField label="Situação" value={status} onChange={(value) => setStatus(value as TransactionInput['status'])} options={[
+        <SelectField label="Situação" value={status} onChange={(value) => applyStatus(value as TransactionStatus)} options={[
           { value: 'planned', label: 'Planejado' },
-          { value: kind === 'income' ? 'received' : 'paid', label: kind === 'income' ? 'Recebido' : 'Pago' },
+          { value: settledStatusFor(kind), label: kind === 'income' ? 'Recebido' : 'Pago' },
           { value: 'cancelled', label: 'Cancelado' },
         ]} />
         <SelectField label="Forma de pagamento" value={paymentMethodId} onChange={setPaymentMethodId} disabled={kind === 'income'} options={[
@@ -106,7 +296,13 @@ export const TransactionForm = ({
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Algo importante sobre este lançamento?" rows={3} />
         </label>
         <div className="modal__actions form-grid__full">
-          <button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button>
+          {savedCount > 0 && <span className="modal__actions-note">{savedCount} {savedCount === 1 ? 'lançamento salvo' : 'lançamentos salvos'} nesta sessão</span>}
+          <button type="button" className="button button--ghost" onClick={onClose}>{savedCount > 0 ? 'Concluir' : 'Cancelar'}</button>
+          {!transaction && (
+            <button type="button" className="button button--soft" disabled={saving} onClick={saveAndContinue}>
+              Salvar e adicionar outro
+            </button>
+          )}
           <button className="button button--primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar lançamento'}</button>
         </div>
       </form>
@@ -117,7 +313,7 @@ export const TransactionForm = ({
 export const RecurringForm = ({ item, catalogs, onSave, onClose }: {
   item?: RecurringExpense | null;
   catalogs: Catalogs;
-  onSave: (input: RecurringExpenseInput) => Promise<void>;
+  onSave: (input: RecurringExpenseInput) => Promise<unknown>;
   onClose: () => void;
 }) => {
   const [description, setDescription] = useState(item?.description ?? '');
@@ -148,7 +344,7 @@ export const RecurringForm = ({ item, catalogs, onSave, onClose }: {
 
 export const InstallmentForm = ({ catalogs, onSave, onClose }: {
   catalogs: Catalogs;
-  onSave: (input: InstallmentPurchaseInput) => Promise<void>;
+  onSave: (input: InstallmentPurchaseInput) => Promise<unknown>;
   onClose: () => void;
 }) => {
   const creditMethod = useMemo(() => catalogs.paymentMethods.find((method) => method.name === 'Cartão de crédito'), [catalogs]);
@@ -183,7 +379,7 @@ export const InstallmentForm = ({ catalogs, onSave, onClose }: {
 export const GoalForm = ({ goal, catalogs, onSave, onClose }: {
   goal?: Goal | null;
   catalogs: Catalogs;
-  onSave: (input: GoalInput) => Promise<void>;
+  onSave: (input: GoalInput) => Promise<unknown>;
   onClose: () => void;
 }) => {
   const [name, setName] = useState(goal?.name ?? '');

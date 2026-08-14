@@ -1,6 +1,14 @@
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+export {
+  currentMonthIso,
+  isPastDate,
+  localDateIso,
+  settlementDateFor,
+  todayIso,
+} from '../shared/finance';
+
 export const currency = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
@@ -24,8 +32,6 @@ export const monthLabel = (month: string) => {
   const label = format(date, 'MMMM yyyy', { locale: ptBR });
   return label.charAt(0).toUpperCase() + label.slice(1);
 };
-
-export const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export const statusLabel = (status: string) =>
   ({

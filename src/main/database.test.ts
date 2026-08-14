@@ -75,28 +75,121 @@ describe('despesas fixas', () => {
   });
 });
 
-describe('contas a caminho', () => {
-  const plan = (
-    database: LionPocketDatabase,
-    kind: 'income' | 'expense',
-    description: string,
-    dueDate: string,
-    plannedAmount: number,
-  ) =>
+const plan = (
+  database: LionPocketDatabase,
+  kind: 'income' | 'expense',
+  description: string,
+  dueDate: string,
+  plannedAmount: number,
+) =>
+  database.saveTransaction({
+    kind,
+    description,
+    categoryId: null,
+    plannedAmount,
+    actualAmount: null,
+    dueDate,
+    settledDate: null,
+    status: 'planned',
+    paymentMethodId: null,
+    cardId: null,
+    notes: '',
+  });
+
+describe('meses já encerrados', () => {
+  it('quita a lista inteira usando o planejado e a data do vencimento', () => {
+    const database = createDatabase();
+    const internet = plan(database, 'expense', 'Internet', '2020-03-10', 120);
+    const salary = plan(database, 'income', 'Salário CLT', '2020-03-05', 4000);
+    const future = plan(database, 'expense', 'Luz', '2999-03-20', 300);
+    database.settleTransaction(future.id);
+
+    const settled = database.settleTransactions([internet.id, salary.id, future.id]);
+
+    // A conta futura já estava quitada e não entra na contagem.
+    expect(settled).toBe(2);
+    expect(database.listTransactions({ month: '2020-03' })).toMatchObject([
+      { description: 'Salário CLT', status: 'received', actualAmount: 4000, settledDate: '2020-03-05' },
+      { description: 'Internet', status: 'paid', actualAmount: 120, settledDate: '2020-03-10' },
+    ]);
+
+    database.db.close();
+  });
+
+  it('não mexe em quem já foi cancelado ou pago à mão', () => {
+    const database = createDatabase();
+    const bill = plan(database, 'expense', 'Aluguel', '2020-03-10', 1500);
     database.saveTransaction({
-      kind,
-      description,
+      id: bill.id,
+      kind: 'expense',
+      description: 'Aluguel',
       categoryId: null,
-      plannedAmount,
-      actualAmount: null,
-      dueDate,
-      settledDate: null,
-      status: 'planned',
+      plannedAmount: 1500,
+      actualAmount: 1480,
+      dueDate: '2020-03-10',
+      settledDate: '2020-03-08',
+      status: 'paid',
       paymentMethodId: null,
       cardId: null,
       notes: '',
     });
 
+    expect(database.settleTransactions([bill.id])).toBe(0);
+    expect(database.listTransactions({ month: '2020-03' })[0]).toMatchObject({
+      actualAmount: 1480,
+      settledDate: '2020-03-08',
+    });
+
+    database.db.close();
+  });
+});
+
+describe('sugestões de lançamento', () => {
+  it('devolve o lançamento parecido mais usado, com categoria e valor', () => {
+    const database = createDatabase();
+    const mercado = database.findOrCreateCategory('Alimentação', 'expense');
+    for (const month of ['01', '02', '03']) {
+      database.saveTransaction({
+        kind: 'expense',
+        description: 'Supermercado',
+        categoryId: mercado,
+        plannedAmount: 500,
+        actualAmount: month === '03' ? 540 : 500,
+        dueDate: `2020-${month}-08`,
+        settledDate: `2020-${month}-08`,
+        status: 'paid',
+        paymentMethodId: null,
+        cardId: null,
+        notes: '',
+      });
+    }
+    plan(database, 'expense', 'Super trunfo', '2020-04-08', 40);
+    plan(database, 'income', 'Supermercado devolução', '2020-04-09', 30);
+
+    const suggestions = database.suggestTransactions('expense', 'super');
+
+    expect(suggestions).toMatchObject([
+      { description: 'Supermercado', categoryName: 'Alimentação', amount: 540, uses: 3 },
+      { description: 'Super trunfo', amount: 40, uses: 1 },
+    ]);
+    // Uma entrada nunca vira sugestão de saída.
+    expect(suggestions.map((item) => item.description)).not.toContain('Supermercado devolução');
+    expect(database.suggestTransactions('expense', 's')).toEqual([]);
+
+    database.db.close();
+  });
+
+  it('trata % e _ como texto comum, não como curinga', () => {
+    const database = createDatabase();
+    plan(database, 'expense', 'Internet', '2020-05-10', 120);
+
+    expect(database.suggestTransactions('expense', '%e%')).toEqual([]);
+
+    database.db.close();
+  });
+});
+
+describe('contas a caminho', () => {
   it('mostra só despesas do mês aberto, sem entradas e sem outros meses', () => {
     const database = createDatabase();
 

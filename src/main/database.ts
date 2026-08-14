@@ -23,7 +23,9 @@ import {
   dateForMonthDay,
   fromCents,
   monthRange,
+  settlementDateFor,
   toCents,
+  todayIso,
 } from '../shared/finance';
 
 type Row = Record<string, string | number | null>;
@@ -535,11 +537,74 @@ export class LionPocketDatabase {
   settleTransaction(id: string) {
     const transaction = this.getTransaction(id);
     const status = transaction.kind === 'income' ? 'received' : 'paid';
-    const today = new Date().toISOString().slice(0, 10);
     this.db.prepare(`
       UPDATE transactions SET status = ?, actual_cents = COALESCE(actual_cents, planned_cents),
         settled_date = COALESCE(settled_date, ?), updated_at = ? WHERE id = ?
-    `).run(status, today, now(), id);
+    `).run(status, settlementDateFor(transaction.dueDate), now(), id);
+  }
+
+  /**
+   * Quita uma lista inteira de uma vez — o fecho de um mês antigo em um clique.
+   * Cada lançamento vira "pago" ou "recebido" conforme o tipo, assume o valor
+   * planejado como valor real e é datado no próprio vencimento.
+   */
+  settleTransactions(ids: string[]): number {
+    if (!ids.length) return 0;
+    const timestamp = now();
+    const today = todayIso();
+    const statement = this.db.prepare(`
+      UPDATE transactions
+      SET status = CASE kind WHEN 'income' THEN 'received' ELSE 'paid' END,
+        actual_cents = COALESCE(actual_cents, planned_cents),
+        settled_date = COALESCE(settled_date, MIN(due_date, ?)),
+        updated_at = ?
+      WHERE id = ? AND deleted_at IS NULL AND status = 'planned'
+    `);
+    let settled = 0;
+    this.db.exec('BEGIN');
+    try {
+      for (const id of ids) {
+        settled += Number(statement.run(today, timestamp, id).changes);
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+    return settled;
+  }
+
+  /**
+   * Lançamentos parecidos já registrados antes. Quem preenche vários meses
+   * digita as mesmas contas repetidas vezes; devolver categoria, forma de
+   * pagamento e último valor evita reescrever tudo de novo.
+   */
+  suggestTransactions(kind: 'income' | 'expense', term: string, limit = 6) {
+    const cleaned = term.trim();
+    if (cleaned.length < 2) return [];
+    const pattern = `%${cleaned.replace(/[\\%_]/g, '\\$&')}%`;
+    const rows = this.db.prepare(`
+      SELECT t.description, t.category_id AS categoryId, c.name AS categoryName,
+        t.payment_method_id AS paymentMethodId, t.card_id AS cardId,
+        COALESCE(t.actual_cents, t.planned_cents) AS amountCents,
+        MAX(t.due_date) AS lastDueDate, COUNT(*) AS uses
+      FROM transactions t
+      LEFT JOIN categories c ON c.id = t.category_id
+      WHERE t.deleted_at IS NULL AND t.kind = ? AND t.status != 'cancelled'
+        AND t.description LIKE ? ESCAPE '\\'
+      GROUP BY LOWER(t.description)
+      ORDER BY uses DESC, lastDueDate DESC
+      LIMIT ?
+    `).all(kind, pattern, limit) as unknown as Row[];
+    return rows.map((row) => ({
+      description: String(row.description),
+      categoryId: row.categoryId ? String(row.categoryId) : null,
+      categoryName: row.categoryName ? String(row.categoryName) : null,
+      paymentMethodId: row.paymentMethodId ? String(row.paymentMethodId) : null,
+      cardId: row.cardId ? String(row.cardId) : null,
+      amount: fromCents(Number(row.amountCents)) ?? 0,
+      uses: Number(row.uses),
+    }));
   }
 
   listRecurringExpenses(): RecurringExpense[] {

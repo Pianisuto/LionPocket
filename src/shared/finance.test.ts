@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { addMonths, calculateGoal, dateForMonthDay, fromCents, monthRange, toCents } from './finance';
+import {
+  addMonths,
+  calculateGoal,
+  dateForMonthDay,
+  fromCents,
+  isPastDate,
+  localDateIso,
+  monthRange,
+  settlementDateFor,
+  toCents,
+} from './finance';
 
 describe('regras financeiras', () => {
   it('guarda valores em centavos sem erro de ponto flutuante', () => {
@@ -14,6 +24,23 @@ describe('regras financeiras', () => {
   it('ajusta vencimentos para o último dia do mês', () => {
     expect(dateForMonthDay('2026-02', 31)).toBe('2026-02-28');
     expect(addMonths('2026-01-31', 1)).toBe('2026-02-28');
+  });
+
+  it('usa a data local, e não UTC, para saber que dia é hoje', () => {
+    // 23h de 14/08 em São Paulo já é 15/08 em UTC.
+    expect(localDateIso(new Date(2026, 7, 14, 23, 30))).toBe('2026-08-14');
+  });
+
+  it('reconhece uma data que já passou', () => {
+    expect(isPastDate('2026-07-10', '2026-08-14')).toBe(true);
+    expect(isPastDate('2026-08-14', '2026-08-14')).toBe(false);
+    expect(isPastDate('2026-09-01', '2026-08-14')).toBe(false);
+    expect(isPastDate('', '2026-08-14')).toBe(false);
+  });
+
+  it('data um lançamento antigo no próprio vencimento, não em hoje', () => {
+    expect(settlementDateFor('2026-07-10', '2026-08-14')).toBe('2026-07-10');
+    expect(settlementDateFor('2026-08-30', '2026-08-14')).toBe('2026-08-14');
   });
 
   it('calcula progresso e sugestão mensal de um objetivo', () => {

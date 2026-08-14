@@ -21,6 +21,7 @@ import { Leo } from './ui/Leo';
 import { TitleBar } from './ui/TitleBar';
 import { useTheme } from './ui/theme';
 import { GoalForm, InstallmentForm, RecurringForm, TransactionForm } from './ui/forms';
+import { currentMonthIso, todayIso } from './ui/format';
 import { Dashboard } from './ui/screens/Dashboard';
 import { Goals } from './ui/screens/Goals';
 import { Installments } from './ui/screens/Installments';
@@ -58,7 +59,7 @@ const pageCopy: Record<View, { title: string; subtitle: string }> = {
 export default function App() {
   const { theme, toggleTheme } = useTheme();
   const [view, setView] = useState<View>('dashboard');
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(currentMonthIso);
   const [catalogs, setCatalogs] = useState<Catalogs>(emptyCatalogs);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
@@ -96,20 +97,38 @@ export default function App() {
     };
   }, [month, refreshKey, notify]);
 
+  // Ctrl+N abre um lançamento novo de qualquer tela — quem está preenchendo
+  // um mês inteiro não precisa voltar ao botão a cada item.
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'n') return;
+      event.preventDefault();
+      setModal((current) => current ?? { type: 'transaction' });
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, []);
+
   const changed = useCallback(() => setRefreshKey((value) => value + 1), []);
   const defaultDate = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayIso();
     return today.startsWith(month) ? today : `${month}-01`;
   }, [month]);
 
-  const safeAction = async (action: () => Promise<void>, successMessage: string) => {
+  const safeAction = async (
+    action: () => Promise<void>,
+    successMessage: string,
+    keepOpen = false,
+  ) => {
     try {
       await action();
-      setModal(null);
+      if (!keepOpen) setModal(null);
       changed();
       notify(successMessage);
+      return true;
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Algo não saiu como esperado.');
+      return false;
     }
   };
 
@@ -245,10 +264,11 @@ export default function App() {
           catalogs={catalogs}
           defaultDate={defaultDate}
           onClose={() => setModal(null)}
-          onSave={(input) =>
+          onSave={(input, options) =>
             safeAction(
               () => window.lionPocket.saveTransaction(input).then(() => undefined),
               input.id ? 'Lançamento atualizado.' : 'Lançamento adicionado.',
+              options?.keepOpen,
             )
           }
         />
@@ -303,4 +323,3 @@ export default function App() {
     </div>
   );
 }
-

@@ -10,6 +10,32 @@ export const fromCents = (value: number | null | undefined): number | null => {
   return value / 100;
 };
 
+/**
+ * Data local em ISO. `toISOString` devolve UTC: à noite, no horário de São
+ * Paulo, ele já mostra o dia seguinte — e o lançamento cairia no dia errado.
+ */
+export const localDateIso = (date: Date = new Date()): string =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+
+export const todayIso = () => localDateIso();
+
+export const currentMonthIso = () => todayIso().slice(0, 7);
+
+/** Uma data que já passou: o sinal de que aquilo ali provavelmente já aconteceu. */
+export const isPastDate = (date: string, today = todayIso()) => Boolean(date) && date < today;
+
+/**
+ * Quando um lançamento foi de fato pago ou recebido. Se o vencimento já
+ * passou — o caso de quem está preenchendo meses antigos — a resposta certa é
+ * a própria data prevista: marcar "hoje" jogaria o pagamento para fora do mês.
+ */
+export const settlementDateFor = (dueDate: string, today = todayIso()) =>
+  isPastDate(dueDate, today) ? dueDate : today;
+
 export const monthRange = (month: string): { start: string; end: string } => {
   const [year, rawMonth] = month.split('-').map(Number);
   const start = `${year}-${String(rawMonth).padStart(2, '0')}-01`;

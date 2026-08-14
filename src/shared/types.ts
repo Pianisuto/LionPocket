@@ -51,6 +51,20 @@ export interface TransactionInput {
   notes?: string;
 }
 
+/**
+ * O que o app já aprendeu sobre uma descrição usada antes: serve para repetir
+ * um lançamento parecido sem redigitar categoria, forma de pagamento e valor.
+ */
+export interface TransactionSuggestion {
+  description: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  paymentMethodId: string | null;
+  cardId: string | null;
+  amount: number;
+  uses: number;
+}
+
 export interface TransactionFilters {
   month: string;
   kind?: MoneyKind | 'all';
@@ -201,6 +215,9 @@ export interface LionPocketApi {
   saveTransaction(input: TransactionInput): Promise<Transaction>;
   deleteTransaction(id: string): Promise<void>;
   settleTransaction(id: string): Promise<void>;
+  /** Quita vários de uma vez. Devolve quantos realmente mudaram de situação. */
+  settleTransactions(ids: string[]): Promise<number>;
+  suggestTransactions(kind: MoneyKind, term: string): Promise<TransactionSuggestion[]>;
   listRecurringExpenses(): Promise<RecurringExpense[]>;
   saveRecurringExpense(input: RecurringExpenseInput): Promise<RecurringExpense>;
   deleteRecurringExpense(id: string): Promise<void>;
