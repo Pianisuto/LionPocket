@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   CircleDollarSign,
+  CreditCard,
   PiggyBank,
   Plus,
   ReceiptText,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react';
 import type { Overview, Transaction } from '../../shared/types';
 import { EmptyState, ProgressBar, Skeleton } from '../components';
-import { compactCurrency, currency, formatDate, monthLabel } from '../format';
+import { compactCurrency, currency, formatDate, monthLabel, overdueLabel } from '../format';
 
 const MetricCard = ({
   label,
@@ -209,20 +210,62 @@ const TransactionRow = ({ item, onEdit }: { item: Transaction; onEdit: (item: Tr
   );
 };
 
+type PayableEntry = {
+  key: string;
+  name: string;
+  dueDate: string;
+  total: number;
+  overdue: boolean;
+  cardInvoice: boolean;
+  items: Transaction[];
+  detail: string;
+};
+
+export const groupUpcoming = (items: Transaction[]): PayableEntry[] => {
+  const entries = new Map<string, PayableEntry>();
+  for (const item of items) {
+    const creditCard = Boolean(item.cardId)
+      || item.paymentMethodName?.trim().toLocaleLowerCase('pt-BR') === 'cartão de crédito';
+    const cardInvoice = item.isOverdue && creditCard;
+    const key = cardInvoice
+      ? `invoice:${item.cardId ?? item.paymentMethodId ?? 'unassigned'}:${item.dueDate}`
+      : `transaction:${item.id}`;
+    const current = entries.get(key) ?? {
+      key,
+      name: cardInvoice ? `Fatura ${item.cardName ?? 'sem cartão informado'}` : item.description,
+      dueDate: item.dueDate,
+      total: 0,
+      overdue: item.isOverdue,
+      cardInvoice,
+      items: [],
+      detail: cardInvoice ? '' : item.categoryName ?? 'Sem categoria',
+    };
+    current.items.push(item);
+    current.total += item.plannedAmount;
+    if (cardInvoice) current.detail = `${current.items.length} ${current.items.length === 1 ? 'compra' : 'compras'} na fatura`;
+    entries.set(key, current);
+  }
+  return [...entries.values()]
+    .sort((left, right) => Number(right.overdue) - Number(left.overdue)
+      || left.dueDate.localeCompare(right.dueDate)
+      || left.name.localeCompare(right.name, 'pt-BR'))
+    .slice(0, 5);
+};
+
 export const Dashboard = ({
   overview,
   loading,
   onAddTransaction,
   onNavigate,
   onEditTransaction,
-  onSettleTransaction,
+  onSettleTransactions,
 }: {
   overview: Overview | null;
   loading: boolean;
   onAddTransaction: () => void;
   onNavigate: (view: string) => void;
   onEditTransaction: (item: Transaction) => void;
-  onSettleTransaction: (item: Transaction) => Promise<boolean>;
+  onSettleTransactions: (items: Transaction[]) => Promise<boolean>;
 }) => {
   const [settlingId, setSettlingId] = useState('');
   if (loading || !overview) {
@@ -231,12 +274,13 @@ export const Dashboard = ({
 
   const { summary } = overview;
   const totalCategories = overview.categoryBreakdown.reduce((sum, item) => sum + item.amount, 0);
+  const upcoming = groupUpcoming(overview.upcoming);
 
   return (
     <div className="dashboard">
       <section className="metric-grid">
         <MetricCard label="Entradas planejadas" value={summary.plannedIncome} hint={`${currency.format(summary.receivedIncome)} já recebidos`} tone="income" icon={<ArrowUpRight size={20} />} />
-        <MetricCard label="Saídas planejadas" value={summary.plannedExpenses} hint={`${currency.format(summary.paidExpenses)} já pagos`} tone="expense" icon={<ReceiptText size={20} />} />
+        <MetricCard label="Saídas planejadas" value={summary.plannedExpenses} hint={summary.overdueExpenses > 0 ? `${currency.format(summary.paidExpenses)} já pagos · ${currency.format(summary.overdueExpenses)} em atraso` : `${currency.format(summary.paidExpenses)} já pagos`} tone="expense" icon={<ReceiptText size={20} />} />
         <MetricCard label="Saldo projetado" value={summary.projectedBalance} hint="Se tudo ocorrer como planejado" tone="balance" icon={<TrendingUp size={20} />} />
         <MetricCard label="Renda comprometida" value={summary.committedPercent} displayValue={`${Math.round(summary.committedPercent * 100)}%`} hint="do que deve entrar" tone="neutral" icon={<WalletCards size={20} />} />
       </section>
@@ -263,28 +307,31 @@ export const Dashboard = ({
             <button className="text-button" onClick={() => onNavigate('transactions')}>Ver todas <ChevronRight size={16} /></button>
           </header>
           <div className="upcoming-list">
-            {overview.upcoming.length ? overview.upcoming.map((item) => (
-              <div className="upcoming-item" key={item.id}>
-                <button type="button" className="upcoming-item__open" onClick={() => onEditTransaction(item)} aria-label={`Editar ${item.description}`}>
-                  <span className="date-badge"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
-                  <span className="upcoming-item__copy"><strong>{item.description}</strong><small>{item.categoryName ?? 'Sem categoria'}</small></span>
-                  <strong>{currency.format(item.plannedAmount)}</strong>
+            {upcoming.length ? upcoming.map((entry) => (
+              <div className={`upcoming-item ${entry.overdue ? 'upcoming-item--overdue' : ''}`} key={entry.key}>
+                <button type="button" className="upcoming-item__open" onClick={() => entry.cardInvoice ? onNavigate('transactions') : onEditTransaction(entry.items[0])} aria-label={entry.cardInvoice ? `Abrir ${entry.name}` : `Editar ${entry.name}`}>
+                  <span className="date-badge">{entry.cardInvoice ? <CreditCard size={18} /> : <><strong>{formatDate(entry.dueDate, 'dd')}</strong><small>{formatDate(entry.dueDate, 'MMM')}</small></>}</span>
+                  <span className="upcoming-item__copy"><strong>{entry.name}</strong><small>{entry.detail}</small></span>
+                  <span className="upcoming-item__amount">
+                    <strong>{currency.format(entry.total)}</strong>
+                    {entry.overdue && <span className="upcoming-item__late">{overdueLabel(entry.dueDate)}</span>}
+                  </span>
                 </button>
                 <button
                   type="button"
                   className="icon-button icon-button--success upcoming-item__check"
-                  title="Marcar como paga"
-                  aria-label={`Marcar ${item.description} como paga`}
-                  disabled={settlingId === item.id}
+                  title={entry.cardInvoice ? 'Pagar fatura' : 'Marcar como paga'}
+                  aria-label={entry.cardInvoice ? `Pagar ${entry.name}` : `Marcar ${entry.name} como paga`}
+                  disabled={settlingId === entry.key}
                   onClick={async () => {
-                    setSettlingId(item.id);
-                    try { await onSettleTransaction(item); } finally { setSettlingId(''); }
+                    setSettlingId(entry.key);
+                    try { await onSettleTransactions(entry.items); } finally { setSettlingId(''); }
                   }}
                 >
                   <Check size={17} />
                 </button>
               </div>
-            )) : <EmptyState icon={<CalendarClock />} title="Nada em aberto neste mês" description="As saídas ainda não pagas deste mês aparecem aqui." />}
+            )) : <EmptyState icon={<CalendarClock />} title="Nada em aberto neste mês" description="As saídas ainda não pagas deste mês e atrasos carregados aparecem aqui." />}
           </div>
         </section>
 

@@ -1,7 +1,8 @@
-import { format, parseISO } from 'date-fns';
+import { differenceInCalendarDays, format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export {
+  addMonths,
   cardStatementDueDate,
   currentMonthIso,
   dateForMonthDay,
@@ -27,6 +28,18 @@ export const compactCurrency = new Intl.NumberFormat('pt-BR', {
 export const formatDate = (date: string | null, pattern = "dd 'de' MMM") => {
   if (!date) return 'Sem data';
   return format(parseISO(date), pattern, { locale: ptBR });
+};
+
+/**
+ * Há quanto tempo uma conta venceu, em texto curto.
+ *
+ * A data em si já aparece no selo ao lado, então repeti-la por extenso só
+ * alonga a linha: o que falta saber é o tamanho do atraso.
+ */
+export const overdueLabel = (dueDate: string, today = new Date()) => {
+  const days = differenceInCalendarDays(today, parseISO(dueDate));
+  if (days <= 0) return 'vence hoje';
+  return `${days} ${days === 1 ? 'dia' : 'dias'} em atraso`;
 };
 
 export const monthLabel = (month: string) => {

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CreditCard, Plus, Trash2 } from 'lucide-react';
+import { CreditCard, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { InstallmentPurchase } from '../../shared/types';
 import { EmptyState, ProgressBar } from '../components';
 import { currency, formatDate, monthLabel, statusLabel } from '../format';
 
-export const Installments = ({ month, refreshKey, onAdd, onChanged, notify }: {
+export const Installments = ({ month, refreshKey, onAdd, onEdit, onChanged, notify }: {
   month: string;
   refreshKey: number;
   onAdd: () => void;
+  onEdit: (item: InstallmentPurchase) => void;
   onChanged: () => void;
   notify: (message: string) => void;
 }) => {
@@ -39,7 +40,10 @@ export const Installments = ({ month, refreshKey, onAdd, onChanged, notify }: {
             <div className="installment-row__main"><div><strong>{item.description}</strong><span>{item.categoryName ?? 'Sem categoria'} · {item.cardName ?? 'Cartão não informado'}</span></div><ProgressBar value={progress} color="var(--violet)" /><small>{progressLabel}</small></div>
             <div className="installment-row__value"><strong>{currency.format(item.installmentAmount)}</strong><span>por parcela</span></div>
             <div className="installment-row__date"><span>Parcela {item.viewedInstallment} de {item.totalInstallments} · {statusLabel(item.viewedStatus)}</span><strong>{formatDate(item.viewedDueDate, 'dd/MM/yyyy')}</strong></div>
-            <button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={17} /></button>
+            <div className="installment-row__actions">
+              <button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button>
+              <button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={17} /></button>
+            </div>
           </article>;
         })}</div> : <EmptyState icon={<CreditCard />} title={`Nenhuma parcela em ${monthLabel(month)}`} description="Mude o mês ou cadastre uma nova compra parcelada." action={<button className="button button--soft" onClick={onAdd}><Plus size={16} /> Criar parcelas</button>} />}
       </div>

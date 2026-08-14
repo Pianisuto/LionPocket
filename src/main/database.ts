@@ -28,7 +28,6 @@ import {
   fromCents,
   monthRange,
   nextCardDueDate,
-  settlementDateFor,
   toCents,
   todayIso,
 } from '../shared/finance';
@@ -179,6 +178,7 @@ export class LionPocketDatabase {
         installment_cents INTEGER NOT NULL,
         total_installments INTEGER NOT NULL,
         starting_installment INTEGER NOT NULL DEFAULT 1,
+        purchase_date TEXT,
         first_due_date TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
         notes TEXT NOT NULL DEFAULT '',
@@ -261,6 +261,9 @@ export class LionPocketDatabase {
         'ALTER TABLE installment_purchases ADD COLUMN starting_installment INTEGER NOT NULL DEFAULT 1',
       );
     }
+    if (!installmentColumns.some((column) => column.name === 'purchase_date')) {
+      this.db.exec('ALTER TABLE installment_purchases ADD COLUMN purchase_date TEXT');
+    }
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (2, datetime('now'))");
     const recurringColumns = this.db
       .prepare('PRAGMA table_info(recurring_expenses)')
@@ -288,6 +291,7 @@ export class LionPocketDatabase {
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (4, datetime('now'))");
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (6, datetime('now'))");
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (7, datetime('now'))");
+    this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (8, datetime('now'))");
   }
 
   private seed() {
@@ -470,7 +474,26 @@ export class LionPocketDatabase {
       sourceId: row.sourceId ? String(row.sourceId) : null,
       installmentNumber: row.installmentNumber === null ? null : Number(row.installmentNumber),
       installmentTotal: row.installmentTotal === null ? null : Number(row.installmentTotal),
+      isOverdue: row.kind === 'expense' && row.status === 'planned' && String(row.dueDate) < todayIso(),
     };
+  }
+
+  /**
+   * A competência de uma saída pode diferir do vencimento: uma pendência
+   * vencida é carregada adiante e um pagamento tardio pertence ao mês em que
+   * realmente saiu da conta. O registro original nunca perde o vencimento.
+   */
+  private expenseCountsInMonth(transaction: Transaction, month: string) {
+    if (transaction.kind !== 'expense' || transaction.status === 'cancelled') return false;
+    if (transaction.status === 'paid') {
+      return (transaction.settledDate ?? transaction.dueDate).slice(0, 7) === month;
+    }
+    if (transaction.status !== 'planned') return transaction.dueDate.slice(0, 7) === month;
+    const dueMonth = transaction.dueDate.slice(0, 7);
+    if (dueMonth === month) {
+      return !(transaction.isOverdue && month < currentMonthIso());
+    }
+    return transaction.isOverdue && dueMonth < month;
   }
 
   private transactionSelect() {
@@ -580,13 +603,24 @@ export class LionPocketDatabase {
   listTransactions(filters: TransactionFilters): Transaction[] {
     this.ensureRecurringForMonth(filters.month);
     const { start, end } = monthRange(filters.month);
+    const today = todayIso();
     const conditions = [
       't.deleted_at IS NULL',
       this.recurringPeriodCondition(),
-      't.due_date >= ?',
-      't.due_date < ?',
+      `(
+        (t.due_date >= ? AND t.due_date < ?)
+        OR (
+          t.kind = 'expense' AND t.status = 'planned'
+          AND t.due_date < ? AND t.due_date < ?
+        )
+        OR (
+          t.kind = 'expense' AND t.status = 'paid'
+          AND COALESCE(t.settled_date, t.due_date) >= ?
+          AND COALESCE(t.settled_date, t.due_date) < ?
+        )
+      )`,
     ];
-    const parameters: Array<string> = [start, end];
+    const parameters: Array<string> = [start, end, today, start, start, end];
     if (filters.kind && filters.kind !== 'all') {
       conditions.push('t.kind = ?');
       parameters.push(filters.kind);
@@ -594,6 +628,19 @@ export class LionPocketDatabase {
     if (filters.status && filters.status !== 'all') {
       conditions.push('t.status = ?');
       parameters.push(filters.status);
+    }
+    const creditCardCondition = `(
+      t.card_id IS NOT NULL OR
+      search_key(COALESCE(pm.name, '')) = search_key('Cartão de crédito')
+    )`;
+    if (filters.payment === 'creditCard') {
+      conditions.push(creditCardCondition);
+    } else if (filters.payment === 'other') {
+      conditions.push(`NOT ${creditCardCondition}`);
+    }
+    if (filters.source && filters.source !== 'all') {
+      conditions.push('t.source_type = ?');
+      parameters.push(filters.source);
     }
     if (filters.search?.trim()) {
       conditions.push(`search_key(
@@ -604,8 +651,10 @@ export class LionPocketDatabase {
       parameters.push(`%${cleaned}%`);
     }
     const rows = this.db
-      .prepare(`${this.transactionSelect()} WHERE ${conditions.join(' AND ')} ORDER BY t.due_date, t.created_at`)
-      .all(...parameters) as unknown as Row[];
+      .prepare(`${this.transactionSelect()} WHERE ${conditions.join(' AND ')} ORDER BY
+        CASE WHEN t.kind = 'expense' AND t.status = 'planned' AND t.due_date < ? THEN 0 ELSE 1 END,
+        t.due_date, t.created_at`)
+      .all(...parameters, today) as unknown as Row[];
     return rows.map((row) => this.transactionFromRow(row));
   }
 
@@ -720,13 +769,13 @@ export class LionPocketDatabase {
     this.db.prepare(`
       UPDATE transactions SET status = ?, actual_cents = COALESCE(actual_cents, planned_cents),
         settled_date = COALESCE(settled_date, ?), updated_at = ? WHERE id = ?
-    `).run(status, settlementDateFor(transaction.dueDate), now(), id);
+    `).run(status, todayIso(), now(), id);
   }
 
   /**
    * Quita uma lista inteira de uma vez — o fecho de um mês antigo em um clique.
    * Cada lançamento vira "pago" ou "recebido" conforme o tipo, assume o valor
-   * planejado como valor real e é datado no próprio vencimento.
+   * planejado como valor real e registra o dia em que a ação foi executada.
    */
   settleTransactions(ids: string[]): number {
     if (!ids.length) return 0;
@@ -736,7 +785,7 @@ export class LionPocketDatabase {
       UPDATE transactions
       SET status = CASE kind WHEN 'income' THEN 'received' ELSE 'paid' END,
         actual_cents = COALESCE(actual_cents, planned_cents),
-        settled_date = COALESCE(settled_date, MIN(due_date, ?)),
+        settled_date = COALESCE(settled_date, ?),
         updated_at = ?
       WHERE id = ? AND deleted_at IS NULL AND status = 'planned'
     `);
@@ -999,8 +1048,8 @@ export class LionPocketDatabase {
       this.db.prepare(`
         INSERT INTO installment_purchases(
           id, description, category_id, payment_method_id, card_id, installment_cents,
-          total_installments, starting_installment, first_due_date, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          total_installments, starting_installment, purchase_date, first_due_date, notes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         input.description.trim(),
@@ -1010,6 +1059,7 @@ export class LionPocketDatabase {
         cents,
         totalInstallments,
         currentInstallment,
+        input.purchaseDate ?? null,
         firstDueDate,
         input.notes?.trim() ?? '',
         timestamp,
@@ -1017,10 +1067,10 @@ export class LionPocketDatabase {
       );
       const statement = this.db.prepare(`
         INSERT INTO transactions(
-          id, kind, description, category_id, planned_cents, due_date, status,
+          id, kind, description, category_id, planned_cents, purchase_date, due_date, status,
           payment_method_id, card_id, notes, source_type, source_id,
           installment_number, installment_total, created_at, updated_at
-        ) VALUES (?, 'expense', ?, ?, ?, ?, 'planned', ?, ?, ?, 'installment', ?, ?, ?, ?, ?)
+        ) VALUES (?, 'expense', ?, ?, ?, ?, ?, 'planned', ?, ?, ?, 'installment', ?, ?, ?, ?, ?)
       `);
       for (let installment = currentInstallment; installment <= totalInstallments; installment += 1) {
         statement.run(
@@ -1028,6 +1078,7 @@ export class LionPocketDatabase {
           input.description.trim(),
           input.categoryId ?? null,
           cents,
+          input.purchaseDate ?? null,
           addMonths(input.currentDueDate, installment - currentInstallment),
           input.paymentMethodId ?? null,
           input.cardId ?? null,
@@ -1049,13 +1100,203 @@ export class LionPocketDatabase {
     return saved;
   }
 
+  saveInstallmentPurchase(input: InstallmentPurchaseInput): InstallmentPurchase {
+    if (!input.id) return this.createInstallmentPurchase(input);
+
+    const purchase = this.db.prepare(`
+      SELECT id, starting_installment AS startingInstallment
+      FROM installment_purchases
+      WHERE id = ? AND deleted_at IS NULL
+    `).get(input.id) as unknown as Row | undefined;
+    if (!purchase) throw new Error('Compra parcelada não encontrada.');
+
+    const timestamp = now();
+    const cents = toCents(input.installmentAmount) ?? 0;
+    const totalInstallments = Math.round(input.totalInstallments);
+    const currentInstallment = Math.round(input.currentInstallment);
+    const startingInstallment = Number(purchase.startingInstallment);
+    const originalCurrentInstallment = Math.round(input.originalCurrentInstallment ?? currentInstallment);
+    const installmentNumberShift = currentInstallment - originalCurrentInstallment;
+    const correctedStartingInstallment = startingInstallment + installmentNumberShift;
+    const description = input.description.trim();
+    if (!description) throw new Error('Informe a descrição da compra.');
+    if (cents < 1) throw new Error('Informe um valor de parcela maior que zero.');
+    if (
+      correctedStartingInstallment < 1
+      || totalInstallments < correctedStartingInstallment
+      || currentInstallment < correctedStartingInstallment
+      || currentInstallment > totalInstallments
+    ) {
+      throw new Error('Informe uma parcela entre 1 e o total da compra.');
+    }
+
+    const transactions = this.db.prepare(`
+      SELECT id, installment_number AS installmentNumber, due_date AS dueDate, status
+      FROM transactions
+      WHERE source_type = 'installment' AND source_id = ? AND deleted_at IS NULL
+      ORDER BY installment_number
+    `).all(input.id) as unknown as Row[];
+    const shiftedTransactions: Array<Row & { installmentNumber: number }> = transactions.map((transaction) => ({
+      ...transaction,
+      installmentNumber: Number(transaction.installmentNumber) + installmentNumberShift,
+    }));
+    const highestFinalized = shiftedTransactions.reduce((highest, transaction) =>
+      transaction.status !== 'planned'
+        ? Math.max(highest, Number(transaction.installmentNumber))
+        : highest, 0);
+    if (totalInstallments < highestFinalized) {
+      throw new Error(`O total não pode ser menor que a parcela ${highestFinalized}, que já foi concluída.`);
+    }
+
+    const firstDueDate = addMonths(input.currentDueDate, -(currentInstallment - 1));
+    const finalizedDates = new Set(
+      shiftedTransactions
+        .filter((transaction) => transaction.status !== 'planned')
+        .map((transaction) => String(transaction.dueDate)),
+    );
+    for (let installment = correctedStartingInstallment; installment <= totalInstallments; installment += 1) {
+      const existing = shiftedTransactions.find((transaction) => Number(transaction.installmentNumber) === installment);
+      if (existing?.status !== 'planned') continue;
+      const dueDate = addMonths(firstDueDate, installment - 1);
+      if (finalizedDates.has(dueDate)) {
+        throw new Error('O novo calendário coincide com uma parcela já concluída. Ajuste a parcela atual ou a data da compra.');
+      }
+    }
+
+    this.db.exec('BEGIN');
+    try {
+      if (installmentNumberShift !== 0) {
+        this.db.prepare(`
+          UPDATE transactions
+          SET installment_number = installment_number + ?, updated_at = ?
+          WHERE source_type = 'installment' AND source_id = ? AND deleted_at IS NULL
+        `).run(installmentNumberShift, timestamp, input.id);
+      }
+      this.db.prepare(`
+        UPDATE transactions
+        SET deleted_at = ?, updated_at = ?
+        WHERE source_type = 'installment' AND source_id = ? AND status = 'planned'
+          AND installment_number > ? AND deleted_at IS NULL
+      `).run(timestamp, timestamp, input.id, totalInstallments);
+      // Libera temporariamente as datas das parcelas abertas para que mover a
+      // série um mês não colida com a próxima parcela no índice único.
+      this.db.prepare(`
+        UPDATE transactions
+        SET due_date = 'editing-' || installment_number || '-' || id
+        WHERE source_type = 'installment' AND source_id = ? AND status = 'planned'
+          AND installment_number <= ? AND deleted_at IS NULL
+      `).run(input.id, totalInstallments);
+      this.db.prepare(`
+        UPDATE transactions
+        SET description = ?, category_id = ?, purchase_date = ?, payment_method_id = ?,
+          card_id = ?, notes = ?, installment_total = ?, updated_at = ?
+        WHERE source_type = 'installment' AND source_id = ? AND deleted_at IS NULL
+      `).run(
+        description,
+        input.categoryId ?? null,
+        input.purchaseDate ?? null,
+        input.paymentMethodId ?? null,
+        input.cardId ?? null,
+        input.notes?.trim() ?? '',
+        totalInstallments,
+        timestamp,
+        input.id,
+      );
+
+      const activeByNumber = new Map(
+        shiftedTransactions
+          .filter((transaction) => Number(transaction.installmentNumber) <= totalInstallments)
+          .map((transaction) => [Number(transaction.installmentNumber), transaction]),
+      );
+      const insert = this.db.prepare(`
+        INSERT INTO transactions(
+          id, kind, description, category_id, planned_cents, purchase_date, due_date, status,
+          payment_method_id, card_id, notes, source_type, source_id,
+          installment_number, installment_total, created_at, updated_at
+        ) VALUES (?, 'expense', ?, ?, ?, ?, ?, 'planned', ?, ?, ?, 'installment', ?, ?, ?, ?, ?)
+      `);
+      const updatePlanned = this.db.prepare(`
+        UPDATE transactions
+        SET planned_cents = ?, due_date = ?, updated_at = ?
+        WHERE id = ? AND status = 'planned' AND deleted_at IS NULL
+      `);
+      for (let installment = correctedStartingInstallment; installment <= totalInstallments; installment += 1) {
+        const dueDate = addMonths(firstDueDate, installment - 1);
+        const existing = activeByNumber.get(installment);
+        if (existing?.status === 'planned') {
+          updatePlanned.run(cents, dueDate, timestamp, existing.id);
+        } else if (!existing) {
+          insert.run(
+            randomUUID(),
+            description,
+            input.categoryId ?? null,
+            cents,
+            input.purchaseDate ?? null,
+            dueDate,
+            input.paymentMethodId ?? null,
+            input.cardId ?? null,
+            input.notes?.trim() ?? '',
+            input.id,
+            installment,
+            totalInstallments,
+            timestamp,
+            timestamp,
+          );
+        }
+      }
+      const stillPlanned = this.db.prepare(`
+        SELECT 1 FROM transactions
+        WHERE source_type = 'installment' AND source_id = ? AND status = 'planned'
+          AND deleted_at IS NULL LIMIT 1
+      `).get(input.id);
+      this.db.prepare(`
+        UPDATE installment_purchases
+        SET description = ?, category_id = ?, payment_method_id = ?, card_id = ?,
+          installment_cents = ?, total_installments = ?, starting_installment = ?,
+          purchase_date = ?, first_due_date = ?,
+          status = ?, notes = ?, updated_at = ?
+        WHERE id = ? AND deleted_at IS NULL
+      `).run(
+        description,
+        input.categoryId ?? null,
+        input.paymentMethodId ?? null,
+        input.cardId ?? null,
+        cents,
+        totalInstallments,
+        correctedStartingInstallment,
+        input.purchaseDate ?? null,
+        firstDueDate,
+        stillPlanned ? 'active' : 'completed',
+        input.notes?.trim() ?? '',
+        timestamp,
+        input.id,
+      );
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+
+    const viewedDue = this.db.prepare(`
+      SELECT due_date AS dueDate FROM transactions
+      WHERE source_type = 'installment' AND source_id = ? AND installment_number = ?
+        AND deleted_at IS NULL
+      LIMIT 1
+    `).get(input.id, currentInstallment) as unknown as Row | undefined;
+    const viewed = this.listInstallmentPurchases(String(viewedDue?.dueDate ?? input.currentDueDate).slice(0, 7))
+      .find((item) => item.id === input.id);
+    if (!viewed) throw new Error('Não foi possível carregar a compra parcelada atualizada.');
+    return viewed;
+  }
+
   listInstallmentPurchases(month: string): InstallmentPurchase[] {
     const { start, end } = monthRange(month);
     const rows = this.db.prepare(`
       SELECT p.id, p.description, p.category_id AS categoryId, c.name AS categoryName,
         p.card_id AS cardId, ca.name AS cardName, p.installment_cents AS installmentCents,
         p.total_installments AS totalInstallments,
-        p.starting_installment AS startingInstallment, p.first_due_date AS firstDueDate,
+        p.starting_installment AS startingInstallment, p.purchase_date AS purchaseDate,
+        p.first_due_date AS firstDueDate,
         p.status, p.notes, viewed.installment_number AS viewedInstallment,
         viewed.due_date AS viewedDueDate, viewed.status AS viewedStatus,
         (p.starting_installment - 1) +
@@ -1083,6 +1324,7 @@ export class LionPocketDatabase {
       totalInstallments: Number(row.totalInstallments),
       startingInstallment: Number(row.startingInstallment),
       paidInstallments: Math.min(Number(row.totalInstallments), Number(row.paidInstallments)),
+      purchaseDate: row.purchaseDate ? String(row.purchaseDate) : null,
       firstDueDate: String(row.firstDueDate),
       viewedInstallment: Number(row.viewedInstallment),
       viewedDueDate: String(row.viewedDueDate),
@@ -1209,28 +1451,35 @@ export class LionPocketDatabase {
   }
 
   private monthSummary(month: string): MonthSummary {
-    this.ensureRecurringForMonth(month);
-    const { start, end } = monthRange(month);
-    const row = this.db.prepare(`
-      SELECT
-        COALESCE(SUM(CASE WHEN kind = 'income' AND status != 'cancelled' THEN planned_cents ELSE 0 END), 0) AS plannedIncome,
-        COALESCE(SUM(CASE WHEN kind = 'income' AND status = 'received' THEN COALESCE(actual_cents, planned_cents) ELSE 0 END), 0) AS receivedIncome,
-        COALESCE(SUM(CASE WHEN kind = 'expense' AND status != 'cancelled' THEN planned_cents ELSE 0 END), 0) AS plannedExpenses,
-        COALESCE(SUM(CASE WHEN kind = 'expense' AND status = 'paid' THEN COALESCE(actual_cents, planned_cents) ELSE 0 END), 0) AS paidExpenses
-      FROM transactions t
-      WHERE t.deleted_at IS NULL AND ${this.recurringPeriodCondition()}
-        AND t.due_date >= ? AND t.due_date < ?
-    `).get(start, end) as Row;
-    const plannedIncome = fromCents(Number(row.plannedIncome)) ?? 0;
-    const receivedIncome = fromCents(Number(row.receivedIncome)) ?? 0;
-    const plannedExpenses = fromCents(Number(row.plannedExpenses)) ?? 0;
-    const paidExpenses = fromCents(Number(row.paidExpenses)) ?? 0;
+    const transactions = this.listTransactions({ month });
+    let plannedIncome = 0;
+    let receivedIncome = 0;
+    let plannedExpenses = 0;
+    let paidExpenses = 0;
+    let overdueExpenses = 0;
+    for (const transaction of transactions) {
+      if (transaction.status === 'cancelled') continue;
+      if (transaction.kind === 'income') {
+        plannedIncome += transaction.plannedAmount;
+        if (transaction.status === 'received') {
+          receivedIncome += transaction.actualAmount ?? transaction.plannedAmount;
+        }
+        continue;
+      }
+      if (!this.expenseCountsInMonth(transaction, month)) continue;
+      plannedExpenses += transaction.plannedAmount;
+      if (transaction.status === 'paid') {
+        paidExpenses += transaction.actualAmount ?? transaction.plannedAmount;
+      }
+      if (transaction.isOverdue) overdueExpenses += transaction.plannedAmount;
+    }
     return {
       month,
       plannedIncome,
       receivedIncome,
       plannedExpenses,
       paidExpenses,
+      overdueExpenses,
       projectedBalance: plannedIncome - plannedExpenses,
       realizedBalance: receivedIncome - paidExpenses,
       committedPercent: plannedIncome > 0 ? plannedExpenses / plannedIncome : 0,
@@ -1242,50 +1491,46 @@ export class LionPocketDatabase {
     const annual = Array.from({ length: 12 }, (_, index) =>
       this.monthSummary(`${year}-${String(index + 1).padStart(2, '0')}`),
     );
-    const { start, end } = monthRange(month);
-    const categoryRows = this.db.prepare(`
-      SELECT COALESCE(c.name, 'Sem categoria') AS name,
-        COALESCE(c.color, '${NEUTRAL_COLOR}') AS color,
-        COALESCE(SUM(CASE WHEN t.status = 'paid' THEN COALESCE(t.actual_cents, t.planned_cents) ELSE t.planned_cents END), 0) AS amount
-      FROM transactions t
-      LEFT JOIN categories c ON c.id = t.category_id
-      WHERE t.deleted_at IS NULL AND t.kind = 'expense' AND t.status != 'cancelled'
-        AND ${this.recurringPeriodCondition()}
-        AND t.due_date >= ? AND t.due_date < ?
-      GROUP BY c.id, c.name, c.color
-      HAVING amount > 0
-      ORDER BY amount DESC
-    `).all(start, end) as unknown as Row[];
-
-    // "Contas a caminho" são só o que se paga, e só dentro do mês aberto —
-    // como o resto do painel. Sem recorte por "hoje": uma conta vencida e não
-    // paga continua sendo uma conta a pagar, e some da lista ao ser quitada.
-    const upcomingRows = this.db.prepare(`
-      ${this.transactionSelect()}
-      WHERE t.deleted_at IS NULL AND t.kind = 'expense' AND t.status = 'planned'
-        AND ${this.recurringPeriodCondition()}
-        AND t.due_date >= ? AND t.due_date < ? AND t.planned_cents > 0
-      ORDER BY t.due_date LIMIT 5
-    `).all(start, end) as unknown as Row[];
-
-    const recentRows = this.db.prepare(`
-      ${this.transactionSelect()}
-      WHERE t.deleted_at IS NULL AND t.due_date >= ? AND t.due_date < ?
-        AND ${this.recurringPeriodCondition()}
-        AND (t.planned_cents > 0 OR COALESCE(t.actual_cents, 0) > 0)
-      ORDER BY COALESCE(t.settled_date, t.due_date) DESC, t.updated_at DESC LIMIT 6
-    `).all(start, end) as unknown as Row[];
+    const monthlyTransactions = this.listTransactions({ month });
+    const countedExpenses = monthlyTransactions.filter((transaction) =>
+      transaction.kind === 'expense'
+      && transaction.status !== 'cancelled'
+      && this.expenseCountsInMonth(transaction, month));
+    const categoryMap = new Map<string, { name: string; color: string; amount: number }>();
+    for (const transaction of countedExpenses) {
+      const key = transaction.categoryId ?? 'uncategorized';
+      const current = categoryMap.get(key) ?? {
+        name: transaction.categoryName ?? 'Sem categoria',
+        color: transaction.categoryColor ?? NEUTRAL_COLOR,
+        amount: 0,
+      };
+      current.amount += transaction.status === 'paid'
+        ? transaction.actualAmount ?? transaction.plannedAmount
+        : transaction.plannedAmount;
+      categoryMap.set(key, current);
+    }
+    const categoryBreakdown = [...categoryMap.values()]
+      .filter((category) => category.amount > 0)
+      .sort((left, right) => right.amount - left.amount);
+    const upcoming = countedExpenses
+      .filter((transaction) => transaction.status === 'planned' && transaction.plannedAmount > 0)
+      .sort((left, right) => Number(right.isOverdue) - Number(left.isOverdue)
+        || left.dueDate.localeCompare(right.dueDate)
+        || left.description.localeCompare(right.description, 'pt-BR'));
+    const recent = monthlyTransactions
+      .filter((transaction) => (
+        transaction.kind === 'income'
+        || this.expenseCountsInMonth(transaction, month)
+      ) && (transaction.plannedAmount > 0 || (transaction.actualAmount ?? 0) > 0))
+      .sort((left, right) => (right.settledDate ?? right.dueDate).localeCompare(left.settledDate ?? left.dueDate))
+      .slice(0, 6);
 
     return {
       summary: this.monthSummary(month),
       annual,
-      categoryBreakdown: categoryRows.map((row) => ({
-        name: String(row.name),
-        color: String(row.color),
-        amount: fromCents(Number(row.amount)) ?? 0,
-      })),
-      upcoming: upcomingRows.map((row) => this.transactionFromRow(row)),
-      recent: recentRows.map((row) => this.transactionFromRow(row)),
+      categoryBreakdown,
+      upcoming,
+      recent,
       goals: this.listGoals().filter((goal) => !['cancelled', 'completed'].includes(goal.status)).slice(0, 3),
     };
   }

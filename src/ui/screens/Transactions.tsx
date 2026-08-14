@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDownRight, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronUp, CreditCard, History, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, ChevronUp, CreditCard, History, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import type { Transaction, TransactionFilters } from '../../shared/types';
 import { EmptyState, Modal, SearchField, SelectControl } from '../components';
-import { currency, currentMonthIso, formatDate, monthLabel, statusLabel } from '../format';
+import { currency, currentMonthIso, formatDate, monthLabel, overdueLabel, statusLabel } from '../format';
 
 type SortKey = 'date' | 'description' | 'category' | 'paymentMethod' | 'card' | 'status' | 'amount';
 type SortDirection = 'asc' | 'desc';
@@ -15,6 +15,15 @@ const sortLabels: Record<SortKey, string> = {
   card: 'Cartão',
   status: 'Situação',
   amount: 'Valor',
+};
+
+const expenseCountsInMonth = (item: Transaction, month: string) => {
+  if (item.kind !== 'expense' || item.status === 'cancelled') return false;
+  if (item.status === 'paid') return (item.settledDate ?? item.dueDate).slice(0, 7) === month;
+  if (item.status !== 'planned') return item.dueDate.slice(0, 7) === month;
+  const dueMonth = item.dueDate.slice(0, 7);
+  if (dueMonth === month) return !(item.isOverdue && month < currentMonthIso());
+  return item.isOverdue && dueMonth < month;
 };
 
 export const Transactions = ({
@@ -37,6 +46,8 @@ export const Transactions = ({
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<NonNullable<TransactionFilters['kind']>>('all');
   const [status, setStatus] = useState<NonNullable<TransactionFilters['status']>>('all');
+  const [payment, setPayment] = useState<NonNullable<TransactionFilters['payment']>>('all');
+  const [source, setSource] = useState<NonNullable<TransactionFilters['source']>>('all');
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: 'date', direction: 'asc' });
   const [creditCardExpenses, setCreditCardExpenses] = useState<Transaction[]>([]);
   const [payingCard, setPayingCard] = useState(false);
@@ -45,8 +56,8 @@ export const Transactions = ({
 
   useEffect(() => {
     setLoading(true);
-    window.lionPocket.listTransactions({ month, search, kind, status }).then(setItems).finally(() => setLoading(false));
-  }, [month, search, kind, status, refreshKey]);
+    window.lionPocket.listTransactions({ month, search, kind, status, payment, source }).then(setItems).finally(() => setLoading(false));
+  }, [month, search, kind, status, payment, source, refreshKey]);
 
   useEffect(() => {
     let active = true;
@@ -67,9 +78,9 @@ export const Transactions = ({
   const totals = useMemo(() => items.reduce((result, item) => {
     if (item.status === 'cancelled') return result;
     if (item.kind === 'income') result.income += item.actualAmount ?? item.plannedAmount;
-    else result.expense += item.actualAmount ?? item.plannedAmount;
+    else if (expenseCountsInMonth(item, month)) result.expense += item.actualAmount ?? item.plannedAmount;
     return result;
-  }, { income: 0, expense: 0 }), [items]);
+  }, { income: 0, expense: 0 }), [items, month]);
 
   const sortedItems = useMemo(() => {
     const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
@@ -96,21 +107,22 @@ export const Transactions = ({
       : { key, direction: 'asc' });
   };
 
-  // O mês já virou: o que ficou como "planejado" quase sempre é só um registro
-  // que faltou marcar, e dá para resolver tudo de uma vez.
   const closedMonth = month < currentMonthIso();
-  const pending = useMemo(() => items.filter((item) => item.status === 'planned'), [items]);
-  const pendingTotal = useMemo(
-    () => pending.reduce((sum, item) => sum + item.plannedAmount, 0),
-    [pending],
-  );
+  const carriedForward = useMemo(() => items.filter((item) =>
+    item.isOverdue && item.dueDate.slice(0, 7) === month && closedMonth), [closedMonth, items, month]);
+  const overdueInProjection = useMemo(() => items
+    .filter((item) => item.isOverdue && expenseCountsInMonth(item, month))
+    .reduce((sum, item) => sum + item.plannedAmount, 0), [items, month]);
   const creditCardGroups = useMemo(() => {
-    const groups = new Map<string, { key: string; name: string; items: Transaction[]; total: number }>();
+    const groups = new Map<string, { key: string; name: string; dueDate: string; overdue: boolean; items: Transaction[]; total: number }>();
     for (const item of creditCardExpenses) {
-      const key = item.cardId ?? 'unassigned';
+      const cardKey = item.cardId ?? item.paymentMethodId ?? 'unassigned';
+      const key = `${cardKey}:${item.dueDate}`;
       const current = groups.get(key) ?? {
         key,
-        name: item.cardName ?? 'Cartão não informado',
+        name: `Fatura ${item.cardName ?? 'sem cartão informado'}`,
+        dueDate: item.dueDate,
+        overdue: item.isOverdue,
         items: [],
         total: 0,
       };
@@ -118,23 +130,20 @@ export const Transactions = ({
       current.total += item.plannedAmount;
       groups.set(key, current);
     }
-    return [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
+    return [...groups.values()].sort((left, right) => Number(right.overdue) - Number(left.overdue)
+      || left.dueDate.localeCompare(right.dueDate)
+      || left.name.localeCompare(right.name, 'pt-BR'));
   }, [creditCardExpenses]);
   const selectedCard = creditCardGroups.find((group) => group.key === selectedCardKey) ?? creditCardGroups[0];
+  const hasActiveFilters = Boolean(search)
+    || kind !== 'all'
+    || status !== 'all'
+    || payment !== 'all'
+    || source !== 'all';
 
   const settle = async (item: Transaction) => {
     await window.lionPocket.settleTransaction(item.id);
     notify(item.kind === 'income' ? 'Entrada marcada como recebida.' : 'Conta marcada como paga.');
-    onChanged();
-  };
-
-  const settleAllPending = async () => {
-    const question = pending.length === 1
-      ? `Concluir “${pending[0].description}” usando o valor planejado como valor real?`
-      : `Concluir os ${pending.length} lançamentos pendentes de ${monthLabel(month)} usando o valor planejado como valor real?`;
-    if (!window.confirm(question)) return;
-    const settled = await window.lionPocket.settleTransactions(pending.map((item) => item.id));
-    notify(settled === 1 ? 'Lançamento concluído.' : `${settled} lançamentos concluídos.`);
     onChanged();
   };
 
@@ -143,7 +152,7 @@ export const Transactions = ({
     setPayingCard(true);
     try {
       const settled = await window.lionPocket.settleTransactions(selectedCard.items.map((item) => item.id));
-      notify(settled === 1 ? `1 saída do ${selectedCard.name} marcada como paga.` : `${settled} saídas do ${selectedCard.name} marcadas como pagas.`);
+      notify(settled === 1 ? `1 saída da ${selectedCard.name} marcada como paga.` : `${settled} saídas da ${selectedCard.name} marcadas como pagas.`);
       setPayCardOpen(false);
       onChanged();
     } finally {
@@ -160,23 +169,20 @@ export const Transactions = ({
 
   return (
     <section className="page-section">
-      {closedMonth && pending.length > 0 && !loading && (
+      {carriedForward.length > 0 && !loading && (
         <div className="feature-banner feature-banner--backfill">
           <div className="feature-banner__icon"><History size={25} /></div>
           <div>
-            <span>Mês já encerrado</span>
-            <h3>{pending.length === 1 ? '1 lançamento ainda em aberto' : `${pending.length} lançamentos ainda em aberto`}</h3>
-            <p>{monthLabel(month)} já passou. Some {currency.format(pendingTotal)} e provavelmente já aconteceu — dá para concluir tudo de uma vez.</p>
+            <span>Carregadas adiante</span>
+            <h3>{carriedForward.length === 1 ? '1 conta continua em atraso' : `${carriedForward.length} contas continuam em atraso`}</h3>
+            <p>Elas permanecem visíveis em {monthLabel(month)} para histórico, mas só entram nas projeções dos meses seguintes até serem pagas.</p>
           </div>
-          <button className="button button--primary" onClick={settleAllPending}>
-            <CheckCheck size={18} /> Concluir pendentes
-          </button>
         </div>
       )}
 
       <div className="summary-strip">
         <div><span>Entradas na lista</span><strong className="money-positive">{currency.format(totals.income)}</strong></div>
-        <div><span>Saídas na lista</span><strong className="money-negative">{currency.format(totals.expense)}</strong></div>
+        <div><span>Saídas consideradas</span><strong className="money-negative">{currency.format(totals.expense)}</strong>{overdueInProjection > 0 && <small>{currency.format(overdueInProjection)} em atraso</small>}</div>
         <div><span>Diferença</span><strong>{currency.format(totals.income - totals.expense)}</strong></div>
       </div>
 
@@ -193,6 +199,18 @@ export const Transactions = ({
           { value: 'paid', label: 'Pago' },
           { value: 'received', label: 'Recebido' },
           { value: 'cancelled', label: 'Cancelado' },
+        ]} />
+        <SelectControl className="filter-select" ariaLabel="Filtrar por forma de pagamento" value={payment} onChange={(value) => setPayment(value as NonNullable<TransactionFilters['payment']>)} options={[
+          { value: 'all', label: 'Todos os pagamentos' },
+          { value: 'creditCard', label: 'Cartão de crédito' },
+          { value: 'other', label: 'Outras formas' },
+        ]} />
+        <SelectControl className="filter-select" ariaLabel="Filtrar por origem" value={source} onChange={(value) => setSource(value as NonNullable<TransactionFilters['source']>)} options={[
+          { value: 'all', label: 'Todas as origens' },
+          { value: 'installment', label: 'Compras parceladas' },
+          { value: 'recurring', label: 'Recorrências' },
+          { value: 'manual', label: 'Lançamentos avulsos' },
+          { value: 'imported', label: 'Dados importados' },
         ]} />
         {creditCardExpenses.length > 0 && (
           <button className="button button--soft" disabled={payingCard} onClick={() => {
@@ -218,14 +236,22 @@ export const Transactions = ({
             <span aria-hidden="true" />
           </div>
           {loading ? <div className="table-loading">Carregando seus lançamentos…</div> : sortedItems.map((item) => (
-            <div className={`data-table__row ${item.status === 'cancelled' ? 'is-muted' : ''}`} key={item.id}>
+            <div className={`data-table__row ${item.status === 'cancelled' ? 'is-muted' : ''} ${item.isOverdue ? 'is-overdue' : ''}`} key={item.id}>
               <span className="date-cell"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
               <span className="transaction-name">
                 <i style={{ background: item.categoryColor ?? 'var(--text-muted)' }}>{item.kind === 'income' ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}</i>
                 <span>
                   <strong>{item.description}</strong>
-                  {(item.purchaseDate || item.installmentNumber) && (
+                  {(item.isOverdue || item.purchaseDate || item.installmentNumber || (item.status === 'paid' && item.settledDate && item.settledDate !== item.dueDate)) && (
                     <small>{[
+                      item.isOverdue
+                        ? item.dueDate.slice(0, 7) === month && closedMonth
+                          ? `Carregada adiante · venceu em ${formatDate(item.dueDate, 'dd/MM/yyyy')}`
+                          : overdueLabel(item.dueDate)
+                        : null,
+                      item.status === 'paid' && item.settledDate && item.settledDate !== item.dueDate
+                        ? `Pago em ${formatDate(item.settledDate, 'dd/MM/yyyy')}`
+                        : null,
                       item.purchaseDate ? `Compra em ${formatDate(item.purchaseDate, 'dd/MM/yyyy')}` : null,
                       item.installmentNumber ? `${item.installmentNumber} de ${item.installmentTotal} parcelas` : null,
                     ].filter(Boolean).join(' · ')}</small>
@@ -235,7 +261,7 @@ export const Transactions = ({
               <span>{item.categoryName ?? 'Sem categoria'}</span>
               <span>{item.paymentMethodName ?? 'Não informado'}</span>
               <span>{item.cardName ?? '—'}</span>
-              <span><i className={`status-pill status-pill--${item.status}`}>{statusLabel(item.status)}</i></span>
+              <span><i className={`status-pill status-pill--${item.isOverdue ? 'overdue' : item.status}`}>{item.isOverdue ? 'Atrasado' : statusLabel(item.status)}</i></span>
               <span className={item.kind === 'income' ? 'money-positive' : ''}><strong>{item.kind === 'income' ? '+' : '−'} {currency.format(item.actualAmount ?? item.plannedAmount)}</strong>{item.actualAmount !== null && item.actualAmount !== item.plannedAmount && <small>Previsto {currency.format(item.plannedAmount)}</small>}</span>
               <span className="row-actions">
                 {item.status === 'planned' && <button className="icon-button icon-button--success" onClick={() => settle(item)} title={item.kind === 'income' ? 'Marcar como recebida' : 'Marcar como paga'}><Check size={17} /></button>}
@@ -245,11 +271,11 @@ export const Transactions = ({
             </div>
           ))}
         </div>
-        {!loading && items.length === 0 && <EmptyState icon={<ReceiptText />} title="Nenhum lançamento encontrado" description={search ? 'Tente buscar por outro termo ou mudar os filtros.' : 'Adicione a primeira entrada ou saída deste mês.'} action={!search && <button className="button button--soft" onClick={onAdd}><Plus size={16} /> Adicionar lançamento</button>} />}
+        {!loading && items.length === 0 && <EmptyState icon={<ReceiptText />} title="Nenhum lançamento encontrado" description={hasActiveFilters ? 'Tente buscar por outro termo ou mudar os filtros.' : 'Adicione a primeira entrada ou saída deste mês.'} action={!hasActiveFilters && <button className="button button--soft" onClick={onAdd}><Plus size={16} /> Adicionar lançamento</button>} />}
       </div>
 
       {payCardOpen && selectedCard && (
-        <Modal title="Pagar cartão" description={`Escolha qual fatura de ${monthLabel(month)} será marcada como paga.`} onClose={() => setPayCardOpen(false)}>
+        <Modal title="Pagar cartão" description="Escolha uma fatura. Atrasos e faturas atuais ficam separados pelo vencimento." onClose={() => setPayCardOpen(false)}>
           <div className="pay-card-modal__body">
             <div className="pay-card-options" role="radiogroup" aria-label="Cartão a pagar">
               {creditCardGroups.map((group) => (
@@ -262,7 +288,7 @@ export const Transactions = ({
                   onClick={() => setSelectedCardKey(group.key)}
                 >
                   <span className="pay-card-options__icon"><CreditCard size={18} /></span>
-                  <span className="pay-card-options__copy"><strong>{group.name}</strong><small>{group.items.length} {group.items.length === 1 ? 'saída planejada' : 'saídas planejadas'}</small></span>
+                  <span className="pay-card-options__copy"><strong>{group.name}</strong><small>{group.overdue ? 'Atrasada' : 'Vence'} em {formatDate(group.dueDate, 'dd/MM/yyyy')} · {group.items.length} {group.items.length === 1 ? 'saída' : 'saídas'}</small></span>
                   <strong className="pay-card-options__value">{currency.format(group.total)}</strong>
                   <span className="pay-card-options__check">{group.key === selectedCard.key && <Check size={15} strokeWidth={2.8} />}</span>
                 </button>

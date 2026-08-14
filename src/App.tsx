@@ -12,6 +12,7 @@ import {
 import type {
   Catalogs,
   Goal,
+  InstallmentPurchase,
   Overview,
   RecurringExpense,
   Transaction,
@@ -33,7 +34,7 @@ type View = 'dashboard' | 'transactions' | 'recurring' | 'installments' | 'goals
 type ModalState =
   | { type: 'transaction'; item?: Transaction | null }
   | { type: 'recurring'; item?: RecurringExpense | null }
-  | { type: 'installment' }
+  | { type: 'installment'; item?: InstallmentPurchase | null }
   | { type: 'goal'; item?: Goal | null }
   | null;
 
@@ -196,10 +197,10 @@ export default function App() {
               onAddTransaction={() => setModal({ type: 'transaction' })}
               onNavigate={(next) => setView(next as View)}
               onEditTransaction={(item) => setModal({ type: 'transaction', item })}
-              onSettleTransaction={(item) =>
+              onSettleTransactions={(items) =>
                 safeAction(
-                  () => window.lionPocket.settleTransaction(item.id),
-                  item.kind === 'income' ? 'Entrada marcada como recebida.' : 'Conta marcada como paga.',
+                  () => window.lionPocket.settleTransactions(items.map((item) => item.id)).then(() => undefined),
+                  items.length === 1 ? 'Conta marcada como paga.' : `${items.length} compras da fatura marcadas como pagas.`,
                 )
               }
             />
@@ -228,6 +229,7 @@ export default function App() {
               month={month}
               refreshKey={refreshKey}
               onAdd={() => setModal({ type: 'installment' })}
+              onEdit={(item) => setModal({ type: 'installment', item })}
               onChanged={changed}
               notify={notify}
             />
@@ -299,12 +301,13 @@ export default function App() {
       )}
       {modal?.type === 'installment' && (
         <InstallmentForm
+          item={modal.item}
           catalogs={catalogs}
           onClose={() => setModal(null)}
           onSave={(input) =>
             safeAction(
-              () => window.lionPocket.createInstallmentPurchase(input).then(() => undefined),
-              'Parcelas criadas com sucesso.',
+              () => window.lionPocket.saveInstallmentPurchase(input).then(() => undefined),
+              input.id ? 'Compra parcelada atualizada.' : 'Parcelas criadas com sucesso.',
             )
           }
         />

@@ -49,6 +49,13 @@
   --positive-wash: rgba(86, 215, 171, 0.14);
   --negative: #ff8a6b;
   --negative-wash: rgba(255, 138, 107, 0.14);
+  /* Alerta é um vermelho puxado para o rosa, não o coral das saídas: laranja
+     sobre o fundo ameixa composita em marrom sujo, este matiz não. */
+  --alert: #ff5d7e;
+  --alert-wash: rgba(255, 93, 126, 0.14);
+  /* Versão sólida, para quando o alerta é o fundo e o texto por cima é branco:
+     o --alert é claro demais para isso e derrubaria o contraste. */
+  --alert-solid: #e2325c;
   --violet: #b085ff;
   --violet-wash: rgba(176, 133, 255, 0.14);
 
@@ -94,6 +101,9 @@
   --positive-wash: rgba(18, 160, 119, 0.12);
   --negative: #e4622f;
   --negative-wash: rgba(228, 98, 47, 0.12);
+  --alert: #d81b52;
+  --alert-wash: rgba(216, 27, 82, 0.11);
+  --alert-solid: #d81b52;
   --violet: #7c4dd8;
   --violet-wash: rgba(124, 77, 216, 0.12);
 
@@ -189,16 +199,29 @@ strong,
   background: transparent;
 }
 
+/* Barra de rolagem discreta: o polegar nasce invisível e só aparece, em fade,
+   quando o ponteiro entra na área que rola. A calha continua ocupando os
+   mesmos 11px o tempo todo, então o conteúdo não pula quando ela surge. */
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
-  background: var(--line-2);
+  background-color: transparent;
   background-clip: content-box;
+  transition: background-color 220ms ease;
+}
+
+.page-content:hover::-webkit-scrollbar-thumb,
+.category-legend:hover::-webkit-scrollbar-thumb,
+.upcoming-list:hover::-webkit-scrollbar-thumb,
+.mini-list:hover::-webkit-scrollbar-thumb,
+.modal:hover::-webkit-scrollbar-thumb,
+.leo__panel:hover::-webkit-scrollbar-thumb,
+.select-control__menu:hover::-webkit-scrollbar-thumb {
+  background-color: var(--line-2);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--primary);
-  background-clip: content-box;
+  background-color: var(--primary);
 }
 
 /* --------------------------------------------------------------------------
@@ -297,7 +320,7 @@ strong,
 
 .titlebar__button--close:hover {
   color: #fff;
-  background: #e2325c;
+  background: var(--alert-solid);
 }
 
 .titlebar__button:focus-visible {
@@ -638,9 +661,9 @@ strong,
 }
 
 .icon-button--danger:hover {
-  color: #ff5f7a;
-  border-color: #ff5f7a;
-  background: rgba(255, 95, 122, 0.12);
+  color: var(--alert);
+  border-color: var(--alert);
+  background: var(--alert-wash);
 }
 
 .month-picker {
@@ -908,12 +931,12 @@ strong,
 }
 
 .field input[aria-invalid='true'] {
-  border-color: var(--negative);
-  box-shadow: 0 0 0 3px var(--negative-wash);
+  border-color: var(--alert);
+  box-shadow: 0 0 0 3px var(--alert-wash);
 }
 
 .field__error {
-  color: var(--negative);
+  color: var(--alert);
   font-size: 11.5px;
 }
 
@@ -949,6 +972,152 @@ strong,
   box-shadow: none;
 }
 
+.number-input {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 42px;
+  padding: 4px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  transition: 140ms ease;
+}
+
+.number-input:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-wash);
+}
+
+.number-input input {
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  appearance: textfield;
+}
+
+.number-input input:focus {
+  box-shadow: none;
+}
+
+.number-input input::-webkit-inner-spin-button,
+.number-input input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.number-input button {
+  display: grid;
+  flex: 0 0 34px;
+  place-items: center;
+  width: 34px;
+  min-height: 32px;
+  padding: 0;
+  color: var(--text-soft);
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: var(--surface-3);
+  box-shadow: none;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease, transform 80ms ease;
+}
+
+.number-input button:hover:not(:disabled) {
+  color: var(--primary-ink);
+  border-color: var(--primary);
+  background: var(--primary-wash);
+}
+
+.number-input button:active:not(:disabled) {
+  transform: scale(.92);
+}
+
+.number-input button:disabled {
+  cursor: default;
+  opacity: .32;
+}
+
+.date-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  transition: 140ms ease;
+}
+
+.date-input:focus-within,
+.date-input--open {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-wash);
+}
+
+.date-input input {
+  min-width: 0;
+  padding-right: 4px;
+  border: 0;
+  background: transparent;
+}
+
+.date-input input:focus {
+  box-shadow: none;
+}
+
+.date-input--segmented {
+  gap: 0;
+  padding-left: 13px;
+}
+
+.date-input--segmented .date-input__segment {
+  flex: 0 0 2ch;
+  width: 2ch;
+  min-width: 2ch;
+  min-height: 40px;
+  padding: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  border-radius: 0;
+}
+
+.date-input--segmented .date-input__segment--year {
+  flex-basis: 4ch;
+  width: 4ch;
+  min-width: 4ch;
+}
+
+.date-input__separator {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.date-input--segmented > button {
+  margin-left: auto;
+}
+
+.date-input > button {
+  display: grid;
+  flex: 0 0 40px;
+  place-items: center;
+  align-self: stretch;
+  padding: 0;
+  color: var(--text-muted);
+  border: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: transparent;
+  transition: 130ms ease;
+}
+
+.date-input > button:hover {
+  color: var(--primary-ink);
+  background: var(--primary-wash);
+}
+
 .select-control__trigger,
 .date-control__trigger {
   display: flex;
@@ -969,6 +1138,47 @@ strong,
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.select-control__value {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.select-control__label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.select-control__details {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.select-control__details small {
+  padding: 3px 6px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.select-control__option:focus-visible .select-control__details small,
+.select-control__option:hover .select-control__details small {
+  color: var(--primary-ink);
+  border-color: var(--primary-wash-strong);
+  background: var(--primary-wash);
 }
 
 .select-control__trigger svg,
@@ -996,13 +1206,64 @@ strong,
 .select-control__menu {
   position: fixed;
   z-index: 900;
+  display: flex;
+  flex-direction: column;
   padding: 6px;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-md);
   background: var(--surface-2);
   box-shadow: var(--shadow-lg);
   animation: pop-in 130ms ease;
+}
+
+.select-control__search {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  padding: 0 9px;
+  color: var(--text-muted);
+  border: 1px solid var(--line-1);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.select-control__search:focus-within {
+  color: var(--primary-ink);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-wash);
+}
+
+.select-control__search input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  border: 0;
+  background: transparent;
+  outline: none;
+}
+
+.select-control__search input::placeholder {
+  color: var(--text-muted);
+}
+
+.select-control__options {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.select-control__empty {
+  display: block;
+  padding: 14px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 .select-control__option {
@@ -1212,6 +1473,7 @@ strong,
 /* Sugestões de lançamentos já usados, sob o campo de descrição. */
 .field--suggest {
   position: relative;
+  z-index: 30;
 }
 
 .suggest-menu {
@@ -1277,6 +1539,13 @@ strong,
   padding: 22px 24px 24px;
 }
 
+.form-grid > .field,
+.form-grid > .toggle-row,
+.form-grid > .installment-total,
+.form-grid > .card-cycle-note {
+  animation: field-reveal 190ms cubic-bezier(0.2, 0.75, 0.3, 1) both;
+}
+
 .form-grid--transaction {
   gap: 12px 15px;
   padding-top: 18px;
@@ -1297,8 +1566,8 @@ strong,
 }
 
 .card-cycle-note--warning {
-  border-color: var(--negative);
-  background: var(--negative-wash);
+  border-color: var(--alert);
+  background: var(--alert-wash);
 }
 
 .toggle-row {
@@ -1925,6 +2194,36 @@ strong,
   gap: 3px;
 }
 
+/* Teto de altura para as listas do meio: sem ele, a distribuição cresce com o
+   número de categorias e empurra os objetivos para fora da tela. Nada é
+   cortado — o que passar do limite rola dentro do próprio painel. */
+.category-legend {
+  max-height: 336px;
+}
+
+/* Estas duas preenchem a altura do painel em vez de terem teto próprio. Com um
+   teto fixo sobrava espaço morto embaixo quando o painel era mais alto que a
+   lista, e a última linha ficava cortada ao meio. */
+.upcoming-list,
+.mini-list {
+  flex: 1;
+  min-height: 0;
+}
+
+.category-legend,
+.upcoming-list,
+.mini-list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Espaço para a barra de rolagem não encostar no conteúdo quando aparece. */
+.category-legend:has(> :nth-child(12)),
+.upcoming-list:has(> :nth-child(6)),
+.mini-list:has(> :nth-child(6)) {
+  padding-right: 6px;
+}
+
 .upcoming-item,
 .mini-transaction {
   display: flex;
@@ -1988,6 +2287,47 @@ strong,
   background: var(--surface-2);
 }
 
+/* Atrasada: o alerta mora na data e no rótulo, que são o que de fato atrasou.
+   O resto do app sinaliza estado com elementos pequenos e tingidos — pílulas,
+   ícones em wash — e não com faixas de cor sobre a linha inteira; uma barra
+   de 3px à esquerda também repetiria a marca de garra que indica a página
+   ativa na navegação. Aqui fica só um véu de cor para destacar a linha. */
+.upcoming-item--overdue {
+  background: var(--alert-wash);
+}
+
+.upcoming-item--overdue:hover {
+  background: color-mix(in srgb, var(--alert-wash) 75%, var(--surface-2));
+}
+
+.upcoming-item--overdue .date-badge {
+  border-color: transparent;
+  background: var(--alert-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--alert) 38%, transparent);
+}
+
+.upcoming-item--overdue .date-badge strong {
+  color: var(--alert);
+}
+
+.upcoming-item--overdue .date-badge small {
+  color: color-mix(in srgb, var(--alert) 70%, transparent);
+}
+
+/* O atraso é um estado, não um metadado: sai da frase de detalhe — onde ficava
+   colado na categoria por um ponto — e vira uma pílula própria, alinhada com
+   as das outras listas. A cor e a posição já avisam, então dispensa o ícone. */
+.upcoming-item__late {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  color: var(--alert);
+  font-size: 11px;
+  font-weight: 620;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--alert) 16%, transparent);
+}
+
 .upcoming-item__copy,
 .mini-transaction__copy {
   flex: 1;
@@ -2008,12 +2348,30 @@ strong,
 .mini-transaction__copy span {
   display: block;
   margin-top: 2px;
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.upcoming-item__open > strong:last-child {
+.upcoming-item__copy small svg {
+  vertical-align: -2px;
+}
+
+/* Valor e estado empilhados à direita. Lado a lado eles não cabem quando o
+   painel cai para um terço da largura: a pílula empurrava o nome da conta
+   até sumir. Empilhados, cada um tem sua própria linha e nada se sobrepõe. */
+.upcoming-item__amount {
+  display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.upcoming-item__amount > strong {
   font-family: var(--font-display);
   font-size: 14px;
 }
@@ -2184,8 +2542,17 @@ button.goal-mini {
   font-size: 20px;
 }
 
+/* "X em atraso", logo abaixo do total de saídas. Em coral ficava igual ao
+   valor acima, misturando "isto é uma saída" com "isto está atrasado". */
+.summary-strip small {
+  margin-top: 2px;
+  color: var(--alert);
+  font-size: 10.5px;
+}
+
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
@@ -2258,6 +2625,35 @@ button.goal-mini {
 
 .data-table__row:hover {
   background: var(--surface-2);
+}
+
+/* Mesmo tratamento da visão geral: o vermelho-rosa do alerta em vez do coral
+   das saídas, sem a faixa de cor forte e sem a barra à esquerda, que é a marca
+   de garra da navegação. Quem avisa é a data e a pílula de situação. */
+.data-table__row.is-overdue {
+  background: var(--alert-wash);
+}
+
+.data-table__row.is-overdue:hover {
+  background: color-mix(in srgb, var(--alert-wash) 75%, var(--surface-2));
+}
+
+.data-table__row.is-overdue .date-cell {
+  background: var(--alert-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--alert) 38%, transparent);
+}
+
+.data-table__row.is-overdue .date-cell strong {
+  color: var(--alert);
+}
+
+.data-table__row.is-overdue .date-cell small {
+  color: color-mix(in srgb, var(--alert) 70%, transparent);
+}
+
+.data-table__row.is-overdue .transaction-name small {
+  color: var(--alert);
+  font-weight: 620;
 }
 
 .data-table__row.is-muted {
@@ -2476,6 +2872,11 @@ button.goal-mini {
 .status-pill--saving {
   color: var(--primary-ink);
   background: var(--primary-wash);
+}
+
+.status-pill--overdue {
+  color: var(--alert);
+  background: color-mix(in srgb, var(--alert) 16%, transparent);
 }
 
 .status-pill--cancelled,
@@ -2747,7 +3148,7 @@ button.goal-mini {
 
 .installment-row {
   display: grid;
-  grid-template-columns: 52px minmax(0, 2.2fr) 132px 148px 40px;
+  grid-template-columns: 52px minmax(0, 2.2fr) 132px 148px 76px;
   gap: 16px;
   align-items: center;
   padding: 15px 12px;
@@ -2820,6 +3221,12 @@ button.goal-mini {
 
 .installment-row__date span {
   margin-bottom: 3px;
+}
+
+.installment-row__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
 }
 
 /* --------------------------------------------------------------------------
@@ -3204,8 +3611,8 @@ button.goal-mini {
 
 .tag-item__action--danger:hover,
 .tag-item__action--danger:focus-visible {
-  color: var(--negative);
-  background: var(--negative-wash);
+  color: var(--alert);
+  background: var(--alert-wash);
 }
 
 .tag-item__action:disabled {
@@ -3366,7 +3773,7 @@ button.goal-mini {
   height: 13px;
   border: 2px solid var(--bg);
   border-radius: 50%;
-  background: var(--negative);
+  background: var(--alert);
   content: '';
   animation: pulse-soft 1.9s ease-in-out infinite;
 }
@@ -3584,6 +3991,13 @@ button.goal-mini {
   from {
     opacity: 0;
     transform: translateY(14px) scale(0.985);
+  }
+}
+
+@keyframes field-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.99);
   }
 }
 

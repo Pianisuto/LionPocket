@@ -70,6 +70,10 @@ set -e
 
 for home in /home/*; do
   [ -d "$home" ] || continue
+  legacy_bin="$home/.local/bin/lionpocket"
+  if [ -L "$legacy_bin" ] && [ "$(readlink "$legacy_bin")" = "$home/.local/opt/lionpocket/lionpocket" ]; then
+    rm -f "$legacy_bin" 2>/dev/null || true
+  fi
   rm -rf "$home/.local/opt/lionpocket" 2>/dev/null || true
   rm -f "$home/.local/share/applications/lionpocket.desktop" 2>/dev/null || true
   rm -f "$home/.local/share/icons/hicolor/"*"/apps/lionpocket.png" 2>/dev/null || true

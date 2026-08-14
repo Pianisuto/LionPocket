@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { LionPocketDatabase } from './database';
+import { addMonths, currentMonthIso, todayIso } from '../shared/finance';
 
 const temporaryDirectories: string[] = [];
 
@@ -34,7 +35,8 @@ describe('despesas fixas', () => {
     });
 
     const january = database.listTransactions({ month: '2026-01' })[0];
-    const february = database.listTransactions({ month: '2026-02' })[0];
+    const february = database.listTransactions({ month: '2026-02' }).find((item) => item.dueDate === '2026-02-28');
+    if (!february) throw new Error('A ocorrência de fevereiro não foi criada.');
     database.settleTransaction(january.id);
 
     database.saveRecurringExpense({
@@ -46,8 +48,8 @@ describe('despesas fixas', () => {
     });
 
     const paidJanuary = database.listTransactions({ month: '2026-01' })[0];
-    const plannedFebruary = database.listTransactions({ month: '2026-02' })[0];
-    const newMarch = database.listTransactions({ month: '2026-03' })[0];
+    const plannedFebruary = database.listTransactions({ month: '2026-02' }).find((item) => item.dueDate === '2026-02-15');
+    const newMarch = database.listTransactions({ month: '2026-03' }).find((item) => item.dueDate === '2026-03-15');
 
     expect(paidJanuary).toMatchObject({
       description: 'Internet antiga',
@@ -113,7 +115,7 @@ describe('despesas fixas', () => {
       dueDate: '2026-09-21',
       cardId: card.id,
     });
-    expect(database.listTransactions({ month: '2026-10' })[0]).toMatchObject({
+    expect(database.listTransactions({ month: '2026-10' }).find((item) => item.purchaseDate === '2026-09-20')).toMatchObject({
       purchaseDate: '2026-09-20',
       dueDate: '2026-10-21',
     });
@@ -360,7 +362,7 @@ describe('cartões e compras parceladas', () => {
       installmentTotal: 6,
       dueDate: '2026-08-10',
     });
-    expect(database.listTransactions({ month: '2026-10' })[0]).toMatchObject({
+    expect(database.listTransactions({ month: '2026-10' }).find((item) => item.installmentNumber === 6)).toMatchObject({
       installmentNumber: 6,
       dueDate: '2026-10-10',
     });
@@ -381,6 +383,113 @@ describe('cartões e compras parceladas', () => {
     });
     expect(database.listInstallmentPurchases('2026-11')).toEqual([]);
 
+    database.db.close();
+  });
+
+  it('edita parcelas em aberto sem alterar valor e vencimento das já pagas', () => {
+    const database = createDatabase();
+    database.createCatalogItem({ type: 'card', name: 'Nubank', dueDay: 10 });
+    const card = database.getCatalogs().cards[0];
+    const purchase = database.createInstallmentPurchase({
+      description: 'Notebook',
+      cardId: card.id,
+      installmentAmount: 250,
+      totalInstallments: 3,
+      currentInstallment: 1,
+      purchaseDate: '2026-07-20',
+      currentDueDate: '2026-08-10',
+    });
+    const august = database.listTransactions({ month: '2026-08' })[0];
+    database.settleTransaction(august.id);
+
+    database.saveInstallmentPurchase({
+      id: purchase.id,
+      description: 'Notebook trabalho',
+      cardId: card.id,
+      installmentAmount: 300,
+      totalInstallments: 4,
+      currentInstallment: 2,
+      purchaseDate: '2026-07-20',
+      currentDueDate: '2026-09-10',
+    });
+
+    expect(database.listTransactions({ month: '2026-08' })[0]).toMatchObject({
+      description: 'Notebook trabalho',
+      plannedAmount: 250,
+      actualAmount: 250,
+      dueDate: '2026-08-10',
+      status: 'paid',
+      installmentTotal: 4,
+    });
+    expect(database.listTransactions({ month: '2026-09' })[0]).toMatchObject({
+      description: 'Notebook trabalho',
+      plannedAmount: 300,
+      dueDate: '2026-09-10',
+      installmentNumber: 2,
+      installmentTotal: 4,
+      status: 'planned',
+    });
+    expect(database.listTransactions({ month: '2026-11' })[0]).toMatchObject({
+      installmentNumber: 4,
+      plannedAmount: 300,
+      dueDate: '2026-11-10',
+    });
+    expect(database.listInstallmentPurchases('2026-09')[0]).toMatchObject({
+      description: 'Notebook trabalho',
+      installmentAmount: 300,
+      totalInstallments: 4,
+      purchaseDate: '2026-07-20',
+    });
+    database.db.close();
+  });
+
+  it('corrige a numeração da parcela atual sem perder pagamentos já registrados', () => {
+    const database = createDatabase();
+    const purchase = database.createInstallmentPurchase({
+      description: 'Oboticário',
+      installmentAmount: 55.16,
+      totalInstallments: 10,
+      currentInstallment: 5,
+      purchaseDate: '2026-07-14',
+      currentDueDate: '2026-08-21',
+    });
+    database.settleTransaction(database.listTransactions({ month: '2026-08' })[0].id);
+
+    const corrected = database.saveInstallmentPurchase({
+      id: purchase.id,
+      description: 'Oboticário',
+      installmentAmount: 55.16,
+      totalInstallments: 10,
+      currentInstallment: 4,
+      originalCurrentInstallment: 5,
+      purchaseDate: '2026-07-14',
+      currentDueDate: '2026-08-21',
+    });
+
+    expect(corrected).toMatchObject({
+      startingInstallment: 4,
+      viewedInstallment: 4,
+      viewedStatus: 'paid',
+      paidInstallments: 4,
+      firstDueDate: '2026-05-21',
+    });
+    expect(database.listTransactions({ month: '2026-08' })[0]).toMatchObject({
+      installmentNumber: 4,
+      installmentTotal: 10,
+      dueDate: '2026-08-21',
+      status: 'paid',
+      actualAmount: 55.16,
+    });
+    expect(database.listTransactions({ month: '2026-09' })[0]).toMatchObject({
+      installmentNumber: 5,
+      dueDate: '2026-09-21',
+      status: 'planned',
+    });
+    expect(database.listTransactions({ month: '2027-02' })[0]).toMatchObject({
+      installmentNumber: 10,
+      dueDate: '2027-02-21',
+      status: 'planned',
+    });
     database.db.close();
   });
 
@@ -441,6 +550,51 @@ describe('busca de lançamentos', () => {
     expect(database.listTransactions({ month: '2026-08', search: 'cartao de credito' })[0]?.description).toBe('Água');
     database.db.close();
   });
+
+  it('combina filtros de cartão de crédito e compra parcelada', () => {
+    const database = createDatabase();
+    const credit = database.getCatalogs().paymentMethods.find((method) => method.name === 'Cartão de crédito');
+    database.createCatalogItem({ type: 'card', name: 'Nubank', dueDay: 21, closingDay: 14 });
+    const card = database.getCatalogs().cards[0];
+
+    database.saveTransaction({
+      kind: 'expense',
+      description: 'Assinatura no cartão',
+      plannedAmount: 50,
+      dueDate: '2026-08-21',
+      status: 'planned',
+      paymentMethodId: credit?.id ?? null,
+      cardId: card.id,
+    });
+    database.saveTransaction({
+      kind: 'expense',
+      description: 'Conta no Pix',
+      plannedAmount: 80,
+      dueDate: '2026-08-21',
+      status: 'planned',
+      paymentMethodId: null,
+    });
+    database.createInstallmentPurchase({
+      description: 'Notebook parcelado',
+      cardId: card.id,
+      paymentMethodId: credit?.id ?? null,
+      installmentAmount: 200,
+      totalInstallments: 3,
+      currentInstallment: 1,
+      purchaseDate: '2026-07-10',
+      currentDueDate: '2026-08-21',
+    });
+
+    expect(database.listTransactions({ month: '2026-08', payment: 'creditCard' }).map((item) => item.description))
+      .toEqual(['Assinatura no cartão', 'Notebook parcelado']);
+    expect(database.listTransactions({ month: '2026-08', source: 'installment' }).map((item) => item.description))
+      .toEqual(['Notebook parcelado']);
+    expect(database.listTransactions({ month: '2026-08', payment: 'creditCard', source: 'installment' }).map((item) => item.description))
+      .toEqual(['Notebook parcelado']);
+    expect(database.listTransactions({ month: '2026-08', payment: 'other' }).map((item) => item.description))
+      .toEqual(['Conta no Pix']);
+    database.db.close();
+  });
 });
 
 const plan = (
@@ -465,7 +619,7 @@ const plan = (
   });
 
 describe('meses já encerrados', () => {
-  it('quita a lista inteira usando o planejado e a data do vencimento', () => {
+  it('quita a lista inteira usando o planejado e a data real do pagamento', () => {
     const database = createDatabase();
     const internet = plan(database, 'expense', 'Internet', '2020-03-10', 120);
     const salary = plan(database, 'income', 'Salário CLT', '2020-03-05', 4000);
@@ -477,8 +631,8 @@ describe('meses já encerrados', () => {
     // A conta futura já estava quitada e não entra na contagem.
     expect(settled).toBe(2);
     expect(database.listTransactions({ month: '2020-03' })).toMatchObject([
-      { description: 'Salário CLT', status: 'received', actualAmount: 4000, settledDate: '2020-03-05' },
-      { description: 'Internet', status: 'paid', actualAmount: 120, settledDate: '2020-03-10' },
+      { description: 'Salário CLT', status: 'received', actualAmount: 4000, settledDate: todayIso() },
+      { description: 'Internet', status: 'paid', actualAmount: 120, settledDate: todayIso() },
     ]);
 
     database.db.close();
@@ -558,32 +712,116 @@ describe('sugestões de lançamento', () => {
 });
 
 describe('contas a caminho', () => {
-  it('mostra só despesas do mês aberto, sem entradas e sem outros meses', () => {
+  it('mostra despesas do mês aberto e prioriza atrasos carregados', () => {
     const database = createDatabase();
+    const month = currentMonthIso();
+    const previousMonth = addMonths(`${month}-01`, -1).slice(0, 7);
+    const nextMonth = addMonths(`${month}-01`, 1).slice(0, 7);
+    plan(database, 'expense', 'Internet atrasada', `${previousMonth}-10`, 120);
+    plan(database, 'expense', 'Luz', `${month}-20`, 600);
+    plan(database, 'income', 'Salário CLT', `${month}-05`, 1489);
+    plan(database, 'expense', 'Internet futura', `${nextMonth}-10`, 120);
 
-    plan(database, 'expense', 'Internet', '2026-05-10', 120);
-    plan(database, 'expense', 'Luz', '2026-05-20', 600);
-    plan(database, 'income', 'Salário CLT', '2026-05-05', 1489);
-    plan(database, 'expense', 'Internet de junho', '2026-06-10', 120);
-    plan(database, 'expense', 'Internet de abril', '2026-04-10', 120);
+    const { upcoming } = database.getOverview(month);
 
-    const { upcoming } = database.getOverview('2026-05');
-
-    expect(upcoming.map((item) => item.description)).toEqual(['Internet', 'Luz']);
+    expect(upcoming.map((item) => item.description)).toEqual(['Internet atrasada', 'Luz']);
+    expect(upcoming[0].isOverdue).toBe(true);
 
     database.db.close();
   });
 
   it('deixa de listar a conta depois que ela é paga', () => {
     const database = createDatabase();
-    const bill = plan(database, 'expense', 'Internet', '2026-05-10', 120);
+    const month = currentMonthIso();
+    const bill = plan(database, 'expense', 'Internet', `${month}-20`, 120);
 
-    expect(database.getOverview('2026-05').upcoming).toHaveLength(1);
+    expect(database.getOverview(month).upcoming).toHaveLength(1);
 
     database.settleTransaction(bill.id);
 
-    expect(database.getOverview('2026-05').upcoming).toEqual([]);
+    expect(database.getOverview(month).upcoming).toEqual([]);
 
+    database.db.close();
+  });
+});
+
+describe('contas vencidas carregadas adiante', () => {
+  it('preserva o vencimento, tira do total antigo e carrega junto da recorrência normal', () => {
+    const database = createDatabase();
+    const month = currentMonthIso();
+    const previousMonth = addMonths(`${month}-01`, -1).slice(0, 7);
+    const nextMonth = addMonths(`${month}-01`, 1).slice(0, 7);
+    database.saveRecurringExpense({
+      kind: 'expense',
+      active: true,
+      description: 'Moto',
+      startMonth: previousMonth,
+      plannedAmount: 555.12,
+      dueDay: 1,
+      notes: '',
+    });
+
+    const original = database.listTransactions({ month: previousMonth })
+      .find((item) => item.dueDate.startsWith(previousMonth));
+    if (!original) throw new Error('A ocorrência original não foi criada.');
+    const currentItems = database.listTransactions({ month });
+    const carried = currentItems.find((item) => item.id === original.id);
+    const regular = currentItems.find((item) => item.sourceId === original.sourceId && item.dueDate.startsWith(month));
+
+    expect(carried).toMatchObject({
+      description: 'Moto',
+      dueDate: `${previousMonth}-01`,
+      status: 'planned',
+      isOverdue: true,
+    });
+    expect(regular).toMatchObject({ description: 'Moto', dueDate: `${month}-01` });
+    expect(database.getOverview(previousMonth).summary).toMatchObject({
+      plannedExpenses: 0,
+      paidExpenses: 0,
+      overdueExpenses: 0,
+    });
+    expect(database.getOverview(month).summary.plannedExpenses).toBe(1110.24);
+    expect(database.listTransactions({ month: nextMonth }).some((item) => item.id === original.id)).toBe(true);
+
+    database.settleTransaction(original.id);
+
+    const paid = database.listTransactions({ month }).find((item) => item.id === original.id);
+    expect(paid).toMatchObject({
+      dueDate: `${previousMonth}-01`,
+      settledDate: todayIso(),
+      status: 'paid',
+      isOverdue: false,
+    });
+    expect(database.getOverview(month).summary).toMatchObject({
+      plannedExpenses: 1110.24,
+      paidExpenses: 555.12,
+    });
+    expect(database.listTransactions({ month: nextMonth }).some((item) => item.id === original.id)).toBe(false);
+    expect(database.listTransactions({ month: previousMonth }).some((item) => item.id === original.id)).toBe(true);
+    database.db.close();
+  });
+
+  it('não carrega entradas, canceladas, futuras ou contas já pagas', () => {
+    const database = createDatabase();
+    const month = currentMonthIso();
+    const previousMonth = addMonths(`${month}-01`, -1).slice(0, 7);
+    const nextMonth = addMonths(`${month}-01`, 1).slice(0, 7);
+    const overdue = plan(database, 'expense', 'Conta vencida', `${previousMonth}-05`, 100);
+    plan(database, 'income', 'Entrada vencida', `${previousMonth}-05`, 200);
+    database.saveTransaction({
+      ...plan(database, 'expense', 'Conta cancelada', `${previousMonth}-06`, 300),
+      dueDate: `${previousMonth}-06`,
+      status: 'cancelled',
+    });
+    plan(database, 'expense', 'Conta futura', `${nextMonth}-20`, 400);
+    const paid = plan(database, 'expense', 'Conta paga', `${previousMonth}-07`, 500);
+    database.settleTransaction(paid.id);
+
+    const carriedIds = database.listTransactions({ month: nextMonth }).map((item) => item.id);
+    expect(carriedIds).toContain(overdue.id);
+    expect(carriedIds).not.toContain(paid.id);
+    expect(database.listTransactions({ month: nextMonth }).filter((item) => item.dueDate.startsWith(previousMonth)))
+      .toHaveLength(1);
     database.db.close();
   });
 });

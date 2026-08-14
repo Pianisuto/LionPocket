@@ -67,6 +67,9 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
   ipcMain.handle('installments:create', (_event, input: InstallmentPurchaseInput) =>
     database.createInstallmentPurchase(input),
   );
+  ipcMain.handle('installments:save', (_event, input: InstallmentPurchaseInput) =>
+    database.saveInstallmentPurchase(input),
+  );
   ipcMain.handle('installments:delete', (_event, id: string) =>
     database.deleteInstallmentPurchase(id),
   );

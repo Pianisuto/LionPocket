@@ -17,6 +17,7 @@ const api: LionPocketApi = {
   deleteRecurringExpense: (id) => ipcRenderer.invoke('recurring:delete', id),
   listInstallmentPurchases: (month) => ipcRenderer.invoke('installments:list', month),
   createInstallmentPurchase: (input) => ipcRenderer.invoke('installments:create', input),
+  saveInstallmentPurchase: (input) => ipcRenderer.invoke('installments:save', input),
   deleteInstallmentPurchase: (id) => ipcRenderer.invoke('installments:delete', id),
   listGoals: () => ipcRenderer.invoke('goals:list'),
   saveGoal: (input) => ipcRenderer.invoke('goals:save', input),

@@ -42,6 +42,8 @@ export interface Transaction {
   sourceId: string | null;
   installmentNumber: number | null;
   installmentTotal: number | null;
+  /** Derivado em tempo de consulta; o status persistido continua sendo planned. */
+  isOverdue: boolean;
 }
 
 export interface TransactionInput {
@@ -78,6 +80,8 @@ export interface TransactionFilters {
   month: string;
   kind?: MoneyKind | 'all';
   status?: TransactionStatus | 'all';
+  payment?: 'all' | 'creditCard' | 'other';
+  source?: Transaction['sourceType'] | 'all';
   search?: string;
 }
 
@@ -126,6 +130,7 @@ export interface InstallmentPurchase {
   totalInstallments: number;
   startingInstallment: number;
   paidInstallments: number;
+  purchaseDate: string | null;
   firstDueDate: string;
   viewedInstallment: number;
   viewedDueDate: string;
@@ -135,6 +140,7 @@ export interface InstallmentPurchase {
 }
 
 export interface InstallmentPurchaseInput {
+  id?: string;
   description: string;
   categoryId?: string | null;
   cardId?: string | null;
@@ -142,6 +148,8 @@ export interface InstallmentPurchaseInput {
   installmentAmount: number;
   totalInstallments: number;
   currentInstallment: number;
+  originalCurrentInstallment?: number;
+  purchaseDate?: string | null;
   currentDueDate: string;
   notes?: string;
 }
@@ -187,6 +195,7 @@ export interface MonthSummary {
   receivedIncome: number;
   plannedExpenses: number;
   paidExpenses: number;
+  overdueExpenses: number;
   projectedBalance: number;
   realizedBalance: number;
   committedPercent: number;
@@ -251,6 +260,7 @@ export interface LionPocketApi {
   deleteRecurringExpense(id: string): Promise<void>;
   listInstallmentPurchases(month: string): Promise<InstallmentPurchase[]>;
   createInstallmentPurchase(input: InstallmentPurchaseInput): Promise<InstallmentPurchase>;
+  saveInstallmentPurchase(input: InstallmentPurchaseInput): Promise<InstallmentPurchase>;
   deleteInstallmentPurchase(id: string): Promise<void>;
   listGoals(): Promise<Goal[]>;
   saveGoal(input: GoalInput): Promise<Goal>;

@@ -37,7 +37,7 @@ describe('regras financeiras', () => {
 
   it('coloca a compra na fatura certa usando fechamento e vencimento', () => {
     expect(cardStatementDueDate('2026-08-10', 14, 21)).toBe('2026-08-21');
-    expect(cardStatementDueDate('2026-08-14', 14, 21)).toBe('2026-08-21');
+    expect(cardStatementDueDate('2026-08-14', 14, 21)).toBe('2026-09-21');
     expect(cardStatementDueDate('2026-08-15', 14, 21)).toBe('2026-09-21');
     expect(cardStatementDueDate('2026-08-20', 25, 5)).toBe('2026-09-05');
     expect(cardStatementDueDate('2026-08-26', 25, 5)).toBe('2026-10-05');

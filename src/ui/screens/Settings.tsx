@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import type { CatalogInput, Catalogs, MoneyKind } from '../../shared/types';
-import { SelectField } from '../components';
+import { NumberField, SelectField } from '../components';
 
 export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
   catalogs: Catalogs;
@@ -93,8 +93,8 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
           <SelectField label="Tipo de lista" value={type} onChange={chooseType} options={[{ value: 'category', label: 'Categoria' }, { value: 'paymentMethod', label: 'Forma de pagamento' }, { value: 'card', label: 'Cartão' }]} />
           {type === 'category' && <SelectField label="Usada em" value={kind} onChange={(value) => setKind(value as MoneyKind)} options={[{ value: 'expense', label: 'Saídas' }, { value: 'income', label: 'Entradas' }]} />}
           <label className="field catalog-form__name"><span>Nome</span><input required value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Digite o nome" /></label>
-          {type === 'card' && <label className="field"><span>Dia do fechamento</span><input required min="1" max="31" type="number" value={cardClosingDay} onChange={(event) => setCardClosingDay(event.target.value)} /></label>}
-          {type === 'card' && <label className="field"><span>Dia do vencimento</span><input required min="1" max="31" type="number" value={cardDueDay} onChange={(event) => setCardDueDay(event.target.value)} /></label>}
+          {type === 'card' && <NumberField label="Dia do fechamento" required min={1} max={31} value={cardClosingDay} onChange={setCardClosingDay} />}
+          {type === 'card' && <NumberField label="Dia do vencimento" required min={1} max={31} value={cardDueDay} onChange={setCardDueDay} />}
           <div className="catalog-form__actions">
             {editingCardId && <button type="button" className="button button--ghost" onClick={cancelCardEdit}>Cancelar</button>}
             <button className="button button--primary">{editingCardId ? <Pencil size={17} /> : <Plus size={17} />}{editingCardId ? 'Salvar' : 'Adicionar'}</button>
