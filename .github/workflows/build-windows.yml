@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - redesign-pink
+      - main
     paths:
       - .github/workflows/build-windows.yml
 
@@ -36,15 +36,23 @@ jobs:
           npm run typecheck
           npm run lint
 
+      # A versão vem do package.json em vez de ficar escrita à mão: com o
+      # número fixo, o primeiro release seguinte quebrava o upload, já que o
+      # arquivo gerado passa a ter outro nome e if-no-files-found é error.
+      - name: Read app version
+        id: pkg
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Build Windows installer and portable ZIP
         run: npm run make -- --platform=win32 --arch=x64
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: LionPocket-Windows-0.2.0
+          name: LionPocket-Windows-${{ steps.pkg.outputs.version }}
           path: |
             out/make/squirrel.windows/x64/LionPocket-Instalador.exe
-            out/make/zip/win32/x64/LionPocket-win32-x64-0.2.0.zip
+            out/make/zip/win32/x64/LionPocket-win32-x64-*.zip
           if-no-files-found: error
           retention-days: 14
