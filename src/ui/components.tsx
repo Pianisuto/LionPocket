@@ -433,6 +433,139 @@ export const DateField = ({
   );
 };
 
+const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+export const MonthField = ({
+  label,
+  hint,
+  value,
+  onChange,
+  min,
+  className = '',
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (value: string) => void;
+  min?: string;
+  className?: string;
+}) => {
+  const selectedYear = Number(value.slice(0, 4));
+  const [open, setOpen] = useState(false);
+  const [visibleYear, setVisibleYear] = useState(selectedYear || new Date().getFullYear());
+  const [pickerStyle, setPickerStyle] = useState<CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerId = useId();
+
+  const updatePickerPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const estimatedHeight = 260;
+    const width = Math.max(300, rect.width);
+    const roomBelow = window.innerHeight - rect.bottom - 12;
+    const openAbove = roomBelow < estimatedHeight && rect.top > roomBelow;
+    setPickerStyle({
+      left: Math.min(rect.left, window.innerWidth - width - 8),
+      top: openAbove ? Math.max(8, rect.top - estimatedHeight - 6) : rect.bottom + 6,
+      width,
+    });
+  }, []);
+
+  const closePicker = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  const openPicker = () => {
+    setVisibleYear(selectedYear || new Date().getFullYear());
+    updatePickerPosition();
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    updatePickerPosition();
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !pickerRef.current?.contains(target)) closePicker();
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closePicker(true);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape, true);
+    window.addEventListener('resize', updatePickerPosition);
+    window.addEventListener('scroll', updatePickerPosition, true);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape, true);
+      window.removeEventListener('resize', updatePickerPosition);
+      window.removeEventListener('scroll', updatePickerPosition, true);
+    };
+  }, [open, updatePickerPosition]);
+
+  const chooseMonth = (month: string) => {
+    if (min && month < min) return;
+    onChange(month);
+    closePicker(true);
+  };
+
+  return (
+    <div className={`field ${className}`}>
+      <span>{label}{hint && <small> · {hint}</small>}</span>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`date-control__trigger ${open ? 'date-control__trigger--open' : ''}`}
+        aria-label={label}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? pickerId : undefined}
+        onClick={() => (open ? closePicker() : openPicker())}
+      >
+        <span className={value ? '' : 'is-placeholder'}>{value ? monthLabel(value) : 'Selecione um mês'}</span>
+        <CalendarDays size={16} aria-hidden="true" />
+      </button>
+      {open && createPortal(
+        <div ref={pickerRef} id={pickerId} className="date-control__calendar month-control__calendar" role="dialog" aria-label={`Seletor de mês: ${label}`} style={pickerStyle}>
+          <header className="date-control__header">
+            <button type="button" onClick={() => setVisibleYear((year) => year - 1)} aria-label="Ano anterior"><ChevronLeft size={17} /></button>
+            <strong>{visibleYear}</strong>
+            <button type="button" onClick={() => setVisibleYear((year) => year + 1)} aria-label="Próximo ano"><ChevronRight size={17} /></button>
+          </header>
+          <div className="month-control__months">
+            {monthNames.map((name, index) => {
+              const month = `${visibleYear}-${String(index + 1).padStart(2, '0')}`;
+              const disabled = Boolean(min && month < min);
+              return (
+                <button
+                  key={month}
+                  type="button"
+                  className={`${month === value ? 'is-selected' : ''} ${month === currentMonthIso() ? 'is-current' : ''}`}
+                  aria-label={monthLabel(month)}
+                  aria-pressed={month === value}
+                  disabled={disabled}
+                  onClick={() => chooseMonth(month)}
+                >
+                  {name}
+                </button>
+              );
+            })}
+          </div>
+          <footer className="date-control__footer">
+            <button type="button" className="date-control__today" disabled={Boolean(min && currentMonthIso() < min)} onClick={() => chooseMonth(currentMonthIso())}>Este mês</button>
+          </footer>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+};
+
 export const ProgressBar = ({ value, color = 'var(--primary)' }: { value: number; color?: string }) => (
   <div className="progress" aria-label={`${Math.round(value * 100)}% concluído`}>
     <span style={{ width: `${Math.max(0, Math.min(100, value * 100))}%`, background: color }} />

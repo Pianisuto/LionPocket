@@ -60,6 +60,17 @@ export const addMonths = (date: string, count: number): string => {
   return target.toISOString().slice(0, 10);
 };
 
+/**
+ * Próximo vencimento do cartão a partir de uma data de referência. Sem o
+ * dia de fechamento, a regra mais previsível é nunca sugerir uma data passada.
+ */
+export const nextCardDueDate = (referenceDate: string, dueDay: number): string => {
+  const month = referenceDate.slice(0, 7);
+  const inCurrentMonth = dateForMonthDay(month, dueDay);
+  if (inCurrentMonth >= referenceDate) return inCurrentMonth;
+  return dateForMonthDay(addMonths(referenceDate, 1).slice(0, 7), dueDay);
+};
+
 export const calculateGoal = (
   targetAmount: number,
   savedAmount: number,
@@ -95,4 +106,3 @@ export const emptyMonthSummary = (month: string): MonthSummary => ({
   realizedBalance: 0,
   committedPercent: 0,
 });
-

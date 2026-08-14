@@ -5,6 +5,7 @@ export {
   currentMonthIso,
   isPastDate,
   localDateIso,
+  nextCardDueDate,
   settlementDateFor,
   todayIso,
 } from '../shared/finance';
@@ -47,4 +48,3 @@ export const statusLabel = (status: string) =>
 
 export const priorityLabel = (priority: string) =>
   ({ high: 'Alta', medium: 'Média', low: 'Baixa' })[priority] ?? priority;
-

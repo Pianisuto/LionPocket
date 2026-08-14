@@ -40,6 +40,9 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
 
   ipcMain.handle('catalogs:get', () => database.getCatalogs());
   ipcMain.handle('catalogs:create', (_event, input: CatalogInput) => database.createCatalogItem(input));
+  ipcMain.handle('catalogs:delete', (_event, type: 'category' | 'card', id: string) =>
+    database.deleteCatalogItem(type, id),
+  );
   ipcMain.handle('overview:get', (_event, month: string) => database.getOverview(month));
   ipcMain.handle('transactions:list', (_event, filters: TransactionFilters) =>
     database.listTransactions(filters),
@@ -60,7 +63,7 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
     database.saveRecurringExpense(input),
   );
   ipcMain.handle('recurring:delete', (_event, id: string) => database.deleteRecurringExpense(id));
-  ipcMain.handle('installments:list', () => database.listInstallmentPurchases());
+  ipcMain.handle('installments:list', (_event, month: string) => database.listInstallmentPurchases(month));
   ipcMain.handle('installments:create', (_event, input: InstallmentPurchaseInput) =>
     database.createInstallmentPurchase(input),
   );
@@ -141,4 +144,3 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
     await shell.openExternal(parsed.toString());
   });
 };
-

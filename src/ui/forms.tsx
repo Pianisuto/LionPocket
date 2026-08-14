@@ -13,8 +13,8 @@ import type {
   TransactionStatus,
   TransactionSuggestion,
 } from '../shared/types';
-import { DateField, Modal, SelectField } from './components';
-import { currency, isPastDate, settlementDateFor, todayIso } from './format';
+import { DateField, Modal, MonthField, SelectField } from './components';
+import { currentMonthIso, currency, isPastDate, nextCardDueDate, settlementDateFor, todayIso } from './format';
 
 const moneyValue = (value: number | null | undefined) => (value === null || value === undefined ? '' : String(value));
 
@@ -68,12 +68,16 @@ export const TransactionForm = ({
   const descriptionId = useId();
 
   const categories = catalogs.categories.filter((category) => category.kind === kind);
+  const creditMethod = useMemo(
+    () => catalogs.paymentMethods.find((method) => method.name.toLocaleLowerCase('pt-BR') === 'cartão de crédito'),
+    [catalogs.paymentMethods],
+  );
   const settled = isSettled(status);
   const backfilling = isPastDate(dueDate);
 
   useEffect(() => {
     const term = description.trim();
-    if (!suggestionsOpen || term.length < 2) {
+    if (transaction || !suggestionsOpen || term.length < 2) {
       setSuggestions([]);
       return undefined;
     }
@@ -90,7 +94,7 @@ export const TransactionForm = ({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [description, kind, suggestionsOpen]);
+  }, [description, kind, suggestionsOpen, transaction]);
 
   const applyKind = (next: MoneyKind) => {
     setKind(next);
@@ -109,6 +113,24 @@ export const TransactionForm = ({
     const nextStatus = statusForDate(value, kind);
     setStatus(nextStatus);
     if (amountsLinked) setActualAmount(isSettled(nextStatus) ? plannedAmount : '');
+  };
+
+  const applyCard = (nextCardId: string) => {
+    setCardId(nextCardId);
+    if (!nextCardId) return;
+    if (creditMethod) setPaymentMethodId(creditMethod.id);
+    const card = catalogs.cards.find((item) => item.id === nextCardId);
+    if (card) applyDueDate(nextCardDueDate(defaultDate, card.dueDay));
+  };
+
+  const applyPaymentMethod = (nextMethodId: string) => {
+    setPaymentMethodId(nextMethodId);
+    if (nextMethodId !== creditMethod?.id) {
+      setCardId('');
+      return;
+    }
+    const nextCardId = cardId || catalogs.cards[0]?.id || '';
+    if (nextCardId) applyCard(nextCardId);
   };
 
   const applyStatus = (value: TransactionStatus) => {
@@ -138,8 +160,8 @@ export const TransactionForm = ({
     setDescription(item.description);
     setSuggestionsOpen(false);
     if (item.categoryId && !categoryId) setCategoryId(item.categoryId);
-    if (item.paymentMethodId && !paymentMethodId && kind === 'expense') setPaymentMethodId(item.paymentMethodId);
-    if (item.cardId && !cardId && kind === 'expense') setCardId(item.cardId);
+    if (item.paymentMethodId && !paymentMethodId && kind === 'expense') applyPaymentMethod(item.paymentMethodId);
+    if (item.cardId && !cardId && kind === 'expense') applyCard(item.cardId);
     if (item.amount > 0 && plannedAmount === '') {
       const value = String(item.amount);
       setPlannedAmount(value);
@@ -227,7 +249,7 @@ export const TransactionForm = ({
             autoFocus
             autoComplete="off"
             role="combobox"
-            aria-expanded={suggestionsOpen && suggestions.length > 0}
+            aria-expanded={!transaction && suggestionsOpen && suggestions.length > 0}
             aria-autocomplete="list"
             value={description}
             onChange={(event) => { setDescription(event.target.value); setSuggestionsOpen(true); }}
@@ -241,7 +263,7 @@ export const TransactionForm = ({
             }}
             placeholder={kind === 'expense' ? 'Ex.: Supermercado' : 'Ex.: Salário'}
           />
-          {suggestionsOpen && suggestions.length > 0 && (
+          {!transaction && suggestionsOpen && suggestions.length > 0 && (
             <div className="suggest-menu" role="listbox" aria-label="Lançamentos parecidos">
               <span className="suggest-menu__title"><History size={13} /> Você já lançou</span>
               {suggestions.map((item) => (
@@ -283,13 +305,13 @@ export const TransactionForm = ({
           { value: settledStatusFor(kind), label: kind === 'income' ? 'Recebido' : 'Pago' },
           { value: 'cancelled', label: 'Cancelado' },
         ]} />
-        <SelectField label="Forma de pagamento" value={paymentMethodId} onChange={setPaymentMethodId} disabled={kind === 'income'} options={[
+        <SelectField label="Forma de pagamento" value={paymentMethodId} onChange={applyPaymentMethod} disabled={kind === 'income'} options={[
           { value: '', label: 'Não informada' },
           ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name })),
         ]} />
-        <SelectField label="Cartão" value={cardId} onChange={setCardId} disabled={kind === 'income'} options={[
+        <SelectField label="Cartão" value={cardId} onChange={applyCard} disabled={kind === 'income'} options={[
           { value: '', label: 'Nenhum' },
-          ...catalogs.cards.map((card) => ({ value: card.id, label: card.name })),
+          ...catalogs.cards.map((card) => ({ value: card.id, label: `${card.name} · vence dia ${card.dueDay}` })),
         ]} />
         <label className="field form-grid__full">
           <span>Observações</span>
@@ -310,33 +332,62 @@ export const TransactionForm = ({
   );
 };
 
-export const RecurringForm = ({ item, catalogs, onSave, onClose }: {
+export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClose }: {
   item?: RecurringExpense | null;
   catalogs: Catalogs;
+  defaultStartMonth: string;
   onSave: (input: RecurringExpenseInput) => Promise<unknown>;
   onClose: () => void;
 }) => {
+  const [kind, setKind] = useState<MoneyKind>(item?.kind ?? 'expense');
   const [description, setDescription] = useState(item?.description ?? '');
+  const [startMonth, setStartMonth] = useState(item?.startMonth ?? (defaultStartMonth < currentMonthIso() ? currentMonthIso() : defaultStartMonth));
   const [categoryId, setCategoryId] = useState(item?.categoryId ?? '');
   const [paymentMethodId, setPaymentMethodId] = useState(item?.paymentMethodId ?? '');
   const [amount, setAmount] = useState(moneyValue(item?.plannedAmount));
   const [dueDay, setDueDay] = useState(String(item?.dueDay ?? 10));
   const [active, setActive] = useState(item?.active ?? true);
   const [notes, setNotes] = useState(item?.notes ?? '');
+  const [existingItems, setExistingItems] = useState<RecurringExpense[]>([]);
+  useEffect(() => {
+    window.lionPocket.listRecurringExpenses().then(setExistingItems).catch(() => undefined);
+  }, []);
+  const normalizedDescription = description.trim().toLocaleLowerCase('pt-BR');
+  const originalIdentity = item
+    ? `${item.kind}:${item.description.trim().toLocaleLowerCase('pt-BR')}`
+    : null;
+  const currentIdentity = `${kind}:${normalizedDescription}`;
+  const duplicate = currentIdentity !== originalIdentity
+    ? existingItems.find((candidate) =>
+        candidate.id !== item?.id
+          && candidate.kind === kind
+          && candidate.description.trim().toLocaleLowerCase('pt-BR') === normalizedDescription,
+      )
+    : undefined;
+  const applyKind = (next: MoneyKind) => {
+    setKind(next);
+    setCategoryId('');
+  };
   return (
-    <Modal title={item ? 'Editar despesa fixa' : 'Nova despesa fixa'} description="Ela será incluída automaticamente em cada mês." onClose={onClose}>
+    <Modal title={item ? 'Editar recorrência' : 'Nova recorrência'} description="Ela será incluída automaticamente a partir do mês escolhido." onClose={onClose}>
       <form className="form-grid" onSubmit={async (event) => {
         event.preventDefault();
-        await onSave({ id: item?.id, description, categoryId: categoryId || null, paymentMethodId: paymentMethodId || null, plannedAmount: Number(amount), dueDay: Number(dueDay), active, notes });
+        if (duplicate) return;
+        await onSave({ id: item?.id, kind, description, startMonth, categoryId: categoryId || null, paymentMethodId: paymentMethodId || null, plannedAmount: Number(amount), dueDay: Number(dueDay), active, notes });
       }}>
-        <label className="field form-grid__full"><span>Descrição</span><input required autoFocus value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Internet" /></label>
-        <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === 'expense').map((category) => ({ value: category.id, label: category.name }))]} />
-        <SelectField label="Forma de pagamento" value={paymentMethodId} onChange={setPaymentMethodId} options={[{ value: '', label: 'Não informada' }, ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name }))]} />
+        <div className="segmented form-grid__full">
+          <button type="button" className={kind === 'expense' ? 'active' : ''} onClick={() => applyKind('expense')}>Saída fixa</button>
+          <button type="button" className={kind === 'income' ? 'active' : ''} onClick={() => applyKind('income')}>Entrada fixa</button>
+        </div>
+        <label className="field form-grid__full"><span>Descrição</span><input required autoFocus aria-invalid={Boolean(duplicate)} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={kind === 'income' ? 'Ex.: Salário' : 'Ex.: Internet'} />{duplicate && <small className="field__error">Já existe uma {kind === 'income' ? 'entrada fixa' : 'saída fixa'} com esse nome. Edite a recorrência existente.</small>}</label>
+        <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === kind).map((category) => ({ value: category.id, label: category.name }))]} />
+        <SelectField label={kind === 'income' ? 'Forma de recebimento' : 'Forma de pagamento'} value={paymentMethodId} onChange={setPaymentMethodId} options={[{ value: '', label: 'Não informada' }, ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name }))]} />
         <label className="field"><span>Valor mensal</span><div className="money-input"><span>R$</span><input required min="0" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>
-        <label className="field"><span>Dia do vencimento</span><input required min="1" max="31" type="number" value={dueDay} onChange={(event) => setDueDay(event.target.value)} /></label>
+        <label className="field"><span>{kind === 'income' ? 'Dia do recebimento' : 'Dia do vencimento'}</span><input required min="1" max="31" type="number" value={dueDay} onChange={(event) => setDueDay(event.target.value)} /></label>
+        <MonthField className="form-grid__full" label="Começar em" hint="não cria lançamentos nos meses anteriores" min={item ? undefined : currentMonthIso()} value={startMonth} onChange={setStartMonth} />
         <label className="field form-grid__full"><span>Observações</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
-        <label className="toggle-row form-grid__full"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /><span><strong>Despesa ativa</strong><small>Inclui esta conta nos próximos meses</small></span></label>
-        <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary">Salvar despesa</button></div>
+        <label className="toggle-row form-grid__full"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /><span><strong>{kind === 'income' ? 'Entrada ativa' : 'Saída ativa'}</strong><small>Inclui este lançamento nos próximos meses</small></span></label>
+        <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={Boolean(duplicate)}>Salvar recorrência</button></div>
       </form>
     </Modal>
   );
@@ -353,22 +404,38 @@ export const InstallmentForm = ({ catalogs, onSave, onClose }: {
   const [cardId, setCardId] = useState(catalogs.cards[0]?.id ?? '');
   const [amount, setAmount] = useState('');
   const [total, setTotal] = useState('2');
-  const [firstDueDate, setFirstDueDate] = useState(todayIso());
+  const [current, setCurrent] = useState('1');
+  const [currentDueDate, setCurrentDueDate] = useState(() => {
+    const card = catalogs.cards[0];
+    return card ? nextCardDueDate(todayIso(), card.dueDay) : todayIso();
+  });
   const [notes, setNotes] = useState('');
   const totalAmount = Number(amount || 0) * Number(total || 0);
+  const remainingInstallments = Math.max(0, Number(total || 0) - Number(current || 0) + 1);
+  const applyCard = (nextCardId: string) => {
+    setCardId(nextCardId);
+    const card = catalogs.cards.find((item) => item.id === nextCardId);
+    if (card) setCurrentDueDate(nextCardDueDate(todayIso(), card.dueDay));
+  };
+  const applyTotal = (value: string) => {
+    setTotal(value);
+    const numeric = Number(value);
+    if (numeric > 0 && Number(current) > numeric) setCurrent(value);
+  };
   return (
-    <Modal title="Nova compra parcelada" description="Cadastre uma vez; o LionPocket cria todas as parcelas." onClose={onClose}>
+    <Modal title="Nova compra parcelada" description="Informe a parcela deste mês; as anteriores entram como já pagas." onClose={onClose}>
       <form className="form-grid" onSubmit={async (event) => {
         event.preventDefault();
-        await onSave({ description, categoryId: categoryId || null, cardId: cardId || null, paymentMethodId: creditMethod?.id ?? null, installmentAmount: Number(amount), totalInstallments: Number(total), firstDueDate, notes });
+        await onSave({ description, categoryId: categoryId || null, cardId: cardId || null, paymentMethodId: creditMethod?.id ?? null, installmentAmount: Number(amount), totalInstallments: Number(total), currentInstallment: Number(current), currentDueDate, notes });
       }}>
         <label className="field form-grid__full"><span>Compra</span><input required autoFocus value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Notebook" /></label>
         <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === 'expense').map((category) => ({ value: category.id, label: category.name }))]} />
-        <SelectField label="Cartão" value={cardId} onChange={setCardId} options={[{ value: '', label: 'Não informado' }, ...catalogs.cards.map((card) => ({ value: card.id, label: card.name }))]} />
+        <SelectField label="Cartão" value={cardId} onChange={applyCard} options={[{ value: '', label: 'Não informado' }, ...catalogs.cards.map((card) => ({ value: card.id, label: `${card.name} · vence dia ${card.dueDay}` }))]} />
         <label className="field"><span>Valor da parcela</span><div className="money-input"><span>R$</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>
-        <label className="field"><span>Quantidade</span><input required min="2" max="120" type="number" value={total} onChange={(event) => setTotal(event.target.value)} /></label>
-        <DateField label="Primeiro vencimento" value={firstDueDate} onChange={setFirstDueDate} required />
-        <div className="installment-total"><span>Valor total da compra</span><strong>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalAmount)}</strong></div>
+        <label className="field"><span>Total de parcelas</span><input required min="1" max="120" type="number" value={total} onChange={(event) => applyTotal(event.target.value)} /></label>
+        <label className="field"><span>Parcela deste mês</span><input required min="1" max={Math.max(1, Number(total || 1))} type="number" value={current} onChange={(event) => setCurrent(event.target.value)} /></label>
+        <DateField label="Vencimento desta parcela" value={currentDueDate} onChange={setCurrentDueDate} required />
+        <div className="installment-total"><span>{remainingInstallments} {remainingInstallments === 1 ? 'parcela será criada' : 'parcelas serão criadas'} · total da compra</span><strong>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalAmount)}</strong></div>
         <label className="field form-grid__full"><span>Observações</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
         <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary">Criar parcelas</button></div>
       </form>

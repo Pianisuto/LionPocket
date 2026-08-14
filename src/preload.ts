@@ -4,6 +4,7 @@ import type { LionPocketApi, WindowState } from './shared/types';
 const api: LionPocketApi = {
   getCatalogs: () => ipcRenderer.invoke('catalogs:get'),
   createCatalogItem: (input) => ipcRenderer.invoke('catalogs:create', input),
+  deleteCatalogItem: (type, id) => ipcRenderer.invoke('catalogs:delete', type, id),
   getOverview: (month) => ipcRenderer.invoke('overview:get', month),
   listTransactions: (filters) => ipcRenderer.invoke('transactions:list', filters),
   saveTransaction: (input) => ipcRenderer.invoke('transactions:save', input),
@@ -14,7 +15,7 @@ const api: LionPocketApi = {
   listRecurringExpenses: () => ipcRenderer.invoke('recurring:list'),
   saveRecurringExpense: (input) => ipcRenderer.invoke('recurring:save', input),
   deleteRecurringExpense: (id) => ipcRenderer.invoke('recurring:delete', id),
-  listInstallmentPurchases: () => ipcRenderer.invoke('installments:list'),
+  listInstallmentPurchases: (month) => ipcRenderer.invoke('installments:list', month),
   createInstallmentPurchase: (input) => ipcRenderer.invoke('installments:create', input),
   deleteInstallmentPurchase: (id) => ipcRenderer.invoke('installments:delete', id),
   listGoals: () => ipcRenderer.invoke('goals:list'),

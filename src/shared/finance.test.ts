@@ -7,6 +7,7 @@ import {
   isPastDate,
   localDateIso,
   monthRange,
+  nextCardDueDate,
   settlementDateFor,
   toCents,
 } from './finance';
@@ -24,6 +25,13 @@ describe('regras financeiras', () => {
   it('ajusta vencimentos para o último dia do mês', () => {
     expect(dateForMonthDay('2026-02', 31)).toBe('2026-02-28');
     expect(addMonths('2026-01-31', 1)).toBe('2026-02-28');
+  });
+
+  it('sugere o próximo vencimento do cartão sem usar uma data passada', () => {
+    expect(nextCardDueDate('2026-08-04', 10)).toBe('2026-08-10');
+    expect(nextCardDueDate('2026-08-14', 10)).toBe('2026-09-10');
+    expect(nextCardDueDate('2026-01-31', 31)).toBe('2026-01-31');
+    expect(nextCardDueDate('2026-02-15', 31)).toBe('2026-02-28');
   });
 
   it('usa a data local, e não UTC, para saber que dia é hoje', () => {
@@ -50,4 +58,3 @@ describe('regras financeiras', () => {
     expect(result.suggestedMonthlyAmount).toBe(180);
   });
 });
-
