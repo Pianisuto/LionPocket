@@ -1,7 +1,7 @@
 {
   "name": "lionpocket",
   "productName": "LionPocket",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Finanças pessoais simples, locais e bonitas.",
   "main": ".vite/build/main.js",
   "private": true,
