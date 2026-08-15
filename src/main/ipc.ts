@@ -1,6 +1,6 @@
 import { backup } from 'node:sqlite';
 import fs from 'node:fs/promises';
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { autoUpdater, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
   CatalogInput,
@@ -37,6 +37,7 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
     callerWindow(event)?.close();
   });
   ipcMain.handle('window:is-maximized', (event) => callerWindow(event)?.isMaximized() ?? false);
+  ipcMain.handle('update:install', () => autoUpdater.quitAndInstall());
 
   ipcMain.handle('catalogs:get', () => database.getCatalogs());
   ipcMain.handle('catalogs:create', (_event, input: CatalogInput) => database.createCatalogItem(input));

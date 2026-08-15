@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { LionPocketApi, WindowState } from './shared/types';
+import type { LionPocketApi, UpdateInfo, WindowState } from './shared/types';
 
 const api: LionPocketApi = {
   getCatalogs: () => ipcRenderer.invoke('catalogs:get'),
@@ -31,6 +31,12 @@ const api: LionPocketApi = {
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
   isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdateDownloaded: (listener) => {
+    const handler = (_event: unknown, info: UpdateInfo) => listener(info);
+    ipcRenderer.on('update:downloaded', handler);
+    return () => ipcRenderer.removeListener('update:downloaded', handler);
+  },
   onWindowState: (listener) => {
     const handler = (_event: unknown, state: WindowState) => listener(state);
     ipcRenderer.on('window:state', handler);

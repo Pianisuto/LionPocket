@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Plus,
   ReceiptText,
+  RefreshCw,
   Settings as SettingsIcon,
   Target,
   X,
@@ -16,8 +17,9 @@ import type {
   Overview,
   RecurringExpense,
   Transaction,
+  UpdateInfo,
 } from './shared/types';
-import { MonthPicker } from './ui/components';
+import { Modal, MonthPicker } from './ui/components';
 import { Leo } from './ui/Leo';
 import { TitleBar } from './ui/TitleBar';
 import { useTheme } from './ui/theme';
@@ -67,6 +69,8 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [modal, setModal] = useState<ModalState>(null);
   const [toast, setToast] = useState('');
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -80,6 +84,8 @@ export default function App() {
   useEffect(() => {
     refreshCatalogs().catch(() => notify('Não foi possível carregar as listas.'));
   }, [refreshCatalogs, notify]);
+
+  useEffect(() => window.lionPocket.onUpdateDownloaded(setUpdateInfo), []);
 
   useEffect(() => {
     let active = true;
@@ -324,6 +330,32 @@ export default function App() {
             )
           }
         />
+      )}
+
+      {updateInfo && (
+        <Modal title="Atualização pronta" description="Uma nova versão do LionPocket já foi baixada." onClose={() => setUpdateInfo(null)} closeDisabled={installingUpdate}>
+          <div className="update-dialog">
+            <div className="update-dialog__content">
+              <span><RefreshCw size={21} /></span>
+              <div>
+                <strong>{updateInfo.version ? `Versão ${updateInfo.version}` : 'Nova versão disponível'}</strong>
+                <p>Reinicie o aplicativo agora para concluir a instalação. Seus dados serão preservados.</p>
+              </div>
+            </div>
+            <div className="modal__actions">
+              <button type="button" className="button button--ghost" disabled={installingUpdate} onClick={() => setUpdateInfo(null)}>Depois</button>
+              <button type="button" className="button button--primary" disabled={installingUpdate} onClick={async () => {
+                setInstallingUpdate(true);
+                try {
+                  await window.lionPocket.installUpdate();
+                } catch {
+                  setInstallingUpdate(false);
+                  notify('Não foi possível reiniciar para atualizar.');
+                }
+              }}><RefreshCw size={16} /> {installingUpdate ? 'Reiniciando…' : 'Reiniciar e atualizar'}</button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {toast && (

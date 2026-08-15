@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { app, autoUpdater, BrowserWindow, dialog } from 'electron';
+import { app, autoUpdater, BrowserWindow, nativeImage } from 'electron';
 import started from 'electron-squirrel-startup';
+import type { UpdateInfo } from './shared/types';
 import { LionPocketDatabase } from './main/database';
 import { registerIpcHandlers } from './main/ipc';
 
@@ -13,6 +14,10 @@ if (started) {
 // The GPU sandbox blocks the NVIDIA GBM driver on some Linux distributions.
 // Keep acceleration enabled and relax only the GPU process sandbox there.
 if (process.platform === 'linux') {
+  // Mantém o identificador da janela igual ao arquivo instalado em
+  // /usr/share/applications. Sem isso o painel pode abrir um segundo item sem
+  // ícone por não conseguir associar a janela ao launcher do LionPocket.
+  app.setDesktopName('lionpocket.desktop');
   app.commandLine.appendSwitch('disable-gpu-sandbox');
 }
 
@@ -23,6 +28,7 @@ if (!hasSingleInstanceLock) {
 
 let database: LionPocketDatabase;
 let mainWindow: BrowserWindow | null = null;
+let downloadedUpdate: UpdateInfo | null = null;
 
 const showMainWindow = () => {
   if (!mainWindow) return;
@@ -38,6 +44,17 @@ const iconPath = () =>
   app.isPackaged
     ? path.join(process.resourcesPath, 'icon.png')
     : path.join(__dirname, '../../assets/icon.png');
+
+const windowIcon = () => {
+  const sourceIcon = nativeImage.createFromPath(iconPath());
+
+  // No X11, o Electron 43 não publica _NET_WM_ICON para este PNG de 512 px
+  // quando ele é passado apenas como caminho no construtor. Uma representação
+  // nativa menor é aceita pelo gerenciador de janelas e continua nítida no painel.
+  return sourceIcon.isEmpty()
+    ? iconPath()
+    : sourceIcon.resize({ width: 128, height: 128, quality: 'best' });
+};
 
 /**
  * A versão portátil também é `app.isPackaged`, mas não possui a infraestrutura
@@ -61,21 +78,11 @@ const configureAutoUpdates = () => {
     console.warn('Falha ao verificar atualização do LionPocket:', error);
   });
 
-  autoUpdater.on('update-downloaded', () => {
-    void dialog
-      .showMessageBox({
-        type: 'info',
-        title: 'Atualização pronta',
-        message: 'Uma nova versão do LionPocket foi baixada.',
-        detail: 'Reinicie o aplicativo para concluir a atualização.',
-        buttons: ['Reiniciar e atualizar', 'Depois'],
-        defaultId: 0,
-        cancelId: 1,
-        noLink: true,
-      })
-      .then(({ response }) => {
-        if (response === 0) autoUpdater.quitAndInstall();
-      });
+  autoUpdater.on('update-downloaded', (_event, _releaseNotes, releaseName) => {
+    downloadedUpdate = { version: releaseName || null };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update:downloaded', downloadedUpdate);
+    }
   });
 
   const checkForUpdates = () => autoUpdater.checkForUpdates();
@@ -90,6 +97,7 @@ const configureAutoUpdates = () => {
 };
 
 const createWindow = () => {
+  const appIcon = windowIcon();
   const createdWindow = new BrowserWindow({
     title: 'LionPocket',
     width: 1440,
@@ -99,7 +107,7 @@ const createWindow = () => {
     // A barra de título é desenhada pelo próprio app (src/ui/TitleBar.tsx).
     frame: false,
     backgroundColor: '#150E14',
-    icon: iconPath(),
+    icon: appIcon,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -110,6 +118,9 @@ const createWindow = () => {
   });
 
   mainWindow = createdWindow;
+  // Reaplica depois da criação da janela para garantir que o X11 receba
+  // _NET_WM_ICON; só a opção do construtor pode ser ignorada nesta versão.
+  createdWindow.setIcon(appIcon);
   createdWindow.setMenuBarVisibility(false);
   // A janela nasce escondida para não piscar sem conteúdo. O 'ready-to-show'
   // é o gatilho ideal, mas no app empacotado ele não chega a disparar em
@@ -133,6 +144,7 @@ const createWindow = () => {
   createdWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   createdWindow.webContents.once('did-finish-load', () => {
     createdWindow.webContents.setZoomFactor(1);
+    if (downloadedUpdate) createdWindow.webContents.send('update:downloaded', downloadedUpdate);
   });
   createdWindow.webContents.on('before-input-event', (event, input) => {
     const modifierPressed = input.control || input.meta;

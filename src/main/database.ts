@@ -560,7 +560,6 @@ export class LionPocketDatabase {
     const existing = this.db.prepare(`
       SELECT id FROM transactions
       WHERE source_type = 'recurring' AND source_id = ? AND due_date >= ? AND due_date < ?
-        AND deleted_at IS NULL
       LIMIT 1
     `);
     const statement = this.db.prepare(`
@@ -571,6 +570,9 @@ export class LionPocketDatabase {
     `);
     const timestamp = now();
     for (const item of recurring) {
+      // Uma ocorrência excluída continua no banco como um marcador. Considerá-la
+      // aqui evita que a consulta do mês recrie imediatamente o lançamento que
+      // a pessoa acabou de apagar, sem interromper a recorrência nos outros meses.
       if (existing.get(item.id, start, end)) continue;
       const recurringStartMonth = String(item.start_month ?? String(item.created_at).slice(0, 7));
       // Uma cobrança pode vencer no mesmo mês, no seguinte ou, em ciclos

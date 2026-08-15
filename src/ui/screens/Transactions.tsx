@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, ChevronUp, CreditCard, History, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import type { Transaction, TransactionFilters } from '../../shared/types';
-import { EmptyState, Modal, SearchField, SelectControl } from '../components';
+import { ConfirmDialog, EmptyState, Modal, SearchField, SelectControl } from '../components';
 import { currency, currentMonthIso, formatDate, monthLabel, overdueLabel, statusLabel } from '../format';
 
 type SortKey = 'date' | 'description' | 'category' | 'paymentMethod' | 'card' | 'status' | 'amount';
@@ -53,6 +53,8 @@ export const Transactions = ({
   const [payingCard, setPayingCard] = useState(false);
   const [payCardOpen, setPayCardOpen] = useState(false);
   const [selectedCardKey, setSelectedCardKey] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -160,11 +162,20 @@ export const Transactions = ({
     }
   };
 
-  const remove = async (item: Transaction) => {
-    if (!window.confirm(`Excluir “${item.description}”?`)) return;
-    await window.lionPocket.deleteTransaction(item.id);
-    notify('Lançamento excluído.');
-    onChanged();
+  const remove = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await window.lionPocket.deleteTransaction(pendingDelete.id);
+      setItems((current) => current.filter((item) => item.id !== pendingDelete.id));
+      setPendingDelete(null);
+      notify('Lançamento excluído.');
+      onChanged();
+    } catch {
+      notify('Não foi possível excluir o lançamento.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -266,7 +277,7 @@ export const Transactions = ({
               <span className="row-actions">
                 {item.status === 'planned' && <button className="icon-button icon-button--success" onClick={() => settle(item)} title={item.kind === 'income' ? 'Marcar como recebida' : 'Marcar como paga'}><Check size={17} /></button>}
                 <button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button>
-                <button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={16} /></button>
+                <button className="icon-button icon-button--danger" onClick={() => setPendingDelete(item)} title="Excluir"><Trash2 size={16} /></button>
               </span>
             </div>
           ))}
@@ -300,6 +311,21 @@ export const Transactions = ({
             </div>
           </div>
         </Modal>
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Excluir lançamento?"
+          itemName={pendingDelete.description}
+          description={pendingDelete.sourceType === 'recurring'
+            ? 'Somente esta ocorrência será removida. A recorrência continua nos outros meses.'
+            : pendingDelete.sourceType === 'installment'
+              ? 'Somente esta parcela será removida. A compra e as demais parcelas serão mantidas.'
+              : 'O lançamento será removido do seu histórico.'}
+          confirmLabel="Excluir lançamento"
+          loading={deleting}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={remove}
+        />
       )}
     </section>
   );

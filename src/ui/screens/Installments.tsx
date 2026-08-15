@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CreditCard, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { InstallmentPurchase } from '../../shared/types';
-import { EmptyState, ProgressBar } from '../components';
+import { ConfirmDialog, EmptyState, ProgressBar } from '../components';
 import { currency, formatDate, monthLabel, statusLabel } from '../format';
 
 export const Installments = ({ month, refreshKey, onAdd, onEdit, onChanged, notify }: {
@@ -13,13 +13,23 @@ export const Installments = ({ month, refreshKey, onAdd, onEdit, onChanged, noti
   notify: (message: string) => void;
 }) => {
   const [items, setItems] = useState<InstallmentPurchase[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<InstallmentPurchase | null>(null);
+  const [deleting, setDeleting] = useState(false);
   useEffect(() => { window.lionPocket.listInstallmentPurchases(month).then(setItems); }, [month, refreshKey]);
   const monthTotal = useMemo(() => items.reduce((sum, item) => sum + item.installmentAmount, 0), [items]);
-  const remove = async (item: InstallmentPurchase) => {
-    if (!window.confirm(`Excluir “${item.description}” e as parcelas ainda não pagas?`)) return;
-    await window.lionPocket.deleteInstallmentPurchase(item.id);
-    notify('Compra parcelada removida. As parcelas pagas foram preservadas.');
-    onChanged();
+  const remove = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await window.lionPocket.deleteInstallmentPurchase(pendingDelete.id);
+      setPendingDelete(null);
+      notify('Compra parcelada removida. As parcelas pagas foram preservadas.');
+      onChanged();
+    } catch {
+      notify('Não foi possível excluir a compra parcelada.');
+    } finally {
+      setDeleting(false);
+    }
   };
   return (
     <section className="page-section">
@@ -42,11 +52,12 @@ export const Installments = ({ month, refreshKey, onAdd, onEdit, onChanged, noti
             <div className="installment-row__date"><span>Parcela {item.viewedInstallment} de {item.totalInstallments} · {statusLabel(item.viewedStatus)}</span><strong>{formatDate(item.viewedDueDate, 'dd/MM/yyyy')}</strong></div>
             <div className="installment-row__actions">
               <button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button>
-              <button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={17} /></button>
+              <button className="icon-button icon-button--danger" onClick={() => setPendingDelete(item)} title="Excluir"><Trash2 size={17} /></button>
             </div>
           </article>;
         })}</div> : <EmptyState icon={<CreditCard />} title={`Nenhuma parcela em ${monthLabel(month)}`} description="Mude o mês ou cadastre uma nova compra parcelada." action={<button className="button button--soft" onClick={onAdd}><Plus size={16} /> Criar parcelas</button>} />}
       </div>
+      {pendingDelete && <ConfirmDialog title="Excluir compra parcelada?" itemName={pendingDelete.description} description="As parcelas ainda não pagas serão removidas. As parcelas já concluídas permanecem no histórico." confirmLabel="Excluir compra" loading={deleting} onCancel={() => setPendingDelete(null)} onConfirm={remove} />}
     </section>
   );
 };

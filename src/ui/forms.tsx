@@ -60,6 +60,7 @@ export const TransactionForm = ({
   const [notes, setNotes] = useState(transaction?.notes ?? '');
   const [saving, setSaving] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
+  const [descriptionError, setDescriptionError] = useState('');
   // Planejado e real andam juntos até você digitar um valor real diferente.
   // Na maioria dos lançamentos já acontecidos os dois são o mesmo número.
   const [amountsLinked, setAmountsLinked] = useState(
@@ -201,6 +202,7 @@ export const TransactionForm = ({
   /** Limpa só o que muda de um lançamento para o outro. */
   const resetForNext = () => {
     setDescription('');
+    setDescriptionError('');
     setPlannedAmount('');
     setActualAmount('');
     setNotes('');
@@ -280,8 +282,14 @@ export const TransactionForm = ({
             role="combobox"
             aria-expanded={!transaction && suggestionsOpen && suggestions.length > 0}
             aria-autocomplete="list"
+            aria-invalid={Boolean(descriptionError)}
+            aria-describedby={descriptionError ? `${descriptionId}-error` : undefined}
             value={description}
-            onChange={(event) => { setDescription(event.target.value); setSuggestionsOpen(true); }}
+            onInvalid={(event) => {
+              event.preventDefault();
+              setDescriptionError('Informe uma descrição.');
+            }}
+            onChange={(event) => { setDescription(event.target.value); setDescriptionError(''); setSuggestionsOpen(true); }}
             onFocus={() => setSuggestionsOpen(true)}
             onBlur={() => setSuggestionsOpen(false)}
             onKeyDown={(event) => {
@@ -292,6 +300,7 @@ export const TransactionForm = ({
             }}
             placeholder={kind === 'expense' ? 'Ex.: Supermercado' : 'Ex.: Salário'}
           />
+          {descriptionError && <small id={`${descriptionId}-error`} className="field__error" role="alert">{descriptionError}</small>}
           {!transaction && suggestionsOpen && suggestions.length > 0 && (
             <div className="suggest-menu" role="listbox" aria-label="Lançamentos parecidos">
               <span className="suggest-menu__title"><History size={13} /> Você já lançou</span>
@@ -395,6 +404,7 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
   const [chargeDay, setChargeDay] = useState(item?.chargeDay === null || item?.chargeDay === undefined ? '' : String(item.chargeDay));
   const [active, setActive] = useState(item?.active ?? true);
   const [notes, setNotes] = useState(item?.notes ?? '');
+  const [descriptionError, setDescriptionError] = useState('');
   const [existingItems, setExistingItems] = useState<RecurringExpense[]>([]);
   useEffect(() => {
     window.lionPocket.listRecurringExpenses().then(setExistingItems).catch(() => undefined);
@@ -452,7 +462,7 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
           <button type="button" className={kind === 'expense' ? 'active' : ''} onClick={() => applyKind('expense')}>Saída fixa</button>
           <button type="button" className={kind === 'income' ? 'active' : ''} onClick={() => applyKind('income')}>Entrada fixa</button>
         </div>
-        <label className="field form-grid__full"><span>Descrição</span><input required autoFocus aria-invalid={Boolean(duplicate)} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={kind === 'income' ? 'Ex.: Salário' : 'Ex.: Internet'} />{duplicate && <small className="field__error">Já existe uma {kind === 'income' ? 'entrada fixa' : 'saída fixa'} com esse nome. Edite a recorrência existente.</small>}</label>
+        <label className="field form-grid__full"><span>Descrição</span><input required autoFocus aria-invalid={Boolean(duplicate || descriptionError)} value={description} onInvalid={(event) => { event.preventDefault(); setDescriptionError('Informe uma descrição.'); }} onChange={(event) => { setDescription(event.target.value); setDescriptionError(''); }} placeholder={kind === 'income' ? 'Ex.: Salário' : 'Ex.: Internet'} />{descriptionError && <small className="field__error" role="alert">{descriptionError}</small>}{duplicate && <small className="field__error">Já existe uma {kind === 'income' ? 'entrada fixa' : 'saída fixa'} com esse nome. Edite a recorrência existente.</small>}</label>
         <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === kind).map((category) => ({ value: category.id, label: category.name }))]} />
         <SelectField label={kind === 'income' ? 'Forma de recebimento' : 'Forma de pagamento'} value={paymentMethodId} onChange={applyPaymentMethod} disabled={kind === 'income'} options={[{ value: '', label: 'Não informada' }, ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name }))]} />
         <MoneyField label="Valor mensal" required value={amount} onChange={setAmount} />
@@ -512,6 +522,7 @@ export const InstallmentForm = ({ item, catalogs, onSave, onClose }: {
     item?.viewedDueDate ?? dueDateForPurchase(initialPurchaseDate, initialCardId),
   );
   const [notes, setNotes] = useState(item?.notes ?? '');
+  const [descriptionError, setDescriptionError] = useState('');
   const totalAmount = Number(amount || 0) * Number(total || 0);
   const remainingInstallments = Math.max(0, Number(total || 0) - Number(current || 0) + 1);
   const applyCard = (nextCardId: string) => {
@@ -543,7 +554,7 @@ export const InstallmentForm = ({ item, catalogs, onSave, onClose }: {
         event.preventDefault();
         await onSave({ id: item?.id, description, categoryId: categoryId || null, cardId: cardId || null, paymentMethodId: creditMethod?.id ?? null, installmentAmount: Number(amount), totalInstallments: Number(total), currentInstallment: Number(current), originalCurrentInstallment: item?.viewedInstallment, purchaseDate: purchaseDate || null, currentDueDate, notes });
       }}>
-        <label className="field form-grid__full"><span>Compra</span><input required autoFocus value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Notebook" /></label>
+        <label className="field form-grid__full"><span>Compra</span><input required autoFocus aria-invalid={Boolean(descriptionError)} value={description} onInvalid={(event) => { event.preventDefault(); setDescriptionError('Informe o nome da compra.'); }} onChange={(event) => { setDescription(event.target.value); setDescriptionError(''); }} placeholder="Ex.: Notebook" />{descriptionError && <small className="field__error" role="alert">{descriptionError}</small>}</label>
         <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === 'expense').map((category) => ({ value: category.id, label: category.name }))]} />
         <SelectField label="Cartão" value={cardId} onChange={applyCard} options={[{ value: '', label: 'Não informado' }, ...catalogs.cards.map((card) => ({
           value: card.id,
@@ -578,15 +589,17 @@ export const GoalForm = ({ goal, catalogs, onSave, onClose }: {
   const [dueDate, setDueDate] = useState(goal?.dueDate ?? '');
   const [status, setStatus] = useState<GoalInput['status']>(goal?.status ?? 'planned');
   const [notes, setNotes] = useState(goal?.notes ?? '');
+  const [nameError, setNameError] = useState('');
+  const [linkError, setLinkError] = useState('');
   return (
     <Modal title={goal ? 'Editar objetivo' : 'Novo objetivo'} description="Um passo de cada vez fica bem mais leve." onClose={onClose} wide>
       <form className="form-grid" onSubmit={async (event) => {
         event.preventDefault();
         await onSave({ id: goal?.id, name, itemModel, link, categoryId: categoryId || null, targetAmount: Number(targetAmount), savedAmount: Number(savedAmount), priority, dueDate: dueDate || null, status, notes });
       }}>
-        <label className="field"><span>Nome do objetivo</span><input required autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Reserva de emergência" /></label>
+        <label className="field"><span>Nome do objetivo</span><input required autoFocus aria-invalid={Boolean(nameError)} value={name} onInvalid={(event) => { event.preventDefault(); setNameError('Informe um nome para o objetivo.'); }} onChange={(event) => { setName(event.target.value); setNameError(''); }} placeholder="Ex.: Reserva de emergência" />{nameError && <small className="field__error" role="alert">{nameError}</small>}</label>
         <label className="field"><span>Item ou modelo</span><input value={itemModel} onChange={(event) => setItemModel(event.target.value)} placeholder="Opcional" /></label>
-        <label className="field form-grid__full"><span>Link</span><input type="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="https://…" /></label>
+        <label className="field form-grid__full"><span>Link</span><input type="url" aria-invalid={Boolean(linkError)} value={link} onInvalid={(event) => { event.preventDefault(); setLinkError('Informe um link válido, começando com http:// ou https://.'); }} onChange={(event) => { setLink(event.target.value); setLinkError(''); }} placeholder="https://…" />{linkError && <small className="field__error" role="alert">{linkError}</small>}</label>
         <MoneyField label="Valor desejado" required value={targetAmount} onChange={setTargetAmount} />
         <MoneyField label="Já reservado" required value={savedAmount} onChange={setSavedAmount} />
         <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === 'expense').map((category) => ({ value: category.id, label: category.name }))]} />

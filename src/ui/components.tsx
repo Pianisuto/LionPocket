@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Minus, Plus, Search, X } from 'lucide-react';
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Minus, Plus, Search, Trash2, X } from 'lucide-react';
 import { currentMonthIso, formatDate, localDateIso, monthLabel, todayIso } from './format';
 
 export const MonthPicker = ({
@@ -55,37 +55,42 @@ export const Modal = ({
   description,
   onClose,
   children,
+  closeDisabled = false,
   medium = false,
+  role = 'dialog',
   wide = false,
 }: {
   title: string;
   description?: string;
   onClose: () => void;
   children: ReactNode;
+  closeDisabled?: boolean;
   medium?: boolean;
+  role?: 'dialog' | 'alertdialog';
   wide?: boolean;
 }) => {
+  const titleId = useId();
   // Esc fecha. Quem estiver com um menu ou calendário aberto por cima marca o
   // evento como tratado, então o formulário inteiro não some junto.
   useEffect(() => {
     const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented) onClose();
+      if (event.key === 'Escape' && !event.defaultPrevented && !closeDisabled) onClose();
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [onClose]);
+  }, [closeDisabled, onClose]);
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.currentTarget === event.target) onClose();
+      if (event.currentTarget === event.target && !closeDisabled) onClose();
     }}>
-      <section className={`modal ${wide ? 'modal--wide' : medium ? 'modal--medium' : ''}`} role="dialog" aria-modal="true">
+      <section className={`modal ${wide ? 'modal--wide' : medium ? 'modal--medium' : ''}`} role={role} aria-modal="true" aria-labelledby={titleId}>
         <header className="modal__header">
           <div>
-            <h2>{title}</h2>
+            <h2 id={titleId}>{title}</h2>
             {description && <p>{description}</p>}
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="Fechar">
+          <button className="icon-button" disabled={closeDisabled} onClick={onClose} aria-label="Fechar">
             <X size={20} />
           </button>
         </header>
@@ -94,6 +99,43 @@ export const Modal = ({
     </div>
   );
 };
+
+export const ConfirmDialog = ({
+  title,
+  itemName,
+  description,
+  confirmLabel = 'Excluir',
+  loading = false,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  itemName: string;
+  description: string;
+  confirmLabel?: string;
+  loading?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) => (
+  <Modal title={title} onClose={onCancel} closeDisabled={loading} role="alertdialog">
+    <div className="confirm-dialog">
+      <div className="confirm-dialog__item">
+        <span className="confirm-dialog__icon"><Trash2 size={21} /></span>
+        <div>
+          <strong>{itemName}</strong>
+          <p>{description}</p>
+          <p className="confirm-dialog__warning">Esta ação não pode ser desfeita.</p>
+        </div>
+      </div>
+      <div className="modal__actions">
+        <button type="button" className="button button--ghost" disabled={loading} onClick={onCancel} autoFocus>Cancelar</button>
+        <button type="button" className="button button--danger" disabled={loading} onClick={() => void onConfirm()}>
+          <Trash2 size={16} /> {loading ? 'Excluindo…' : confirmLabel}
+        </button>
+      </div>
+    </div>
+  </Modal>
+);
 
 export const SearchField = ({ value, onChange, placeholder = 'Buscar' }: {
   value: string;
@@ -475,7 +517,9 @@ export const MoneyField = ({
   className?: string;
 }) => {
   const inputId = useId();
+  const errorId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState('');
   const numericValue = value === '' ? null : Number(value);
   const displayValue = numericValue === null || Number.isNaN(numericValue)
     ? ''
@@ -492,7 +536,7 @@ export const MoneyField = ({
   return (
     <label className={`field ${className}`} htmlFor={inputId}>
       <span>{label}</span>
-      <div className="money-input">
+      <div className={`money-input ${error ? 'is-invalid' : ''}`}>
         <span>R$</span>
         <input
           ref={inputRef}
@@ -502,13 +546,25 @@ export const MoneyField = ({
           autoComplete="off"
           value={displayValue}
           placeholder="0,00"
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : undefined}
           onFocus={(event) => event.currentTarget.select()}
+          onInvalid={(event) => {
+            event.preventDefault();
+            setError(numericValue === null
+              ? 'Informe um valor.'
+              : numericValue < min
+                ? `O valor mínimo é ${moneyFormatter.format(min)}.`
+                : 'Informe um valor válido.');
+          }}
           onChange={(event) => {
             const digits = event.target.value.replace(/\D/g, '');
+            setError('');
             onChange(digits ? String(Number(digits) / 100) : '');
           }}
         />
       </div>
+      {error && <small id={errorId} className="field__error" role="alert">{error}</small>}
     </label>
   );
 };
@@ -534,6 +590,8 @@ export const NumberField = ({
   placeholder?: string;
   className?: string;
 }) => {
+  const errorId = useId();
+  const [error, setError] = useState('');
   const numericValue = value.trim() === '' ? null : Number(value);
   const atMinimum = numericValue !== null && min !== undefined && numericValue <= min;
   const atMaximum = numericValue !== null && max !== undefined && numericValue >= max;
@@ -542,13 +600,14 @@ export const NumberField = ({
     const base = numericValue === null || Number.isNaN(numericValue) ? fallback : numericValue;
     const stepped = numericValue === null || Number.isNaN(numericValue) ? base : base + direction * step;
     const bounded = Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? Number.NEGATIVE_INFINITY, stepped));
+    setError('');
     onChange(String(Number(bounded.toFixed(10))));
   };
 
   return (
     <label className={`field ${className}`}>
       <span>{label}</span>
-      <div className="number-input">
+      <div className={`number-input ${error ? 'is-invalid' : ''}`}>
         <input
           required={required}
           min={min}
@@ -557,7 +616,23 @@ export const NumberField = ({
           type="number"
           value={value}
           placeholder={placeholder}
-          onChange={(event) => onChange(event.target.value)}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : undefined}
+          onInvalid={(event) => {
+            event.preventDefault();
+            const validity = event.currentTarget.validity;
+            setError(validity.valueMissing
+              ? 'Informe um valor.'
+              : validity.rangeUnderflow
+                ? `O valor mínimo é ${min}.`
+                : validity.rangeOverflow
+                  ? `O valor máximo é ${max}.`
+                  : 'Informe um número válido.');
+          }}
+          onChange={(event) => {
+            setError('');
+            onChange(event.target.value);
+          }}
         />
         <button
           type="button"
@@ -574,6 +649,7 @@ export const NumberField = ({
           onClick={() => changeBy(1)}
         ><Plus size={16} strokeWidth={2.4} /></button>
       </div>
+      {error && <small id={errorId} className="field__error" role="alert">{error}</small>}
     </label>
   );
 };
@@ -596,6 +672,7 @@ export const DateField = ({
   const [month, setMonth] = useState(() => value.slice(5, 7));
   const [year, setYear] = useState(() => value.slice(0, 4));
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState('');
   const [visibleMonth, setVisibleMonth] = useState(() => {
     const initial = selectedDate ?? new Date();
     return new Date(initial.getFullYear(), initial.getMonth(), 1);
@@ -609,11 +686,13 @@ export const DateField = ({
   const calendarRef = useRef<HTMLDivElement>(null);
   const suppressFocusOpenRef = useRef(false);
   const calendarId = useId();
+  const errorId = useId();
 
   useEffect(() => {
     setDay(value.slice(8, 10));
     setMonth(value.slice(5, 7));
     setYear(value.slice(0, 4));
+    setError('');
   }, [value]);
 
   useEffect(() => {
@@ -694,11 +773,13 @@ export const DateField = ({
   };
 
   const chooseDate = (date: Date) => {
+    setError('');
     onChange(localDateIso(date));
     closeCalendar(true);
   };
 
   const applyParts = (nextDay: string, nextMonth: string, nextYear: string) => {
+    setError('');
     const monthNumber = validMonth(nextMonth);
     const yearNumber = validYear(nextYear);
     if (monthNumber || yearNumber) {
@@ -754,7 +835,7 @@ export const DateField = ({
       <span>{label}</span>
       <div
         ref={dateInputRef}
-        className={`date-input date-input--segmented ${open ? 'date-input--open' : ''}`}
+        className={`date-input date-input--segmented ${open ? 'date-input--open' : ''} ${error ? 'is-invalid' : ''}`}
         onPaste={handleDatePaste}
         onBlur={handleDateBlur}
       >
@@ -767,6 +848,13 @@ export const DateField = ({
           value={day}
           placeholder="dd"
           aria-label={`${label}: dia`}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : undefined}
+          onInvalid={(event) => {
+            event.preventDefault();
+            const empty = !day && !month && !year;
+            setError(empty ? 'Informe uma data.' : 'Informe uma data válida no formato dd/mm/aaaa.');
+          }}
           onFocus={handlePartFocus}
           onChange={(event) => {
             const nextDay = event.target.value.replace(/\D/g, '').slice(0, 2);
@@ -847,6 +935,7 @@ export const DateField = ({
           <CalendarDays size={16} aria-hidden="true" />
         </button>
       </div>
+      {error && <small id={errorId} className="field__error" role="alert">{error}</small>}
       {open && createPortal(
         <div ref={calendarRef} id={calendarId} className="date-control__calendar" role="dialog" aria-label={`Calendário: ${label}`} style={calendarStyle}>
           <header className="date-control__header">
@@ -921,15 +1010,18 @@ export const MonthField = ({
   const selectedYear = Number(value.slice(0, 4));
   const [draft, setDraft] = useState(() => value ? `${value.slice(5, 7)}/${value.slice(0, 4)}` : '');
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState('');
   const [visibleYear, setVisibleYear] = useState(selectedYear || new Date().getFullYear());
   const [pickerStyle, setPickerStyle] = useState<CSSProperties>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerId = useId();
+  const errorId = useId();
 
   useEffect(() => {
     setDraft(value ? `${value.slice(5, 7)}/${value.slice(0, 4)}` : '');
+    setError('');
   }, [value]);
 
   useEffect(() => {
@@ -993,6 +1085,7 @@ export const MonthField = ({
 
   const chooseMonth = (month: string) => {
     if (min && month < min) return;
+    setError('');
     onChange(month);
     closePicker(true);
   };
@@ -1000,7 +1093,7 @@ export const MonthField = ({
   return (
     <div className={`field ${className}`}>
       <span className="field__label">{label}{hint && <HelpTip label={label} align={className.includes('form-grid__full') ? 'start' : 'end'}>{hint}</HelpTip>}</span>
-      <div className={`date-input ${open ? 'date-input--open' : ''}`}>
+      <div className={`date-input ${open ? 'date-input--open' : ''} ${error ? 'is-invalid' : ''}`}>
         <input
           ref={inputRef}
           required
@@ -1010,9 +1103,19 @@ export const MonthField = ({
           value={draft}
           placeholder="mm/aaaa"
           aria-label={label}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : undefined}
           onFocus={(event) => event.currentTarget.select()}
+          onInvalid={(event) => {
+            event.preventDefault();
+            const parsed = monthInputIso(draft);
+            setError(!parsed
+              ? 'Informe um mês válido no formato mm/aaaa.'
+              : `Escolha ${monthLabel(min ?? parsed)} ou um mês posterior.`);
+          }}
           onChange={(event) => {
             const nextDraft = monthInputText(event.target.value);
+            setError('');
             setDraft(nextDraft);
             const parsed = monthInputIso(nextDraft);
             if (parsed) onChange(parsed);
@@ -1037,6 +1140,7 @@ export const MonthField = ({
           <CalendarDays size={16} aria-hidden="true" />
         </button>
       </div>
+      {error && <small id={errorId} className="field__error" role="alert">{error}</small>}
       {open && createPortal(
         <div ref={pickerRef} id={pickerId} className="date-control__calendar month-control__calendar" role="dialog" aria-label={`Seletor de mês: ${label}`} style={pickerStyle}>
           <header className="date-control__header">

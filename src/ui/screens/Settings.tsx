@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import type { CatalogInput, Catalogs, MoneyKind } from '../../shared/types';
-import { NumberField, SelectField } from '../components';
+import { ConfirmDialog, NumberField, SelectField } from '../components';
 
 export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
   catalogs: Catalogs;
@@ -10,12 +10,17 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
   notify: (message: string) => void;
 }) => {
   const [newName, setNewName] = useState('');
+  const [newNameError, setNewNameError] = useState('');
   const [type, setType] = useState<CatalogInput['type']>('category');
   const [kind, setKind] = useState<MoneyKind>('expense');
   const [cardDueDay, setCardDueDay] = useState('10');
   const [cardClosingDay, setCardClosingDay] = useState('14');
   const [editingCardId, setEditingCardId] = useState('');
   const [deletingCatalogId, setDeletingCatalogId] = useState('');
+  const [pendingCatalogDelete, setPendingCatalogDelete] = useState<{
+    type: 'category' | 'card';
+    item: { id: string; name: string };
+  } | null>(null);
   const [busy, setBusy] = useState('');
   const run = async (name: string, action: () => Promise<string | null | object>) => {
     setBusy(name);
@@ -35,6 +40,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
       closingDay: type === 'card' ? Number(cardClosingDay) : undefined,
     });
     setNewName('');
+    setNewNameError('');
     setEditingCardId('');
     await refreshCatalogs();
     notify(editingCardId ? 'Cartão atualizado.' : 'Item adicionado à lista.');
@@ -43,9 +49,11 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
     setType(value as CatalogInput['type']);
     setEditingCardId('');
     setNewName('');
+    setNewNameError('');
   };
   const editCard = (card: Catalogs['cards'][number]) => {
     setType('card');
+    setNewNameError('');
     setEditingCardId(card.id);
     setNewName(card.name);
     setCardDueDay(String(card.dueDay));
@@ -55,16 +63,18 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
     setEditingCardId('');
     setNewName('');
   };
-  const deleteCatalogItem = async (itemType: 'category' | 'card', item: { id: string; name: string }) => {
-    const itemLabel = itemType === 'card' ? 'cartão' : 'categoria';
-    const unlinkLabel = itemType === 'card' ? 'sem cartão informado' : 'sem categoria';
-    if (!window.confirm(`Excluir ${itemLabel} “${item.name}”? Os lançamentos existentes serão preservados e ficarão ${unlinkLabel}.`)) return;
+  const deleteCatalogItem = async () => {
+    if (!pendingCatalogDelete) return;
+    const { type: itemType, item } = pendingCatalogDelete;
     setDeletingCatalogId(item.id);
     try {
       await window.lionPocket.deleteCatalogItem(itemType, item.id);
       if (editingCardId === item.id) cancelCardEdit();
       await refreshCatalogs();
+      setPendingCatalogDelete(null);
       notify(`${itemType === 'card' ? 'Cartão' : 'Categoria'} excluída.`);
+    } catch {
+      notify(`Não foi possível excluir ${itemType === 'card' ? 'o cartão' : 'a categoria'}.`);
     } finally {
       setDeletingCatalogId('');
     }
@@ -92,7 +102,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
         <form className={`catalog-form ${type === 'card' ? 'catalog-form--card' : ''}`} onSubmit={addCatalog}>
           <SelectField label="Tipo de lista" value={type} onChange={chooseType} options={[{ value: 'category', label: 'Categoria' }, { value: 'paymentMethod', label: 'Forma de pagamento' }, { value: 'card', label: 'Cartão' }]} />
           {type === 'category' && <SelectField label="Usada em" value={kind} onChange={(value) => setKind(value as MoneyKind)} options={[{ value: 'expense', label: 'Saídas' }, { value: 'income', label: 'Entradas' }]} />}
-          <label className="field catalog-form__name"><span>Nome</span><input required value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Digite o nome" /></label>
+          <label className="field catalog-form__name"><span>Nome</span><input required aria-invalid={Boolean(newNameError)} value={newName} onInvalid={(event) => { event.preventDefault(); setNewNameError('Informe um nome.'); }} onChange={(event) => { setNewName(event.target.value); setNewNameError(''); }} placeholder="Digite o nome" />{newNameError && <small className="field__error" role="alert">{newNameError}</small>}</label>
           {type === 'card' && <NumberField label="Dia do fechamento" required min={1} max={31} value={cardClosingDay} onChange={setCardClosingDay} />}
           {type === 'card' && <NumberField label="Dia do vencimento" required min={1} max={31} value={cardDueDay} onChange={setCardDueDay} />}
           <div className="catalog-form__actions">
@@ -112,7 +122,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
                       type="button"
                       className="tag-item__action tag-item__action--danger"
                       disabled={deletingCatalogId === item.id}
-                      onClick={() => deleteCatalogItem('category', item)}
+                      onClick={() => setPendingCatalogDelete({ type: 'category', item })}
                       title={`Excluir ${item.name}`}
                       aria-label={`Excluir categoria ${item.name}`}
                     ><Trash2 size={12} /></button>
@@ -129,7 +139,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
                 type="button"
                 className="tag-item__action tag-item__action--danger"
                 disabled={deletingCatalogId === item.id}
-                onClick={() => deleteCatalogItem('card', item)}
+                onClick={() => setPendingCatalogDelete({ type: 'card', item })}
                 title={`Excluir ${item.name}`}
                 aria-label={`Excluir cartão ${item.name}`}
               ><Trash2 size={12} /></button>
@@ -137,6 +147,7 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
           ))}</div></div>
         </div>
       </div>
+      {pendingCatalogDelete && <ConfirmDialog title={`Excluir ${pendingCatalogDelete.type === 'card' ? 'cartão' : 'categoria'}?`} itemName={pendingCatalogDelete.item.name} description={`Os lançamentos existentes serão preservados e ficarão ${pendingCatalogDelete.type === 'card' ? 'sem cartão informado' : 'sem categoria'}.`} confirmLabel={`Excluir ${pendingCatalogDelete.type === 'card' ? 'cartão' : 'categoria'}`} loading={deletingCatalogId === pendingCatalogDelete.item.id} onCancel={() => setPendingCatalogDelete(null)} onConfirm={deleteCatalogItem} />}
     </section>
   );
 };

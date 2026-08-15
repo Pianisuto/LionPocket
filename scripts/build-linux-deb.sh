@@ -57,7 +57,7 @@ Icon=lionpocket
 Terminal=false
 Type=Application
 Categories=Office;Finance;
-StartupWMClass=LionPocket
+StartupWMClass=lionpocket
 EOF
 
 # Instalações anteriores feitas à mão ficavam em ~/.local e o atalho de lá tem
@@ -77,6 +77,19 @@ for home in /home/*; do
   rm -rf "$home/.local/opt/lionpocket" 2>/dev/null || true
   rm -f "$home/.local/share/applications/lionpocket.desktop" 2>/dev/null || true
   rm -f "$home/.local/share/icons/hicolor/"*"/apps/lionpocket.png" 2>/dev/null || true
+
+  # O cache local tem precedência sobre /usr/share. Se ele continuar apontando
+  # para o ícone legado que acabamos de remover, o Zorin Taskbar reserva o
+  # espaço do ícone, mas não desenha nada. Regeneramos como o próprio dono
+  # para não deixar arquivos root-owned dentro da home.
+  icon_theme_dir="$home/.local/share/icons/hicolor"
+  if [ -d "$icon_theme_dir" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    home_owner="$(stat -c %U "$home" 2>/dev/null || true)"
+    if [ -n "$home_owner" ] && command -v runuser >/dev/null 2>&1; then
+      runuser -u "$home_owner" -- \
+        gtk-update-icon-cache -f -t "$icon_theme_dir" 2>/dev/null || true
+    fi
+  fi
 done
 
 exit 0

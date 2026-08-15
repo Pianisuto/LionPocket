@@ -243,6 +243,10 @@ export interface WindowState {
   maximized: boolean;
 }
 
+export interface UpdateInfo {
+  version: string | null;
+}
+
 export interface LionPocketApi {
   getCatalogs(): Promise<Catalogs>;
   createCatalogItem(input: CatalogInput): Promise<void>;
@@ -274,6 +278,9 @@ export interface LionPocketApi {
   toggleMaximizeWindow(): Promise<boolean>;
   closeWindow(): Promise<void>;
   isWindowMaximized(): Promise<boolean>;
+  installUpdate(): Promise<void>;
+  /** Avisa quando uma atualização já foi baixada e pode ser instalada. */
+  onUpdateDownloaded(listener: (info: UpdateInfo) => void): () => void;
   /** Avisa quando a janela é maximizada ou restaurada. Devolve o cancelamento. */
   onWindowState(listener: (state: WindowState) => void): () => void;
 }

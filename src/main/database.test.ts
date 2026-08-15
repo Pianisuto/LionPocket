@@ -20,6 +20,34 @@ afterEach(() => {
 });
 
 describe('despesas fixas', () => {
+  it('não recria uma ocorrência excluída ao consultar o mesmo mês', () => {
+    const database = createDatabase();
+    database.saveRecurringExpense({
+      kind: 'expense',
+      active: true,
+      description: 'Academia',
+      startMonth: '2026-10',
+      categoryId: null,
+      paymentMethodId: null,
+      plannedAmount: 100,
+      dueDay: 10,
+      notes: '',
+    });
+
+    const october = database.listTransactions({ month: '2026-10' });
+    expect(october).toHaveLength(1);
+
+    database.deleteTransaction(october[0].id);
+
+    expect(database.listTransactions({ month: '2026-10' })).toEqual([]);
+    expect(database.listTransactions({ month: '2026-11' })[0]).toMatchObject({
+      description: 'Academia',
+      dueDate: '2026-11-10',
+      sourceType: 'recurring',
+    });
+    database.db.close();
+  });
+
   it('atualiza meses planejados e preserva os que já foram pagos', () => {
     const database = createDatabase();
     const recurring = database.saveRecurringExpense({

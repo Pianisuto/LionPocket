@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, CalendarSync, Pencil, Plus, Power, Trash2 } from 'lucide-react';
 import type { RecurringExpense } from '../../shared/types';
-import { EmptyState } from '../components';
+import { ConfirmDialog, EmptyState } from '../components';
 import { currency } from '../format';
 
 export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
@@ -13,6 +13,8 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
 }) => {
   const [items, setItems] = useState<RecurringExpense[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState<RecurringExpense | null>(null);
+  const [deleting, setDeleting] = useState(false);
   useEffect(() => {
     setLoading(true);
     window.lionPocket.listRecurringExpenses().then(setItems).finally(() => setLoading(false));
@@ -26,11 +28,19 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
     notify(item.active ? 'Recorrência pausada.' : 'Recorrência ativada.');
     onChanged();
   };
-  const remove = async (item: RecurringExpense) => {
-    if (!window.confirm(`Excluir a recorrência “${item.description}”? Os meses anteriores serão preservados.`)) return;
-    await window.lionPocket.deleteRecurringExpense(item.id);
-    notify('Recorrência excluída.');
-    onChanged();
+  const remove = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await window.lionPocket.deleteRecurringExpense(pendingDelete.id);
+      setPendingDelete(null);
+      notify('Recorrência excluída.');
+      onChanged();
+    } catch {
+      notify('Não foi possível excluir a recorrência.');
+    } finally {
+      setDeleting(false);
+    }
   };
   const groups = [
     { kind: 'income' as const, label: 'Entradas fixas', items: items.filter((item) => item.kind === 'income') },
@@ -47,7 +57,7 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
         ? `cobra dia ${item.chargeDay} no ${item.cardName ?? 'cartão'} · fatura vence dia ${item.dueDay}`
         : `${item.kind === 'income' ? 'recebe dia' : 'vence dia'} ${item.dueDay}`}</p>
       <strong className={`item-card__amount ${item.kind === 'income' ? 'money-positive' : ''}`}>{item.kind === 'income' ? '+' : '−'} {currency.format(item.plannedAmount)}<small>/mês</small></strong>
-      <div className="item-card__footer"><span>{item.paymentMethodName ?? (item.kind === 'income' ? 'Recebimento não informado' : 'Pagamento não informado')}</span><div><button className="icon-button" onClick={() => toggle(item)} title={item.active ? 'Pausar' : 'Ativar'}><Power size={16} /></button><button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button><button className="icon-button icon-button--danger" onClick={() => remove(item)} title="Excluir"><Trash2 size={16} /></button></div></div>
+      <div className="item-card__footer"><span>{item.paymentMethodName ?? (item.kind === 'income' ? 'Recebimento não informado' : 'Pagamento não informado')}</span><div><button className="icon-button" onClick={() => toggle(item)} title={item.active ? 'Pausar' : 'Ativar'}><Power size={16} /></button><button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button><button className="icon-button icon-button--danger" onClick={() => setPendingDelete(item)} title="Excluir"><Trash2 size={16} /></button></div></div>
     </article>
   );
   return (
@@ -70,6 +80,7 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
         ))}
       </div>}
       {!loading && items.length === 0 && <div className="panel"><EmptyState icon={<CalendarSync />} title="Cadastre o que se repete" description="Salário, internet, aluguel e assinaturas podem entrar automaticamente todo mês." action={<button className="button button--soft" onClick={onAdd}><Plus size={16} /> Nova recorrência</button>} /></div>}
+      {pendingDelete && <ConfirmDialog title="Excluir recorrência?" itemName={pendingDelete.description} description="Os lançamentos anteriores serão preservados, mas novos meses deixarão de ser gerados." confirmLabel="Excluir recorrência" loading={deleting} onCancel={() => setPendingDelete(null)} onConfirm={remove} />}
     </section>
   );
 };
