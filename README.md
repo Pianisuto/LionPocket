@@ -37,11 +37,13 @@ O **LionPocket** é um aplicativo desktop de finanças pessoais para Linux e Win
 
 Baixe a versão mais recente na página de [Releases](https://github.com/Pianisuto/LionPocket/releases):
 
-- **Windows:** use `LionPocket-Instalador.exe` ou a versão portátil em ZIP;
+- **Windows:** use `LionPocket-Instalador.exe` para receber atualizações automáticas; o ZIP é portátil e deve ser atualizado manualmente;
 - **Linux (Debian/Ubuntu):** use o pacote `.deb`;
 - **Linux portátil:** extraia o ZIP e execute `lionpocket`.
 
 > O projeto ainda não possui assinatura de código. Por isso, Windows ou Linux podem pedir uma confirmação extra antes da primeira execução.
+
+As atualizações automáticas do Windows usam o serviço público e gratuito `update.electronjs.org`. O aplicativo verifica novas versões em segundo plano, baixa a atualização e pede para reiniciar quando ela estiver pronta. O Linux continua sendo atualizado pelo pacote `.deb` ou pela versão portátil.
 
 ## Privacidade
 
@@ -73,14 +75,29 @@ npm run lint
 Empacotamento:
 
 ```bash
-# Instalador .deb e aplicativo Linux
+# Instalador .deb e ZIP portátil Linux
 npm run make:linux
 
 # Artefatos suportados pelo sistema atual
 npm run make
 ```
 
-O instalador do Windows é criado em um runner Windows pelo workflow [`build-windows.yml`](.github/workflows/build-windows.yml). Os artefatos gerados localmente ficam em `out/` e não fazem parte do repositório.
+O instalador do Windows também pode ser criado em um runner Windows pelo workflow [`build-windows.yml`](.github/workflows/build-windows.yml). Os artefatos gerados localmente ficam em `out/` e não fazem parte do repositório.
+
+### Publicação de versões
+
+O workflow [`release.yml`](.github/workflows/release.yml) é disparado por tags `v*`. Ele valida testes, tipos e lint, confere se a tag corresponde à versão do `package.json`, compila Windows e Linux, anexa os binários à mesma GitHub Release, gera `SHA256SUMS.txt` e só então publica a versão.
+
+Para uma atualização pequena:
+
+```bash
+npm version patch
+git push origin main --follow-tags
+```
+
+Use `npm version minor` ou `npm version major` quando a mudança justificar. A Release permanece como rascunho se algum build falhar, evitando publicar uma versão incompleta.
+
+No Windows, o workflow também publica `RELEASES` e o pacote `.nupkg` gerados pelo Squirrel.Windows. Esses arquivos são usados pelo atualizador automático junto com o serviço público do Electron.
 
 ## Tecnologias
 

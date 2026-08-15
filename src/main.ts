@@ -1,5 +1,6 @@
-import { app, BrowserWindow } from 'electron';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { app, autoUpdater, BrowserWindow, dialog } from 'electron';
 import started from 'electron-squirrel-startup';
 import { LionPocketDatabase } from './main/database';
 import { registerIpcHandlers } from './main/ipc';
@@ -37,6 +38,56 @@ const iconPath = () =>
   app.isPackaged
     ? path.join(process.resourcesPath, 'icon.png')
     : path.join(__dirname, '../../assets/icon.png');
+
+/**
+ * A versão portátil também é `app.isPackaged`, mas não possui a infraestrutura
+ * do Squirrel.Windows. Só habilitamos atualização automática quando Update.exe
+ * existe ao lado da pasta versionada criada pelo instalador.
+ */
+const isSquirrelInstall = () => {
+  if (process.platform !== 'win32' || !app.isPackaged) return false;
+  const updateExe = path.resolve(path.dirname(process.execPath), '..', 'Update.exe');
+  return existsSync(updateExe);
+};
+
+const configureAutoUpdates = () => {
+  if (!isSquirrelInstall() || process.argv.includes('--squirrel-firstrun')) return;
+
+  const feedUrl = `https://update.electronjs.org/Pianisuto/LionPocket/${process.platform}-${process.arch}/${app.getVersion()}`;
+  autoUpdater.setFeedURL({ url: feedUrl });
+
+  autoUpdater.on('error', (error) => {
+    // Atualização não deve impedir o app de abrir ou funcionar offline.
+    console.warn('Falha ao verificar atualização do LionPocket:', error);
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    void dialog
+      .showMessageBox({
+        type: 'info',
+        title: 'Atualização pronta',
+        message: 'Uma nova versão do LionPocket foi baixada.',
+        detail: 'Reinicie o aplicativo para concluir a atualização.',
+        buttons: ['Reiniciar e atualizar', 'Depois'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      .then(({ response }) => {
+        if (response === 0) autoUpdater.quitAndInstall();
+      });
+  });
+
+  const checkForUpdates = () => autoUpdater.checkForUpdates();
+
+  // O Squirrel mantém um lock logo após a primeira instalação. A pequena espera
+  // também evita competir com a inicialização do banco e da janela principal.
+  const initialCheck = setTimeout(checkForUpdates, 15_000);
+  initialCheck.unref();
+
+  const periodicCheck = setInterval(checkForUpdates, 60 * 60 * 1000);
+  periodicCheck.unref();
+};
 
 const createWindow = () => {
   const createdWindow = new BrowserWindow({
@@ -118,10 +169,15 @@ const createWindow = () => {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.squirrel.lionpocket.lionpocket');
+  }
+
   const databasePath = path.join(app.getPath('userData'), 'lionpocket.sqlite');
   database = new LionPocketDatabase(databasePath);
   registerIpcHandlers(database);
   createWindow();
+  configureAutoUpdates();
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common
@@ -134,12 +190,11 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
+  // On OS X it's common to re-create a window when the dock icon is clicked and there are no other windows open.
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
 });
 
 // In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
+// code. You can also put them in separate files or import them here.

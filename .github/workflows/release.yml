@@ -1,0 +1,183 @@
+name: Release LionPocket
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check tag matches package version
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          tag_version="${GITHUB_REF_NAME#v}"
+
+          if [[ "$package_version" != "$tag_version" ]]; then
+            echo "A tag $GITHUB_REF_NAME não corresponde à versão $package_version do package.json." >&2
+            exit 1
+          fi
+
+      - name: Validate application
+        run: |
+          npm test
+          npm run typecheck
+          npm run lint
+
+  prepare-release:
+    name: Prepare GitHub Release
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Create draft release
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME já existe; os artefatos serão atualizados."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --draft \
+              --title "LionPocket $version" \
+              --generate-notes
+          fi
+
+  windows:
+    name: Build Windows x64
+    needs: prepare-release
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer and portable ZIP
+        run: npm run make -- --platform=win32 --arch=x64
+
+      - name: Upload Windows release assets
+        shell: pwsh
+        run: |
+          $assets = @(
+            "out/make/squirrel.windows/x64/LionPocket-Instalador.exe"
+            (Get-ChildItem "out/make/squirrel.windows/x64/*.nupkg").FullName
+            "out/make/squirrel.windows/x64/RELEASES"
+            (Get-ChildItem "out/make/zip/win32/x64/*.zip").FullName
+          )
+
+          foreach ($asset in $assets) {
+            gh release upload $env:GITHUB_REF_NAME $asset --repo $env:GITHUB_REPOSITORY --clobber
+          }
+
+  linux:
+    name: Build Linux x64
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Linux DEB and portable ZIP
+        run: npm run make:linux
+
+      - name: Upload Linux release assets
+        shell: bash
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            out/make/deb/x64/*.deb \
+            out/make/zip/linux/x64/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - windows
+      - linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Download release assets for checksums
+        shell: bash
+        run: |
+          mkdir -p release-files
+          gh release download "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir release-files
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          rm -f release-files/SHA256SUMS.txt
+          (
+            cd release-files
+            sha256sum * > SHA256SUMS.txt
+          )
+
+      - name: Upload checksums and publish release
+        shell: bash
+        run: |
+          gh release upload "$GITHUB_REF_NAME" release-files/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false
