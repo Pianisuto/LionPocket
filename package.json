@@ -9,7 +9,7 @@
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
-    "make:linux": "electron-forge package --platform=linux --arch=x64 && bash scripts/build-linux-deb.sh",
+    "make:linux": "electron-forge make --platform=linux --arch=x64 && bash scripts/build-linux-deb.sh",
     "publish": "electron-forge publish",
     "icons": "tsx scripts/generate-icon.tsx",
     "lint": "eslint --ext .ts,.tsx src",
