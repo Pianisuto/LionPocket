@@ -187,6 +187,58 @@ describe('despesas fixas', () => {
     });
     database.db.close();
   });
+
+  it('completa o dia de cobrança legado sem duplicar uma fatura já preservada', () => {
+    const database = createDatabase();
+    const recurring = database.saveRecurringExpense({
+      kind: 'expense',
+      active: true,
+      description: 'Assinatura antiga',
+      startMonth: '2026-09',
+      categoryId: null,
+      paymentMethodId: null,
+      plannedAmount: 50,
+      dueDay: 10,
+      notes: '',
+    });
+    const septemberPending = database.listTransactions({ month: '2026-09' })[0];
+    const octoberPreserved = database.listTransactions({ month: '2026-10' })[0];
+    database.settleTransaction(octoberPreserved.id);
+    database.createCatalogItem({
+      type: 'card',
+      name: 'Nubank',
+      closingDay: 25,
+      dueDay: 10,
+    });
+    const card = database.getCatalogs().cards[0];
+
+    expect(() => database.saveRecurringExpense({
+      ...recurring,
+      cardId: card.id,
+      chargeDay: 21,
+    })).not.toThrow();
+
+    expect(database.listTransactions({ month: '2026-09' })).toEqual([]);
+    expect(database.listTransactions({ month: '2026-10' })).toEqual([
+      expect.objectContaining({
+        id: octoberPreserved.id,
+        description: 'Assinatura antiga',
+        purchaseDate: null,
+        dueDate: '2026-10-10',
+        status: 'paid',
+      }),
+    ]);
+    expect(database.db.prepare(`
+      SELECT deleted_at AS deletedAt FROM transactions WHERE id = ?
+    `).get(septemberPending.id)).toMatchObject({ deletedAt: expect.any(String) });
+    expect(database.listTransactions({ month: '2026-11' })[0]).toMatchObject({
+      purchaseDate: '2026-10-21',
+      dueDate: '2026-11-10',
+      cardId: card.id,
+      status: 'planned',
+    });
+    database.db.close();
+  });
 });
 
 describe('entradas fixas', () => {

@@ -963,6 +963,12 @@ export class LionPocketDatabase {
         const discardPending = this.db.prepare(`
           UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ?
         `);
+        const findDueDateCollision = this.db.prepare(`
+          SELECT id FROM transactions
+          WHERE source_type = 'recurring' AND source_id = ? AND due_date = ?
+            AND id != ? AND deleted_at IS NULL
+          LIMIT 1
+        `);
         const occurrenceSettings: Row = {
           card_id: cardId,
           charge_day: chargeDay,
@@ -979,6 +985,16 @@ export class LionPocketDatabase {
             continue;
           }
           const occurrence = this.recurringOccurrence(occurrenceSettings, chargeMonth);
+          // Ao completar o dia de cobrança de uma recorrência antiga, a nova
+          // fatura pode coincidir com uma ocorrência que foi paga, cancelada ou
+          // ajustada manualmente e, por isso, foi preservada acima. Essa ocorrência
+          // existente tem prioridade: removemos somente a projeção planejada que
+          // se tornou redundante, em vez de violar o índice único ou alterar o
+          // histórico da pessoa.
+          if (findDueDateCollision.get(id, occurrence.dueDate, transaction.id)) {
+            discardPending.run(timestamp, timestamp, transaction.id);
+            continue;
+          }
           updatePending.run(
             kind,
             description,
