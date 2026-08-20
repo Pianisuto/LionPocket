@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { History, Link2 } from 'lucide-react';
+import { Check, History, Link2 } from 'lucide-react';
 import type {
   Catalogs,
   Goal,
@@ -9,6 +9,8 @@ import type {
   MoneyKind,
   RecurringExpense,
   RecurringExpenseInput,
+  RecurringFrequency,
+  RecurringIntervalUnit,
   Transaction,
   TransactionInput,
   TransactionStatus,
@@ -26,6 +28,12 @@ const isSettled = (status: TransactionStatus) => status === 'paid' || status ===
 /** A situação que combina com a data: o que venceu antes de hoje já aconteceu. */
 const statusForDate = (date: string, kind: MoneyKind): TransactionStatus =>
   isPastDate(date) ? settledStatusFor(kind) : 'planned';
+
+const yearMonths = [
+  ['01', 'Janeiro'], ['02', 'Fevereiro'], ['03', 'Março'], ['04', 'Abril'],
+  ['05', 'Maio'], ['06', 'Junho'], ['07', 'Julho'], ['08', 'Agosto'],
+  ['09', 'Setembro'], ['10', 'Outubro'], ['11', 'Novembro'], ['12', 'Dezembro'],
+] as const;
 
 export const TransactionForm = ({
   transaction,
@@ -393,7 +401,15 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
   );
   const [kind, setKind] = useState<MoneyKind>(item?.kind ?? 'expense');
   const [description, setDescription] = useState(item?.description ?? '');
+  const [frequency, setFrequency] = useState<RecurringFrequency>(item?.frequency ?? 'monthly');
   const [startMonth, setStartMonth] = useState(item?.startMonth ?? (defaultStartMonth < currentMonthIso() ? currentMonthIso() : defaultStartMonth));
+  const [startDate, setStartDate] = useState(
+    item?.startDate ?? `${defaultStartMonth < currentMonthIso() ? currentMonthIso() : defaultStartMonth}-01`,
+  );
+  const [intervalCount, setIntervalCount] = useState(String(item?.intervalCount ?? 1));
+  const [intervalUnit, setIntervalUnit] = useState<RecurringIntervalUnit>(item?.intervalUnit ?? 'months');
+  const [anchorToActual, setAnchorToActual] = useState(item?.anchorToActual ?? false);
+  const [manualMonths, setManualMonths] = useState<string[]>(item?.manualMonths ?? []);
   const [categoryId, setCategoryId] = useState(item?.categoryId ?? '');
   const [paymentMethodId, setPaymentMethodId] = useState(item?.paymentMethodId ?? '');
   const [cardId, setCardId] = useState(
@@ -423,16 +439,30 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
     : undefined;
   const creditSelected = kind === 'expense' && paymentMethodId === creditMethod?.id;
   const selectedCard = catalogs.cards.find((card) => card.id === cardId);
+  const monthly = frequency === 'monthly';
+  const manual = frequency === 'manual';
+  const monthBased = monthly || manual;
+  const scheduledAutomatically = frequency !== 'manual';
   const numericChargeDay = Number(chargeDay);
-  const firstChargeDate = selectedCard && numericChargeDay >= 1 && numericChargeDay <= 31
-    ? dateForMonthDay(startMonth, numericChargeDay)
+  const firstChargeDate = selectedCard
+    ? monthly
+      ? numericChargeDay >= 1 && numericChargeDay <= 31
+        ? dateForMonthDay(startMonth, numericChargeDay)
+        : null
+      : scheduledAutomatically && startDate
+        ? startDate
+        : null
     : null;
   const firstCardDueDate = selectedCard && firstChargeDate
     ? selectedCard.closingDay === null
       ? nextCardDueDate(firstChargeDate, selectedCard.dueDay)
       : cardStatementDueDate(firstChargeDate, selectedCard.closingDay, selectedCard.dueDay)
     : null;
-  const incompleteCardCycle = creditSelected && (!selectedCard || !firstChargeDate);
+  const incompleteCardCycle = creditSelected && (
+    !selectedCard
+    || monthBased && !(numericChargeDay >= 1 && numericChargeDay <= 31)
+    || !monthBased && scheduledAutomatically && !firstChargeDate
+  );
   const applyKind = (next: MoneyKind) => {
     setKind(next);
     setCategoryId('');
@@ -456,39 +486,74 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
       <form className="form-grid" onSubmit={async (event) => {
         event.preventDefault();
         if (duplicate || incompleteCardCycle) return;
-        await onSave({ id: item?.id, kind, description, startMonth, categoryId: categoryId || null, paymentMethodId: paymentMethodId || null, cardId: creditSelected ? cardId || null : null, plannedAmount: Number(amount), dueDay: selectedCard?.dueDay ?? Number(dueDay), chargeDay: creditSelected ? Number(chargeDay) : null, active, notes });
+        const effectiveStartMonth = monthBased ? startMonth : startDate.slice(0, 7) || startMonth;
+        await onSave({ id: item?.id, kind, description, frequency, startMonth: effectiveStartMonth, startDate: monthBased ? undefined : startDate, intervalCount: Number(intervalCount), intervalUnit, anchorToActual, manualMonths, categoryId: categoryId || null, paymentMethodId: paymentMethodId || null, cardId: creditSelected ? cardId || null : null, plannedAmount: Number(amount), dueDay: selectedCard?.dueDay ?? Number(dueDay), chargeDay: creditSelected && monthBased ? Number(chargeDay) : null, active, notes });
       }}>
         <div className="segmented form-grid__full">
           <button type="button" className={kind === 'expense' ? 'active' : ''} onClick={() => applyKind('expense')}>Saída fixa</button>
           <button type="button" className={kind === 'income' ? 'active' : ''} onClick={() => applyKind('income')}>Entrada fixa</button>
         </div>
         <label className="field form-grid__full"><span>Descrição</span><input required autoFocus aria-invalid={Boolean(duplicate || descriptionError)} value={description} onInvalid={(event) => { event.preventDefault(); setDescriptionError('Informe uma descrição.'); }} onChange={(event) => { setDescription(event.target.value); setDescriptionError(''); }} placeholder={kind === 'income' ? 'Ex.: Salário' : 'Ex.: Internet'} />{descriptionError && <small className="field__error" role="alert">{descriptionError}</small>}{duplicate && <small className="field__error">Já existe uma {kind === 'income' ? 'entrada fixa' : 'saída fixa'} com esse nome. Edite a recorrência existente.</small>}</label>
+        <SelectField className="form-grid__full" label="Frequência" value={frequency} onChange={(value) => setFrequency(value as RecurringFrequency)} options={[
+          { value: 'once', label: 'Não recorrente' },
+          { value: 'weekly', label: 'Semanal' },
+          { value: 'monthly', label: 'Mensal' },
+          { value: 'custom', label: 'Intervalo personalizado' },
+          { value: 'manual', label: 'Manual (escolher meses)' },
+        ]} />
+        {manual && (
+          <div className="manual-months form-grid__full" role="group" aria-label="Meses em que o lançamento será criado">
+            <div className="manual-months__header">
+              <div><strong>Escolha os meses</strong><small>A seleção se repete todos os anos</small></div>
+              <span>{manualMonths.length ? `${manualMonths.length} ${manualMonths.length === 1 ? 'marcado' : 'marcados'}` : 'Nenhum marcado'}</span>
+            </div>
+            <div className="manual-months__grid">
+              {yearMonths.map(([value, label]) => {
+                const selected = manualMonths.includes(value);
+                return <button key={value} type="button" className={selected ? 'active' : ''} aria-pressed={selected} onClick={() => setManualMonths((current) => selected ? current.filter((month) => month !== value) : [...current, value].sort())}><span>{label}</span><i aria-hidden="true">{selected && <Check size={13} strokeWidth={3} />}</i></button>;
+              })}
+            </div>
+          </div>
+        )}
+        {frequency === 'custom' && <>
+          <NumberField label="Repetir a cada" required min={1} max={999} value={intervalCount} onChange={setIntervalCount} />
+          <SelectField label="Unidade do intervalo" value={intervalUnit} onChange={(value) => setIntervalUnit(value as RecurringIntervalUnit)} options={[
+            { value: 'days', label: 'Dias' },
+            { value: 'weeks', label: 'Semanas' },
+            { value: 'months', label: 'Meses' },
+            { value: 'years', label: 'Anos' },
+          ]} />
+        </>}
         <SelectField label="Categoria" value={categoryId} onChange={setCategoryId} options={[{ value: '', label: 'Sem categoria' }, ...catalogs.categories.filter((category) => category.kind === kind).map((category) => ({ value: category.id, label: category.name }))]} />
         <SelectField label={kind === 'income' ? 'Forma de recebimento' : 'Forma de pagamento'} value={paymentMethodId} onChange={applyPaymentMethod} disabled={kind === 'income'} options={[{ value: '', label: 'Não informada' }, ...catalogs.paymentMethods.map((method) => ({ value: method.id, label: method.name }))]} />
         <MoneyField label="Valor mensal" required value={amount} onChange={setAmount} />
-        {creditSelected
+        {creditSelected && monthBased
           ? <NumberField label="Dia mensal da cobrança" required min={1} max={31} value={chargeDay} onChange={setChargeDay} placeholder="Ex.: 20" />
-          : <NumberField label={kind === 'income' ? 'Dia do recebimento' : 'Dia do vencimento'} required min={1} max={31} value={dueDay} onChange={setDueDay} />}
+          : monthBased && <NumberField label={kind === 'income' ? 'Dia do recebimento' : 'Dia do vencimento'} required min={1} max={31} value={dueDay} onChange={setDueDay} />}
         {creditSelected && <SelectField label="Cartão" value={cardId} onChange={setCardId} options={[{ value: '', label: 'Selecione o cartão' }, ...catalogs.cards.map((card) => ({
           value: card.id,
           label: card.name,
           details: [card.closingDay === null ? 'Sem fechamento' : `Fecha ${card.closingDay}`, `Vence ${card.dueDay}`],
         }))]} />}
-        <MonthField className={creditSelected ? '' : 'form-grid__full'} label={creditSelected ? 'Primeira cobrança em' : 'Começar em'} hint={creditSelected ? 'Escolha o mês em que a cobrança começa. O app usa o fechamento e o vencimento do cartão para decidir em qual fatura ela aparece.' : 'O primeiro lançamento será criado neste mês; meses anteriores ficam intocados.'} min={item ? undefined : currentMonthIso()} value={startMonth} onChange={setStartMonth} />
-        {creditSelected && (
+        {monthBased && <MonthField className={creditSelected ? '' : 'form-grid__full'} label={manual ? 'Começar a partir de' : creditSelected ? 'Primeira cobrança em' : 'Começar em'} hint={manual ? 'A seleção de meses se repete todos os anos a partir daqui.' : creditSelected ? 'Escolha o mês em que a cobrança começa. O app usa o fechamento e o vencimento do cartão para decidir em qual fatura ela aparece.' : 'O primeiro lançamento será criado neste mês; meses anteriores ficam intocados.'} min={item ? undefined : currentMonthIso()} value={startMonth} onChange={setStartMonth} />}
+        {!monthBased && scheduledAutomatically && <DateField className="form-grid__full" label={frequency === 'once' ? 'Data do lançamento' : 'Primeira ocorrência'} value={startDate} onChange={setStartDate} required />}
+        {frequency === 'custom' && (
+          <label className="toggle-row form-grid__full"><input type="checkbox" checked={anchorToActual} onChange={(event) => setAnchorToActual(event.target.checked)} /><span><strong>Calcular a próxima pela data efetiva</strong><small>Se a compra ou o pagamento atrasar, a previsão seguinte acompanha a data real.</small></span></label>
+        )}
+        {creditSelected && scheduledAutomatically && (
           <div className={`card-cycle-note form-grid__full ${incompleteCardCycle || selectedCard?.closingDay === null ? 'card-cycle-note--warning' : ''}`}>
             {!selectedCard
               ? <>Selecione um cartão para calcular a primeira fatura.</>
               : !firstChargeDate
-                ? <>Informe o dia em que essa despesa é cobrada mensalmente no cartão.</>
+                ? <>{monthly ? 'Informe o dia em que essa despesa é cobrada mensalmente no cartão.' : 'Informe a data da primeira ocorrência.'}</>
                 : selectedCard.closingDay === null
                   ? <>O <strong>{selectedCard.name}</strong> ainda está sem fechamento configurado. O vencimento estimado da primeira fatura é <strong>{formatDate(firstCardDueDate, 'dd/MM/yyyy')}</strong>.</>
                   : <>Primeira cobrança em <strong>{formatDate(firstChargeDate, 'dd/MM/yyyy')}</strong> · aparecerá na fatura com vencimento em <strong>{formatDate(firstCardDueDate, 'dd/MM/yyyy')}</strong>.</>}
           </div>
         )}
         <label className="field form-grid__full"><span>Observações</span><textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
-        <label className="toggle-row form-grid__full"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /><span><strong>{kind === 'income' ? 'Entrada ativa' : 'Saída ativa'}</strong><small>Inclui este lançamento nos próximos meses</small></span></label>
-        <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={Boolean(duplicate) || incompleteCardCycle}>Salvar recorrência</button></div>
+        <label className="toggle-row form-grid__full"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /><span><strong>{kind === 'income' ? 'Entrada ativa' : 'Saída ativa'}</strong><small>{frequency === 'manual' ? 'Cria lançamentos somente nos meses marcados' : frequency === 'once' ? 'Cria a ocorrência única informada' : 'Gera os próximos lançamentos automaticamente'}</small></span></label>
+        <div className="modal__actions form-grid__full"><button type="button" className="button button--ghost" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={Boolean(duplicate) || incompleteCardCycle || manual && manualMonths.length === 0}>Salvar recorrência</button></div>
       </form>
     </Modal>
   );

@@ -1,5 +1,7 @@
 export type MoneyKind = 'income' | 'expense';
 export type TransactionStatus = 'planned' | 'paid' | 'received' | 'cancelled';
+export type RecurringFrequency = 'once' | 'weekly' | 'monthly' | 'custom' | 'manual';
+export type RecurringIntervalUnit = 'days' | 'weeks' | 'months' | 'years';
 
 export interface Category {
   id: string;
@@ -91,6 +93,15 @@ export interface RecurringExpense {
   active: boolean;
   description: string;
   startMonth: string;
+  /** Data da primeira ocorrência. Recorrências mensais antigas a derivam de startMonth + dia. */
+  startDate: string;
+  frequency: RecurringFrequency;
+  intervalCount: number;
+  intervalUnit: RecurringIntervalUnit;
+  /** Em intervalos personalizados, desloca a previsão conforme a última data efetiva. */
+  anchorToActual: boolean;
+  /** Meses do ano (01–12) escolhidos explicitamente quando a frequência é manual. */
+  manualMonths: string[];
   categoryId: string | null;
   categoryName: string | null;
   paymentMethodId: string | null;
@@ -110,6 +121,12 @@ export interface RecurringExpenseInput {
   active: boolean;
   description: string;
   startMonth: string;
+  startDate?: string;
+  frequency?: RecurringFrequency;
+  intervalCount?: number;
+  intervalUnit?: RecurringIntervalUnit;
+  anchorToActual?: boolean;
+  manualMonths?: string[];
   categoryId?: string | null;
   paymentMethodId?: string | null;
   cardId?: string | null;

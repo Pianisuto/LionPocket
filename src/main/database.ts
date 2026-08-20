@@ -13,6 +13,8 @@ import type {
   Overview,
   RecurringExpense,
   RecurringExpenseInput,
+  RecurringFrequency,
+  RecurringIntervalUnit,
   SimpleCatalogItem,
   Transaction,
   TransactionFilters,
@@ -20,6 +22,8 @@ import type {
   TransactionStatus,
 } from '../shared/types';
 import {
+  addDays,
+  addInterval,
   addMonths,
   calculateGoal,
   cardStatementDueDate,
@@ -157,6 +161,12 @@ export class LionPocketDatabase {
         active INTEGER NOT NULL DEFAULT 1,
         description TEXT NOT NULL,
         start_month TEXT NOT NULL,
+        start_date TEXT,
+        frequency TEXT NOT NULL DEFAULT 'monthly',
+        interval_count INTEGER NOT NULL DEFAULT 1,
+        interval_unit TEXT NOT NULL DEFAULT 'months',
+        anchor_to_actual INTEGER NOT NULL DEFAULT 0,
+        manual_months TEXT NOT NULL DEFAULT '',
         category_id TEXT REFERENCES categories(id),
         payment_method_id TEXT REFERENCES payment_methods(id),
         card_id TEXT REFERENCES cards(id),
@@ -210,9 +220,6 @@ export class LionPocketDatabase {
         deleted_at TEXT
       );
 
-      CREATE UNIQUE INDEX IF NOT EXISTS transactions_source_unique
-        ON transactions(source_type, source_id, due_date)
-        WHERE source_id IS NOT NULL AND deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS transactions_due_date ON transactions(due_date);
       CREATE INDEX IF NOT EXISTS transactions_status ON transactions(status);
 
@@ -283,6 +290,24 @@ export class LionPocketDatabase {
     if (!recurringColumns.some((column) => column.name === 'charge_day')) {
       this.db.exec('ALTER TABLE recurring_expenses ADD COLUMN charge_day INTEGER');
     }
+    if (!recurringColumns.some((column) => column.name === 'start_date')) {
+      this.db.exec('ALTER TABLE recurring_expenses ADD COLUMN start_date TEXT');
+    }
+    if (!recurringColumns.some((column) => column.name === 'frequency')) {
+      this.db.exec("ALTER TABLE recurring_expenses ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly'");
+    }
+    if (!recurringColumns.some((column) => column.name === 'interval_count')) {
+      this.db.exec('ALTER TABLE recurring_expenses ADD COLUMN interval_count INTEGER NOT NULL DEFAULT 1');
+    }
+    if (!recurringColumns.some((column) => column.name === 'interval_unit')) {
+      this.db.exec("ALTER TABLE recurring_expenses ADD COLUMN interval_unit TEXT NOT NULL DEFAULT 'months'");
+    }
+    if (!recurringColumns.some((column) => column.name === 'anchor_to_actual')) {
+      this.db.exec('ALTER TABLE recurring_expenses ADD COLUMN anchor_to_actual INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!recurringColumns.some((column) => column.name === 'manual_months')) {
+      this.db.exec("ALTER TABLE recurring_expenses ADD COLUMN manual_months TEXT NOT NULL DEFAULT ''");
+    }
     this.db.prepare(`
       UPDATE recurring_expenses
       SET start_month = substr(created_at, 1, 7)
@@ -292,6 +317,19 @@ export class LionPocketDatabase {
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (6, datetime('now'))");
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (7, datetime('now'))");
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (8, datetime('now'))");
+    // Uma recorrência semanal pode ter várias compras na mesma fatura. Para
+    // ela, a identidade é a data da compra; as outras origens continuam usando
+    // o vencimento, como nas versões anteriores.
+    this.db.exec(`
+      DROP INDEX IF EXISTS transactions_source_unique;
+      CREATE UNIQUE INDEX IF NOT EXISTS transactions_recurring_source_unique
+        ON transactions(source_id, COALESCE(purchase_date, due_date))
+        WHERE source_type = 'recurring' AND source_id IS NOT NULL AND deleted_at IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS transactions_other_source_unique
+        ON transactions(source_type, source_id, due_date)
+        WHERE source_type != 'recurring' AND source_id IS NOT NULL AND deleted_at IS NULL;
+      INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (9, datetime('now'));
+    `);
   }
 
   private seed() {
@@ -532,9 +570,36 @@ export class LionPocketDatabase {
     )`;
   }
 
-  private recurringOccurrence(item: Row, chargeMonth: string) {
-    if (item.card_id && item.charge_day !== null) {
-      const purchaseDate = dateForMonthDay(chargeMonth, Number(item.charge_day));
+  private recurringFrequency(item: Row): RecurringFrequency {
+    const frequency = String(item.frequency ?? 'monthly');
+    return ['once', 'weekly', 'monthly', 'custom', 'manual'].includes(frequency)
+      ? frequency as RecurringFrequency
+      : 'monthly';
+  }
+
+  private recurringStartDate(item: Row) {
+    if (item.start_date && /^\d{4}-\d{2}-\d{2}$/.test(String(item.start_date))) {
+      return String(item.start_date);
+    }
+    const startMonth = String(item.start_month ?? String(item.created_at).slice(0, 7));
+    const day = item.card_id && item.charge_day !== null ? Number(item.charge_day) : Number(item.due_day);
+    return dateForMonthDay(startMonth, day);
+  }
+
+  private recurringInterval(item: Row): { count: number; unit: RecurringIntervalUnit } {
+    const frequency = this.recurringFrequency(item);
+    if (frequency === 'weekly') return { count: 1, unit: 'weeks' };
+    if (frequency === 'monthly') return { count: 1, unit: 'months' };
+    const rawUnit = String(item.interval_unit ?? 'months');
+    const unit = ['days', 'weeks', 'months', 'years'].includes(rawUnit)
+      ? rawUnit as RecurringIntervalUnit
+      : 'months';
+    return { count: Math.max(1, Math.round(Number(item.interval_count) || 1)), unit };
+  }
+
+  private recurringOccurrence(item: Row, scheduledDate: string) {
+    if (item.card_id) {
+      const purchaseDate = scheduledDate;
       const cardDueDay = Number(item.cardDueDay ?? item.due_day);
       const dueDate = item.cardClosingDay === null
         ? nextCardDueDate(purchaseDate, cardDueDay)
@@ -543,9 +608,42 @@ export class LionPocketDatabase {
     }
     return {
       purchaseDate: null,
-      dueDate: dateForMonthDay(chargeMonth, Number(item.due_day)),
+      dueDate: scheduledDate,
       cardId: null,
     };
+  }
+
+  private fixedRecurringDates(item: Row, rangeStart: string, rangeEnd: string) {
+    const frequency = this.recurringFrequency(item);
+    if (frequency === 'manual') {
+      const day = item.card_id && item.charge_day !== null ? Number(item.charge_day) : Number(item.due_day);
+      const selectedMonths = new Set(String(item.manual_months ?? '')
+        .split(',')
+        .filter((month) => /^(0[1-9]|1[0-2])$/.test(month)));
+      const dates: string[] = [];
+      let month = `${rangeStart.slice(0, 7)}-01`;
+      while (month < rangeEnd) {
+        const monthIso = month.slice(0, 7);
+        if (
+          monthIso >= String(item.start_month)
+          && selectedMonths.has(monthIso.slice(5, 7))
+        ) dates.push(dateForMonthDay(monthIso, day));
+        month = addMonths(month, 1);
+      }
+      return dates;
+    }
+    const firstDate = this.recurringStartDate(item);
+    if (frequency === 'once') return firstDate >= rangeStart && firstDate < rangeEnd ? [firstDate] : [];
+    const interval = this.recurringInterval(item);
+    const dates: string[] = [];
+    // Cada passo parte da âncora original. Assim, 31/jan continua virando
+    // 31/mar depois do ajuste natural para 28/fev, sem acumular esse corte.
+    for (let occurrence = 0; ; occurrence += 1) {
+      const date = addInterval(firstDate, occurrence * interval.count, interval.unit);
+      if (date >= rangeEnd) break;
+      if (date >= rangeStart) dates.push(date);
+    }
+    return dates;
   }
 
   ensureRecurringForMonth(month: string) {
@@ -559,7 +657,18 @@ export class LionPocketDatabase {
     const { start, end } = monthRange(month);
     const existing = this.db.prepare(`
       SELECT id FROM transactions
-      WHERE source_type = 'recurring' AND source_id = ? AND due_date >= ? AND due_date < ?
+      WHERE source_type = 'recurring' AND source_id = ?
+        AND COALESCE(purchase_date, due_date) = ?
+      LIMIT 1
+    `);
+    const existingMonthly = this.db.prepare(`
+      SELECT id FROM transactions
+      WHERE source_type = 'recurring' AND source_id = ?
+        AND (
+          (purchase_date IS NOT NULL AND substr(purchase_date, 1, 7) = ?)
+          OR (? = 1 AND purchase_date IS NULL AND substr(due_date, 1, 7) = ?)
+          OR due_date = ?
+        )
       LIMIT 1
     `);
     const statement = this.db.prepare(`
@@ -570,17 +679,55 @@ export class LionPocketDatabase {
     `);
     const timestamp = now();
     for (const item of recurring) {
-      // Uma ocorrência excluída continua no banco como um marcador. Considerá-la
-      // aqui evita que a consulta do mês recrie imediatamente o lançamento que
-      // a pessoa acabou de apagar, sem interromper a recorrência nos outros meses.
-      if (existing.get(item.id, start, end)) continue;
-      const recurringStartMonth = String(item.start_month ?? String(item.created_at).slice(0, 7));
-      // Uma cobrança pode vencer no mesmo mês, no seguinte ou, em ciclos
-      // que fecham depois do vencimento, até dois meses adiante.
-      for (let offset = 0; offset <= 2; offset += 1) {
-        const chargeMonth = addMonths(`${month}-01`, -offset).slice(0, 7);
-        if (chargeMonth < recurringStartMonth) continue;
-        const occurrence = this.recurringOccurrence(item, chargeMonth);
+      const frequency = this.recurringFrequency(item);
+      const candidateStart = item.card_id ? addDays(start, -70) : start;
+      let scheduledDates: string[];
+      if (frequency === 'custom' && Boolean(item.anchor_to_actual)) {
+        const interval = this.recurringInterval(item);
+        const history = this.db.prepare(`
+          SELECT purchase_date AS purchaseDate, due_date AS dueDate,
+            settled_date AS settledDate, status
+          FROM transactions
+          WHERE source_type = 'recurring' AND source_id = ?
+        `).all(item.id) as unknown as Row[];
+        const effectiveDates = history.map((transaction) => {
+          if (item.card_id && transaction.purchaseDate) return String(transaction.purchaseDate);
+          if (
+            (transaction.status === 'paid' || transaction.status === 'received')
+            && transaction.settledDate
+          ) return String(transaction.settledDate);
+          return String(transaction.dueDate);
+        });
+        const sortedEffectiveDates = effectiveDates.sort();
+        let nextDate = sortedEffectiveDates.length
+          ? addInterval(sortedEffectiveDates[sortedEffectiveDates.length - 1], interval.count, interval.unit)
+          : this.recurringStartDate(item);
+        scheduledDates = [];
+        while (nextDate < end) {
+          if (nextDate >= candidateStart) scheduledDates.push(nextDate);
+          nextDate = addInterval(nextDate, interval.count, interval.unit);
+        }
+      } else {
+        scheduledDates = this.fixedRecurringDates(item, candidateStart, end);
+      }
+      for (const scheduledDate of scheduledDates) {
+        // Uma ocorrência excluída continua no banco como um marcador. Isso
+        // impede que consultar novamente o mês desfaça a exclusão da pessoa.
+        if (existing.get(item.id, scheduledDate)) continue;
+        const occurrence = this.recurringOccurrence(item, scheduledDate);
+        // Recorrências mensais antigas tinham uma ocorrência por mês de
+        // competência. Preservamos essa identidade ao mudar dia ou migrar a
+        // cobrança para cartão, inclusive quando a ocorrência já foi paga.
+        if (
+          frequency === 'monthly'
+          && existingMonthly.get(
+            item.id,
+            scheduledDate.slice(0, 7),
+            item.card_id ? 0 : 1,
+            scheduledDate.slice(0, 7),
+            occurrence.dueDate,
+          )
+        ) continue;
         if (occurrence.dueDate.slice(0, 7) !== month) continue;
         statement.run(
           randomUUID(),
@@ -597,7 +744,6 @@ export class LionPocketDatabase {
           timestamp,
           timestamp,
         );
-        break;
       }
     }
   }
@@ -660,6 +806,35 @@ export class LionPocketDatabase {
     return rows.map((row) => this.transactionFromRow(row));
   }
 
+  /**
+   * Uma ocorrência efetiva pode deslocar um intervalo personalizado. Projeções
+   * posteriores ainda abertas são descartáveis e serão recriadas sob demanda
+   * a partir da nova data; histórico pago, cancelado ou editado permanece.
+   */
+  private resetRollingRecurringProjections(transactionId: string) {
+    const row = this.db.prepare(`
+      SELECT t.id, t.source_id AS sourceId, t.purchase_date AS purchaseDate,
+        t.due_date AS dueDate, t.settled_date AS settledDate, t.status,
+        r.card_id AS recurringCardId
+      FROM transactions t
+      JOIN recurring_expenses r ON r.id = t.source_id
+      WHERE t.id = ? AND t.source_type = 'recurring'
+        AND r.frequency = 'custom' AND r.anchor_to_actual = 1
+    `).get(transactionId) as Row | undefined;
+    if (!row) return;
+    const effectiveDate = row.recurringCardId && row.purchaseDate
+      ? String(row.purchaseDate)
+      : (row.status === 'paid' || row.status === 'received') && row.settledDate
+        ? String(row.settledDate)
+        : String(row.dueDate);
+    this.db.prepare(`
+      DELETE FROM transactions
+      WHERE source_type = 'recurring' AND source_id = ? AND id != ?
+        AND status = 'planned' AND actual_cents IS NULL AND settled_date IS NULL
+        AND deleted_at IS NULL AND COALESCE(purchase_date, due_date) > ?
+    `).run(row.sourceId, transactionId, effectiveDate);
+  }
+
   saveTransaction(input: TransactionInput): Transaction {
     const id = input.id ?? randomUUID();
     const timestamp = now();
@@ -711,6 +886,7 @@ export class LionPocketDatabase {
         timestamp,
       );
     }
+    this.resetRollingRecurringProjections(id);
     return this.getTransaction(id);
   }
 
@@ -772,6 +948,7 @@ export class LionPocketDatabase {
       UPDATE transactions SET status = ?, actual_cents = COALESCE(actual_cents, planned_cents),
         settled_date = COALESCE(settled_date, ?), updated_at = ? WHERE id = ?
     `).run(status, todayIso(), now(), id);
+    this.resetRollingRecurringProjections(id);
   }
 
   /**
@@ -795,7 +972,9 @@ export class LionPocketDatabase {
     this.db.exec('BEGIN');
     try {
       for (const id of ids) {
-        settled += Number(statement.run(today, timestamp, id).changes);
+        const changed = Number(statement.run(today, timestamp, id).changes);
+        settled += changed;
+        if (changed) this.resetRollingRecurringProjections(id);
       }
       this.db.exec('COMMIT');
     } catch (error) {
@@ -846,7 +1025,10 @@ export class LionPocketDatabase {
         pm.name AS paymentMethodName, r.card_id AS cardId, ca.name AS cardName,
         r.planned_cents AS plannedCents,
         r.due_day AS dueDay, COALESCE(r.start_month, substr(r.created_at, 1, 7)) AS startMonth,
-        r.charge_day AS chargeDay, r.notes
+        r.start_date AS storedStartDate, r.frequency,
+        r.interval_count AS intervalCount, r.interval_unit AS intervalUnit,
+        r.anchor_to_actual AS anchorToActual,
+        r.manual_months AS manualMonths, r.charge_day AS chargeDay, r.notes
       FROM recurring_expenses r
       LEFT JOIN categories c ON c.id = r.category_id
       LEFT JOIN payment_methods pm ON pm.id = r.payment_method_id
@@ -861,6 +1043,20 @@ export class LionPocketDatabase {
       active: Boolean(row.active),
       description: String(row.description),
       startMonth: String(row.startMonth),
+      startDate: row.storedStartDate
+        ? String(row.storedStartDate)
+        : dateForMonthDay(
+            String(row.startMonth),
+            row.cardId && row.chargeDay !== null ? Number(row.chargeDay) : Number(row.dueDay),
+          ),
+      frequency: this.recurringFrequency(row),
+      intervalCount: Math.max(1, Number(row.intervalCount) || 1),
+      intervalUnit: (['days', 'weeks', 'months', 'years'].includes(String(row.intervalUnit))
+        ? row.intervalUnit
+        : 'months') as RecurringIntervalUnit,
+      anchorToActual: Boolean(row.anchorToActual),
+      manualMonths: String(row.manualMonths ?? '').split(',')
+        .filter((month) => /^(0[1-9]|1[0-2])$/.test(month)),
       categoryId: row.categoryId ? String(row.categoryId) : null,
       categoryName: row.categoryName ? String(row.categoryName) : null,
       paymentMethodId: row.paymentMethodId ? String(row.paymentMethodId) : null,
@@ -879,6 +1075,28 @@ export class LionPocketDatabase {
     const timestamp = now();
     const plannedCents = toCents(input.plannedAmount) ?? 0;
     const kind = input.kind === 'income' ? 'income' : 'expense';
+    const requestedFrequency = input.frequency ?? 'monthly';
+    const frequency: RecurringFrequency = ['once', 'weekly', 'monthly', 'custom', 'manual']
+      .includes(requestedFrequency)
+      ? requestedFrequency
+      : 'monthly';
+    const requestedIntervalUnit = input.intervalUnit ?? 'months';
+    const intervalUnit: RecurringIntervalUnit = ['days', 'weeks', 'months', 'years']
+      .includes(requestedIntervalUnit)
+      ? requestedIntervalUnit
+      : 'months';
+    const intervalCount = frequency === 'custom'
+      ? Math.min(999, Math.max(1, Math.round(input.intervalCount ?? 1)))
+      : 1;
+    const anchorToActual = frequency === 'custom' && Boolean(input.anchorToActual);
+    const manualMonths = frequency === 'manual'
+      ? [...new Set(input.manualMonths ?? [])]
+          .filter((month) => /^(0[1-9]|1[0-2])$/.test(month))
+          .sort()
+      : [];
+    if (frequency === 'manual' && manualMonths.length === 0) {
+      throw new Error('Selecione pelo menos um mês para a recorrência manual.');
+    }
     const requestedCardId = kind === 'expense' ? input.cardId ?? null : null;
     const card = requestedCardId
       ? this.db.prepare(`
@@ -898,9 +1116,21 @@ export class LionPocketDatabase {
       ? input.startMonth
       : currentMonthIso();
     const startMonth = requestedStartMonth;
+    const fallbackStartDate = dateForMonthDay(
+      startMonth,
+      cardId ? chargeDay ?? 1 : dueDay,
+    );
+    const startDate = frequency !== 'monthly'
+      && /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(input.startDate ?? '')
+      ? String(input.startDate)
+      : fallbackStartDate;
     const original = input.id
       ? this.db.prepare(`
-          SELECT kind, description FROM recurring_expenses
+          SELECT kind, description, frequency, interval_count AS intervalCount,
+            interval_unit AS intervalUnit, anchor_to_actual AS anchorToActual,
+            manual_months AS manualMonths, start_date, start_month, due_day,
+            card_id, charge_day, created_at
+          FROM recurring_expenses
           WHERE id = ? AND deleted_at IS NULL
         `).get(id) as Row | undefined
       : undefined;
@@ -920,10 +1150,12 @@ export class LionPocketDatabase {
       throw new Error(`Já existe uma ${label} com esse nome. Edite a recorrência existente.`);
     }
     if (input.id) {
+      if (!original) throw new Error('Recorrência não encontrada.');
       this.db.exec('BEGIN');
       try {
         this.db.prepare(`
-          UPDATE recurring_expenses SET kind = ?, active = ?, description = ?, start_month = ?, category_id = ?,
+          UPDATE recurring_expenses SET kind = ?, active = ?, description = ?, start_month = ?, start_date = ?,
+            frequency = ?, interval_count = ?, interval_unit = ?, anchor_to_actual = ?, manual_months = ?, category_id = ?,
             payment_method_id = ?, card_id = ?, planned_cents = ?, due_day = ?, charge_day = ?, notes = ?, updated_at = ?
           WHERE id = ? AND deleted_at IS NULL
         `).run(
@@ -931,6 +1163,12 @@ export class LionPocketDatabase {
           input.active ? 1 : 0,
           description,
           startMonth,
+          startDate,
+          frequency,
+          intervalCount,
+          intervalUnit,
+          anchorToActual ? 1 : 0,
+          manualMonths.join(','),
           input.categoryId ?? null,
           input.paymentMethodId ?? null,
           cardId,
@@ -942,6 +1180,15 @@ export class LionPocketDatabase {
           id,
         );
 
+        const originalFrequency = this.recurringFrequency(original);
+        const scheduleChanged = originalFrequency !== frequency
+          || frequency !== 'monthly' && (
+            this.recurringStartDate(original) !== startDate
+            || Number(original.intervalCount ?? 1) !== intervalCount
+            || String(original.intervalUnit ?? 'months') !== intervalUnit
+            || Boolean(original.anchorToActual) !== anchorToActual
+            || String(original.manualMonths ?? '') !== manualMonths.join(',')
+          );
         const pendingTransactions = this.db.prepare(`
           SELECT id, purchase_date AS purchaseDate, due_date AS dueDate
           FROM transactions
@@ -949,6 +1196,14 @@ export class LionPocketDatabase {
             AND actual_cents IS NULL AND settled_date IS NULL AND deleted_at IS NULL
           ORDER BY due_date
         `).all(id) as unknown as Row[];
+        if (scheduleChanged || frequency !== 'monthly') {
+          this.db.prepare(`
+            DELETE FROM transactions
+            WHERE source_type = 'recurring' AND source_id = ? AND status = 'planned'
+              AND actual_cents IS NULL AND settled_date IS NULL AND deleted_at IS NULL
+          `).run(id);
+          pendingTransactions.length = 0;
+        }
         const parkPending = this.db.prepare(`
           UPDATE transactions SET due_date = ?, updated_at = ? WHERE id = ?
         `);
@@ -984,7 +1239,11 @@ export class LionPocketDatabase {
             discardPending.run(timestamp, timestamp, transaction.id);
             continue;
           }
-          const occurrence = this.recurringOccurrence(occurrenceSettings, chargeMonth);
+          const scheduledDate = dateForMonthDay(
+            chargeMonth,
+            cardId ? chargeDay ?? 1 : dueDay,
+          );
+          const occurrence = this.recurringOccurrence(occurrenceSettings, scheduledDate);
           // Ao completar o dia de cobrança de uma recorrência antiga, a nova
           // fatura pode coincidir com uma ocorrência que foi paga, cancelada ou
           // ajustada manualmente e, por isso, foi preservada acima. Essa ocorrência
@@ -1017,15 +1276,22 @@ export class LionPocketDatabase {
     } else {
       this.db.prepare(`
         INSERT INTO recurring_expenses(
-          id, kind, active, description, start_month, category_id, payment_method_id, card_id,
+          id, kind, active, description, start_month, start_date, frequency, interval_count,
+          interval_unit, anchor_to_actual, manual_months, category_id, payment_method_id, card_id,
           planned_cents, due_day, charge_day, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         kind,
         input.active ? 1 : 0,
         description,
         startMonth,
+        startDate,
+        frequency,
+        intervalCount,
+        intervalUnit,
+        anchorToActual ? 1 : 0,
+        manualMonths.join(','),
         input.categoryId ?? null,
         input.paymentMethodId ?? null,
         cardId,
@@ -1057,20 +1323,26 @@ export class LionPocketDatabase {
     const cents = toCents(input.installmentAmount) ?? 0;
     const totalInstallments = Math.round(input.totalInstallments);
     const currentInstallment = Math.round(input.currentInstallment);
+    const description = input.description.trim();
+    if (!description) throw new Error('Informe a descrição da compra.');
+    if (cents < 1) throw new Error('Informe um valor de parcela maior que zero.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.currentDueDate)) {
+      throw new Error('Informe uma data válida para a parcela atual.');
+    }
     if (totalInstallments < 1 || currentInstallment < 1 || currentInstallment > totalInstallments) {
       throw new Error('Informe uma parcela atual entre 1 e o total da compra.');
     }
     const firstDueDate = addMonths(input.currentDueDate, -(currentInstallment - 1));
     this.db.exec('BEGIN');
     try {
-      this.db.prepare(`
+      const purchaseInsert = this.db.prepare(`
         INSERT INTO installment_purchases(
           id, description, category_id, payment_method_id, card_id, installment_cents,
           total_installments, starting_installment, purchase_date, first_due_date, notes, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
-        input.description.trim(),
+        description,
         input.categoryId ?? null,
         input.paymentMethodId ?? null,
         input.cardId ?? null,
@@ -1090,10 +1362,11 @@ export class LionPocketDatabase {
           installment_number, installment_total, created_at, updated_at
         ) VALUES (?, 'expense', ?, ?, ?, ?, ?, 'planned', ?, ?, ?, 'installment', ?, ?, ?, ?, ?)
       `);
+      let insertedInstallments = 0;
       for (let installment = currentInstallment; installment <= totalInstallments; installment += 1) {
-        statement.run(
+        insertedInstallments += Number(statement.run(
           randomUUID(),
-          input.description.trim(),
+          description,
           input.categoryId ?? null,
           cents,
           input.purchaseDate ?? null,
@@ -1106,12 +1379,23 @@ export class LionPocketDatabase {
           totalInstallments,
           timestamp,
           timestamp,
-        );
+        ).changes);
+      }
+      const expectedInstallments = totalInstallments - currentInstallment + 1;
+      if (Number(purchaseInsert.changes) !== 1 || insertedInstallments !== expectedInstallments) {
+        throw new Error('Não foi possível persistir todas as parcelas.');
       }
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
+    }
+    const persisted = this.db.prepare(`
+      SELECT COUNT(*) AS count FROM transactions
+      WHERE source_type = 'installment' AND source_id = ? AND deleted_at IS NULL
+    `).get(id) as Row;
+    if (Number(persisted.count) !== totalInstallments - currentInstallment + 1) {
+      throw new Error('As parcelas não foram persistidas por completo.');
     }
     const saved = this.listInstallmentPurchases(input.currentDueDate.slice(0, 7)).find((item) => item.id === id);
     if (!saved) throw new Error('Não foi possível salvar a compra parcelada.');

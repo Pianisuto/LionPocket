@@ -255,14 +255,12 @@ export const groupUpcoming = (items: Transaction[]): PayableEntry[] => {
 export const Dashboard = ({
   overview,
   loading,
-  onAddTransaction,
   onNavigate,
   onEditTransaction,
   onSettleTransactions,
 }: {
   overview: Overview | null;
   loading: boolean;
-  onAddTransaction: () => void;
   onNavigate: (view: string) => void;
   onEditTransaction: (item: Transaction) => void;
   onSettleTransactions: (items: Transaction[]) => Promise<boolean>;
@@ -341,7 +339,7 @@ export const Dashboard = ({
             <button className="text-button" onClick={() => onNavigate('transactions')}>Abrir lista <ChevronRight size={16} /></button>
           </header>
           <div className="mini-list">
-            {overview.recent.length ? overview.recent.map((item) => <TransactionRow key={item.id} item={item} onEdit={onEditTransaction} />) : <EmptyState icon={<ReceiptText />} title="Seu mês começa aqui" description="Adicione a primeira entrada ou saída para acompanhar o movimento." action={<button className="button button--soft" onClick={onAddTransaction}><Plus size={16} /> Adicionar</button>} />}
+            {overview.recent.length ? overview.recent.map((item) => <TransactionRow key={item.id} item={item} onEdit={onEditTransaction} />) : <EmptyState icon={<ReceiptText />} title="Seu mês começa aqui" description="Use + Lançamento na barra superior para adicionar a primeira entrada ou saída." />}
           </div>
         </section>
 

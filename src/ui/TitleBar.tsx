@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Minus, Moon, Square, SunMedium, X } from 'lucide-react';
+import { Minus, Moon, Plus, Square, SunMedium, X } from 'lucide-react';
 import { LionMark } from './Lion';
 import type { Theme } from './theme';
 
@@ -19,10 +19,14 @@ export const TitleBar = ({
   theme,
   onToggleTheme,
   subtitle,
+  showAddTransaction,
+  onAddTransaction,
 }: {
   theme: Theme;
   onToggleTheme: () => void;
   subtitle: string;
+  showAddTransaction: boolean;
+  onAddTransaction: () => void;
 }) => {
   const [maximized, setMaximized] = useState(false);
 
@@ -49,6 +53,12 @@ export const TitleBar = ({
 
       {/* Faixa arrastável: tudo que não for botão move a janela. */}
       <div className="titlebar__drag" />
+
+      {showAddTransaction && (
+        <button className="titlebar__quick-add" onClick={onAddTransaction} onDoubleClick={(event) => event.stopPropagation()} aria-label="Adicionar lançamento">
+          <Plus size={14} /> Lançamento
+        </button>
+      )}
 
       <div className="titlebar__controls">
         <button

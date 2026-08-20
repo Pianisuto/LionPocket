@@ -6,7 +6,6 @@ import {
   Hand,
   Moon,
   PartyPopper,
-  Plus,
   Sparkles,
   Target,
   Volume2,
@@ -106,7 +105,6 @@ export const Leo = ({
   month,
   theme,
   onToggleTheme,
-  onQuickAdd,
   onNavigate,
   notify,
 }: {
@@ -114,7 +112,6 @@ export const Leo = ({
   month: string;
   theme: Theme;
   onToggleTheme: () => void;
-  onQuickAdd: () => void;
   onNavigate: (view: string) => void;
   notify: (message: string) => void;
 }) => {
@@ -246,15 +243,6 @@ export const Leo = ({
   };
 
   const usefulActions = [
-    {
-      icon: <Plus size={16} />,
-      label: 'Novo lançamento',
-      hint: 'Registrar uma entrada ou saída',
-      run: () => {
-        setOpen(false);
-        onQuickAdd();
-      },
-    },
     {
       icon: <Sparkles size={16} />,
       label: 'Como está o mês?',

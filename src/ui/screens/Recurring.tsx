@@ -2,7 +2,36 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, CalendarSync, Pencil, Plus, Power, Trash2 } from 'lucide-react';
 import type { RecurringExpense } from '../../shared/types';
 import { ConfirmDialog, EmptyState } from '../components';
-import { currency } from '../format';
+import { currency, formatDate } from '../format';
+
+const intervalLabel = (item: RecurringExpense) => {
+  if (item.frequency === 'once') return `Não recorrente · ${formatDate(item.startDate, 'dd/MM/yyyy')}`;
+  if (item.frequency === 'weekly') return `Semanal · desde ${formatDate(item.startDate, 'dd/MM/yyyy')}`;
+  if (item.frequency === 'manual') {
+    const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const selected = item.manualMonths.map((month) => monthNames[Number(month) - 1]).filter(Boolean);
+    return `Manual · ${selected.join(', ')}`;
+  }
+  if (item.frequency === 'custom') {
+    const units = {
+      days: item.intervalCount === 1 ? 'dia' : 'dias',
+      weeks: item.intervalCount === 1 ? 'semana' : 'semanas',
+      months: item.intervalCount === 1 ? 'mês' : 'meses',
+      years: item.intervalCount === 1 ? 'ano' : 'anos',
+    };
+    return `A cada ${item.intervalCount} ${units[item.intervalUnit]}${item.anchorToActual ? ' · acompanha a data efetiva' : ''}`;
+  }
+  return item.cardId && item.chargeDay
+    ? `Mensal · cobra dia ${item.chargeDay} no ${item.cardName ?? 'cartão'} · fatura vence dia ${item.dueDay}`
+    : `Mensal · ${item.kind === 'income' ? 'recebe dia' : 'vence dia'} ${item.dueDay}`;
+};
+
+const amountSuffix = (item: RecurringExpense) => {
+  if (item.frequency === 'monthly') return '/mês';
+  if (item.frequency === 'weekly') return '/semana';
+  if (item.frequency === 'custom') return '/ocorrência';
+  return '';
+};
 
 export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
   refreshKey: number;
@@ -43,8 +72,8 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
     }
   };
   const groups = [
-    { kind: 'income' as const, label: 'Entradas fixas', items: items.filter((item) => item.kind === 'income') },
-    { kind: 'expense' as const, label: 'Saídas fixas', items: items.filter((item) => item.kind === 'expense') },
+    { kind: 'income' as const, label: 'Entradas recorrentes', items: items.filter((item) => item.kind === 'income') },
+    { kind: 'expense' as const, label: 'Saídas recorrentes', items: items.filter((item) => item.kind === 'expense') },
   ];
   const renderCard = (item: RecurringExpense) => (
     <article className={`item-card ${!item.active ? 'item-card--disabled' : ''}`} key={item.id}>
@@ -53,10 +82,8 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
         <span className={`status-pill ${item.active ? 'status-pill--received' : 'status-pill--cancelled'}`}>{item.active ? 'Ativa' : 'Pausada'}</span>
       </div>
       <h3>{item.description}</h3>
-      <p>{item.categoryName ?? 'Sem categoria'} · {item.cardId && item.chargeDay
-        ? `cobra dia ${item.chargeDay} no ${item.cardName ?? 'cartão'} · fatura vence dia ${item.dueDay}`
-        : `${item.kind === 'income' ? 'recebe dia' : 'vence dia'} ${item.dueDay}`}</p>
-      <strong className={`item-card__amount ${item.kind === 'income' ? 'money-positive' : ''}`}>{item.kind === 'income' ? '+' : '−'} {currency.format(item.plannedAmount)}<small>/mês</small></strong>
+      <p>{item.categoryName ?? 'Sem categoria'} · {intervalLabel(item)}</p>
+      <strong className={`item-card__amount ${item.kind === 'income' ? 'money-positive' : ''}`}>{item.kind === 'income' ? '+' : '−'} {currency.format(item.plannedAmount)}{amountSuffix(item) && <small>{amountSuffix(item)}</small>}</strong>
       <div className="item-card__footer"><span>{item.paymentMethodName ?? (item.kind === 'income' ? 'Recebimento não informado' : 'Pagamento não informado')}</span><div><button className="icon-button" onClick={() => toggle(item)} title={item.active ? 'Pausar' : 'Ativar'}><Power size={16} /></button><button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button><button className="icon-button icon-button--danger" onClick={() => setPendingDelete(item)} title="Excluir"><Trash2 size={16} /></button></div></div>
     </article>
   );
@@ -64,7 +91,7 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
     <section className="page-section">
       <div className="feature-banner feature-banner--recurring">
         <div className="feature-banner__icon"><CalendarSync size={25} /></div>
-        <div><span>Previsibilidade</span><h3 className="recurring-summary"><b><data className="money-positive" value={totals.income}>{currency.format(totals.income)}</data> em entradas</b><b><data className="money-negative" value={totals.expense}>{currency.format(totals.expense)}</data> em saídas</b></h3><p>Estes lançamentos entram automaticamente em cada mês e podem ser ajustados depois.</p></div>
+        <div><span>Previsibilidade</span><h3 className="recurring-summary"><b><data className="money-positive" value={totals.income}>{currency.format(totals.income)}</data> em entradas</b><b><data className="money-negative" value={totals.expense}>{currency.format(totals.expense)}</data> em saídas</b></h3><p>Organize frequências fixas, flexíveis ou manuais e ajuste cada ocorrência quando precisar.</p></div>
         <button className="button button--primary" onClick={onAdd}><Plus size={18} /> Nova recorrência</button>
       </div>
       {!loading && items.length > 0 && <div className="recurring-groups">
@@ -79,7 +106,7 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
           </section>
         ))}
       </div>}
-      {!loading && items.length === 0 && <div className="panel"><EmptyState icon={<CalendarSync />} title="Cadastre o que se repete" description="Salário, internet, aluguel e assinaturas podem entrar automaticamente todo mês." action={<button className="button button--soft" onClick={onAdd}><Plus size={16} /> Nova recorrência</button>} /></div>}
+      {!loading && items.length === 0 && <div className="panel"><EmptyState icon={<CalendarSync />} title="Cadastre o que se repete" description="Use ciclos semanais, mensais, personalizados ou manuais para planejar entradas e saídas." action={<button className="button button--soft" onClick={onAdd}><Plus size={16} /> Nova recorrência</button>} /></div>}
       {pendingDelete && <ConfirmDialog title="Excluir recorrência?" itemName={pendingDelete.description} description="Os lançamentos anteriores serão preservados, mas novos meses deixarão de ser gerados." confirmLabel="Excluir recorrência" loading={deleting} onCancel={() => setPendingDelete(null)} onConfirm={remove} />}
     </section>
   );

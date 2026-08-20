@@ -60,6 +60,22 @@ export const addMonths = (date: string, count: number): string => {
   return target.toISOString().slice(0, 10);
 };
 
+export const addDays = (date: string, count: number): string => {
+  const [year, month, day] = date.split('-').map(Number);
+  const target = new Date(Date.UTC(year, month - 1, day + count));
+  return target.toISOString().slice(0, 10);
+};
+
+export const addInterval = (
+  date: string,
+  count: number,
+  unit: 'days' | 'weeks' | 'months' | 'years',
+): string => {
+  if (unit === 'days') return addDays(date, count);
+  if (unit === 'weeks') return addDays(date, count * 7);
+  return addMonths(date, count * (unit === 'years' ? 12 : 1));
+};
+
 /**
  * Próximo vencimento do cartão a partir de uma data de referência. Sem o
  * dia de fechamento, a regra mais previsível é nunca sugerir uma data passada.

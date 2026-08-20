@@ -15,7 +15,13 @@ export const Installments = ({ month, refreshKey, onAdd, onEdit, onChanged, noti
   const [items, setItems] = useState<InstallmentPurchase[]>([]);
   const [pendingDelete, setPendingDelete] = useState<InstallmentPurchase | null>(null);
   const [deleting, setDeleting] = useState(false);
-  useEffect(() => { window.lionPocket.listInstallmentPurchases(month).then(setItems); }, [month, refreshKey]);
+  useEffect(() => {
+    let active = true;
+    window.lionPocket.listInstallmentPurchases(month).then((nextItems) => {
+      if (active) setItems(nextItems);
+    });
+    return () => { active = false; };
+  }, [month, refreshKey]);
   const monthTotal = useMemo(() => items.reduce((sum, item) => sum + item.installmentAmount, 0), [items]);
   const remove = async () => {
     if (!pendingDelete) return;

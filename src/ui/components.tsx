@@ -94,7 +94,9 @@ export const Modal = ({
             <X size={20} />
           </button>
         </header>
-        {children}
+        <div className="modal__body">
+          {children}
+        </div>
       </section>
     </div>
   );

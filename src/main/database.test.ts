@@ -352,6 +352,66 @@ describe('entradas fixas', () => {
   });
 });
 
+describe('recorrências flexíveis', () => {
+  it('gera ciclos semanais, uma ocorrência única e nenhum lançamento manual', () => {
+    const database = createDatabase();
+    database.saveRecurringExpense({
+      kind: 'expense', active: true, description: 'Feira semanal',
+      frequency: 'weekly', startMonth: '2099-01', startDate: '2099-01-03',
+      plannedAmount: 80, dueDay: 3,
+    });
+    database.saveRecurringExpense({
+      kind: 'expense', active: true, description: 'Taxa única',
+      frequency: 'once', startMonth: '2099-01', startDate: '2099-01-12',
+      plannedAmount: 40, dueDay: 12,
+    });
+    database.saveRecurringExpense({
+      kind: 'expense', active: true, description: 'Compra quando necessário',
+      frequency: 'manual', manualMonths: ['02', '04'],
+      startMonth: '2099-01', plannedAmount: 100, dueDay: 1,
+    });
+
+    const january = database.listTransactions({ month: '2099-01' });
+    expect(january.filter((item) => item.description === 'Feira semanal').map((item) => item.dueDate))
+      .toEqual(['2099-01-03', '2099-01-10', '2099-01-17', '2099-01-24', '2099-01-31']);
+    expect(january.filter((item) => item.description === 'Taxa única')).toHaveLength(1);
+    expect(january.some((item) => item.description === 'Compra quando necessário')).toBe(false);
+    expect(database.listTransactions({ month: '2099-02' }).some((item) => item.description === 'Taxa única')).toBe(false);
+    expect(database.listTransactions({ month: '2099-02' }).find((item) => item.description === 'Compra quando necessário'))
+      .toMatchObject({ dueDate: '2099-02-01' });
+    expect(database.listTransactions({ month: '2099-03' }).some((item) => item.description === 'Compra quando necessário')).toBe(false);
+    expect(database.listTransactions({ month: '2100-02' }).find((item) => item.description === 'Compra quando necessário'))
+      .toMatchObject({ dueDate: '2100-02-01' });
+    database.db.close();
+  });
+
+  it('recalcula intervalo personalizado pela data efetiva da última ocorrência', () => {
+    const database = createDatabase();
+    database.saveRecurringExpense({
+      kind: 'expense', active: true, description: 'Ração',
+      frequency: 'custom', intervalCount: 3, intervalUnit: 'months', anchorToActual: true,
+      startMonth: '2099-01', startDate: '2099-01-10', plannedAmount: 180, dueDay: 10,
+    });
+    const january = database.listTransactions({ month: '2099-01' })[0];
+    expect(database.listTransactions({ month: '2099-04' })[0]).toMatchObject({ dueDate: '2099-04-10' });
+
+    database.saveTransaction({
+      ...january,
+      actualAmount: 180,
+      settledDate: '2099-02-01',
+      status: 'paid',
+    });
+
+    expect(database.listTransactions({ month: '2099-04' })).toEqual([]);
+    expect(database.listTransactions({ month: '2099-05' })[0]).toMatchObject({
+      description: 'Ração',
+      dueDate: '2099-05-01',
+      status: 'planned',
+    });
+    database.db.close();
+  });
+});
+
 describe('cartões e compras parceladas', () => {
   it('não cria um cartão Principal automaticamente', () => {
     const database = createDatabase();
@@ -464,6 +524,40 @@ describe('cartões e compras parceladas', () => {
     expect(database.listInstallmentPurchases('2026-11')).toEqual([]);
 
     database.db.close();
+  });
+
+  it('persiste todas as parcelas em banco novo e continua correto após reabrir', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'lionpocket-installments-fresh-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'fresh.sqlite');
+    const database = new LionPocketDatabase(databasePath);
+    const purchase = database.createInstallmentPurchase({
+      description: 'Celular',
+      installmentAmount: 300,
+      totalInstallments: 3,
+      currentInstallment: 1,
+      purchaseDate: '2099-01-20',
+      currentDueDate: '2099-02-10',
+    });
+
+    expect(purchase).toMatchObject({ viewedInstallment: 1, viewedDueDate: '2099-02-10' });
+    expect(database.listTransactions({ month: '2099-02' })[0]).toMatchObject({ installmentNumber: 1 });
+    expect(database.listTransactions({ month: '2099-03' })[0]).toMatchObject({ installmentNumber: 2 });
+    expect(database.listTransactions({ month: '2099-04' })[0]).toMatchObject({ installmentNumber: 3 });
+    database.db.close();
+
+    const reopened = new LionPocketDatabase(databasePath);
+    expect(reopened.listInstallmentPurchases('2099-02')[0]).toMatchObject({
+      id: purchase.id,
+      viewedInstallment: 1,
+      totalInstallments: 3,
+    });
+    expect(reopened.listTransactions({ month: '2099-04' })[0]).toMatchObject({
+      sourceId: purchase.id,
+      installmentNumber: 3,
+      dueDate: '2099-04-10',
+    });
+    reopened.db.close();
   });
 
   it('edita parcelas em aberto sem alterar valor e vencimento das já pagas', () => {

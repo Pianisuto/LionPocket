@@ -214,7 +214,7 @@ strong,
 .category-legend:hover::-webkit-scrollbar-thumb,
 .upcoming-list:hover::-webkit-scrollbar-thumb,
 .mini-list:hover::-webkit-scrollbar-thumb,
-.modal:hover::-webkit-scrollbar-thumb,
+.modal__body:hover::-webkit-scrollbar-thumb,
 .leo__panel:hover::-webkit-scrollbar-thumb,
 .select-control__menu:hover::-webkit-scrollbar-thumb {
   background-color: var(--line-2);
@@ -279,6 +279,30 @@ strong,
 .titlebar__drag {
   flex: 1;
   align-self: stretch;
+}
+
+.titlebar__quick-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  color: var(--on-primary);
+  font-size: 11.5px;
+  font-weight: 700;
+  border: 0;
+  border-radius: 8px;
+  background: var(--gradient-primary);
+  box-shadow: var(--shadow-primary);
+  -webkit-app-region: no-drag;
+}
+
+.titlebar__quick-add:hover {
+  filter: brightness(1.07);
+}
+
+.titlebar__quick-add:focus-visible {
+  outline-offset: 2px;
 }
 
 .titlebar__controls {
@@ -1564,7 +1588,8 @@ strong,
 .form-grid > .field,
 .form-grid > .toggle-row,
 .form-grid > .installment-total,
-.form-grid > .card-cycle-note {
+.form-grid > .card-cycle-note,
+.form-grid > .manual-months {
   animation: field-reveal 190ms cubic-bezier(0.2, 0.75, 0.3, 1) both;
 }
 
@@ -1621,6 +1646,105 @@ strong,
   font-size: 11.5px;
 }
 
+.manual-months {
+  min-width: 0;
+  margin: 0;
+  padding: 15px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.manual-months__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 13px;
+}
+
+.manual-months__header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.manual-months__header strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.manual-months__header small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.manual-months__header > span {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  color: var(--primary-ink);
+  font-size: 10.5px;
+  font-weight: 700;
+  border: 1px solid var(--primary-wash-strong);
+  border-radius: 999px;
+  background: var(--primary-wash);
+}
+
+.manual-months__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.manual-months__grid button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 39px;
+  padding: 0 9px 0 12px;
+  color: var(--text-soft);
+  font-size: 11.75px;
+  font-weight: 600;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--surface);
+  transition: 140ms ease;
+}
+
+.manual-months__grid button:hover {
+  color: var(--primary-ink);
+  border-color: var(--primary);
+  background: var(--primary-wash);
+  transform: translateY(-1px);
+}
+
+.manual-months__grid button.active {
+  color: var(--primary-ink);
+  border-color: var(--primary);
+  background: var(--primary-wash);
+  box-shadow: inset 0 0 0 1px var(--primary-wash-strong);
+}
+
+.manual-months__grid button i {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface-2);
+  transition: 140ms ease;
+}
+
+.manual-months__grid button.active i {
+  color: var(--on-primary);
+  border-color: transparent;
+  background: var(--gradient-primary);
+}
+
 .installment-total {
   display: flex;
   grid-column: 1 / -1;
@@ -1661,9 +1785,11 @@ strong,
 }
 
 .modal {
+  display: flex;
+  flex-direction: column;
   width: min(520px, 100%);
   max-height: 100%;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-xl);
   background: var(--surface);
@@ -1680,8 +1806,7 @@ strong,
 }
 
 .modal__header {
-  position: sticky;
-  top: 0;
+  flex: 0 0 auto;
   z-index: 1;
   display: flex;
   align-items: flex-start;
@@ -1690,6 +1815,13 @@ strong,
   padding: 22px 24px 16px;
   border-bottom: 1px solid var(--line-1);
   background: var(--surface);
+}
+
+.modal__body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .modal__header h2 {

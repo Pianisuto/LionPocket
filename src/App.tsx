@@ -141,7 +141,13 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <TitleBar theme={theme} onToggleTheme={toggleTheme} subtitle="Seu dinheiro, do seu jeito" />
+      <TitleBar
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        subtitle="Seu dinheiro, do seu jeito"
+        showAddTransaction={view !== 'transactions'}
+        onAddTransaction={() => setModal({ type: 'transaction' })}
+      />
 
       <div className="app-body">
       <aside className="sidebar">
@@ -184,7 +190,7 @@ export default function App() {
           </div>
           <div className="topbar__actions">
             <MonthPicker month={month} onChange={setMonth} />
-            {view !== 'settings' && (
+            {view === 'transactions' && (
               <button
                 className="button button--primary button--compact"
                 onClick={() => setModal({ type: 'transaction' })}
@@ -200,7 +206,6 @@ export default function App() {
             <Dashboard
               overview={overview}
               loading={overviewLoading}
-              onAddTransaction={() => setModal({ type: 'transaction' })}
               onNavigate={(next) => setView(next as View)}
               onEditTransaction={(item) => setModal({ type: 'transaction', item })}
               onSettleTransactions={(items) =>
@@ -269,7 +274,6 @@ export default function App() {
         month={month}
         theme={theme}
         onToggleTheme={toggleTheme}
-        onQuickAdd={() => setModal({ type: 'transaction' })}
         onNavigate={(next) => setView(next as View)}
         notify={notify}
       />
@@ -312,7 +316,9 @@ export default function App() {
           onClose={() => setModal(null)}
           onSave={(input) =>
             safeAction(
-              () => window.lionPocket.saveInstallmentPurchase(input).then(() => undefined),
+              () => window.lionPocket.saveInstallmentPurchase(input).then((saved) => {
+                setMonth(saved.viewedDueDate.slice(0, 7));
+              }),
               input.id ? 'Compra parcelada atualizada.' : 'Parcelas criadas com sucesso.',
             )
           }
