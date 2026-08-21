@@ -19,6 +19,7 @@ import type {
   Transaction,
   TransactionFilters,
   TransactionInput,
+  TransactionPriorityInput,
   TransactionStatus,
 } from '../shared/types';
 import {
@@ -330,6 +331,34 @@ export class LionPocketDatabase {
         WHERE source_type != 'recurring' AND source_id IS NOT NULL AND deleted_at IS NULL;
       INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (9, datetime('now'));
     `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS recurring_transaction_priorities (
+        recurring_id TEXT PRIMARY KEY REFERENCES recurring_expenses(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK(position >= 0),
+        pinned_from_month TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(position)
+      );
+      CREATE TABLE IF NOT EXISTS transaction_priority_order (
+        month TEXT NOT NULL,
+        transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK(position >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(month, transaction_id),
+        UNIQUE(month, position)
+      );
+      INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (10, datetime('now'));
+    `);
+    const recurringPriorityColumns = this.db
+      .prepare('PRAGMA table_info(recurring_transaction_priorities)')
+      .all() as unknown as Row[];
+    if (!recurringPriorityColumns.some((column) => column.name === 'pinned_from_month')) {
+      this.db.exec('ALTER TABLE recurring_transaction_priorities ADD COLUMN pinned_from_month TEXT');
+      this.db.exec("UPDATE recurring_transaction_priorities SET pinned_from_month = '0000-01'");
+    }
+    this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (11, datetime('now'))");
   }
 
   private seed() {
@@ -513,6 +542,7 @@ export class LionPocketDatabase {
       installmentNumber: row.installmentNumber === null ? null : Number(row.installmentNumber),
       installmentTotal: row.installmentTotal === null ? null : Number(row.installmentTotal),
       isOverdue: row.kind === 'expense' && row.status === 'planned' && String(row.dueDate) < todayIso(),
+      priorityPosition: null,
     };
   }
 
@@ -748,8 +778,7 @@ export class LionPocketDatabase {
     }
   }
 
-  listTransactions(filters: TransactionFilters): Transaction[] {
-    this.ensureRecurringForMonth(filters.month);
+  private queryTransactions(filters: TransactionFilters): Transaction[] {
     const { start, end } = monthRange(filters.month);
     const today = todayIso();
     const conditions = [
@@ -804,6 +833,169 @@ export class LionPocketDatabase {
         t.due_date, t.created_at`)
       .all(...parameters, today) as unknown as Row[];
     return rows.map((row) => this.transactionFromRow(row));
+  }
+
+  /**
+   * Combina o snapshot exato do mês com a ordem herdada das recorrências.
+   * A posição final é sempre recalculada, por isso nunca chega duplicada à UI.
+   */
+  private priorityOrderForMonth(month: string, transactions: Transaction[]) {
+    const recurringRows = this.db.prepare(`
+      SELECT recurring_id AS recurringId, position,
+        COALESCE(pinned_from_month, '0000-01') AS pinnedFromMonth
+      FROM recurring_transaction_priorities
+      ORDER BY position, recurring_id
+    `).all() as unknown as Row[];
+    const monthRows = this.db.prepare(`
+      SELECT transaction_id AS transactionId, position
+      FROM transaction_priority_order
+      WHERE month = ?
+      ORDER BY position, transaction_id
+    `).all(month) as unknown as Row[];
+    const recurringPositions = new Map(
+      recurringRows
+        .filter((row) => String(row.pinnedFromMonth) <= month)
+        .map((row) => [String(row.recurringId), Number(row.position)]),
+    );
+    const monthPositions = new Map(
+      monthRows.map((row) => [String(row.transactionId), Number(row.position)]),
+    );
+    return transactions
+      .filter((transaction) => transaction.sourceType === 'recurring'
+        ? Boolean(transaction.sourceId && recurringPositions.has(transaction.sourceId))
+        : monthPositions.has(transaction.id))
+      .sort((left, right) => {
+        const leftMonth = monthPositions.get(left.id);
+        const rightMonth = monthPositions.get(right.id);
+        if (leftMonth !== undefined && rightMonth !== undefined && leftMonth !== rightMonth) {
+          return leftMonth - rightMonth;
+        }
+        if (leftMonth !== undefined && rightMonth === undefined) return -1;
+        if (leftMonth === undefined && rightMonth !== undefined) return 1;
+        const leftRecurring = left.sourceId ? recurringPositions.get(left.sourceId) : undefined;
+        const rightRecurring = right.sourceId ? recurringPositions.get(right.sourceId) : undefined;
+        return (leftRecurring ?? Number.MAX_SAFE_INTEGER) - (rightRecurring ?? Number.MAX_SAFE_INTEGER)
+          || left.dueDate.localeCompare(right.dueDate)
+          || left.id.localeCompare(right.id);
+      })
+      .map((transaction) => transaction.id);
+  }
+
+  listTransactions(filters: TransactionFilters): Transaction[] {
+    this.ensureRecurringForMonth(filters.month);
+    const transactions = this.queryTransactions(filters);
+    const allTransactions = filters.kind || filters.status || filters.payment || filters.source || filters.search
+      ? this.queryTransactions({ month: filters.month })
+      : transactions;
+    const positions = new Map(
+      this.priorityOrderForMonth(filters.month, allTransactions)
+        .map((id, position) => [id, position]),
+    );
+    return transactions.map((transaction) => ({
+      ...transaction,
+      priorityPosition: positions.get(transaction.id) ?? null,
+    }));
+  }
+
+  /**
+   * Move um item usando outro item como âncora. O backend sempre trabalha com
+   * a lista completa do mês, então filtros visuais não apagam prioridades ocultas.
+   */
+  setTransactionPriority(input: TransactionPriorityInput) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)) {
+      throw new Error('Mês inválido para a prioridade.');
+    }
+    this.ensureRecurringForMonth(input.month);
+    const transactions = this.queryTransactions({ month: input.month });
+    const transaction = transactions.find((item) => item.id === input.transactionId);
+    if (!transaction) throw new Error('Lançamento não encontrado neste mês.');
+    const timestamp = now();
+
+    this.db.exec('BEGIN');
+    try {
+      if (transaction.sourceType === 'recurring' && transaction.sourceId) {
+        if (input.pinned) {
+          const last = this.db.prepare(`
+            SELECT COALESCE(MAX(position), -1) AS position
+            FROM recurring_transaction_priorities
+          `).get() as Row;
+          this.db.prepare(`
+            INSERT OR IGNORE INTO recurring_transaction_priorities(
+              recurring_id, position, pinned_from_month, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+          `).run(transaction.sourceId, Number(last.position) + 1, input.month, timestamp, timestamp);
+        } else {
+          this.db.prepare('DELETE FROM recurring_transaction_priorities WHERE recurring_id = ?')
+            .run(transaction.sourceId);
+          this.db.prepare(`
+            DELETE FROM transaction_priority_order
+            WHERE transaction_id IN (
+              SELECT id FROM transactions WHERE source_type = 'recurring' AND source_id = ?
+            )
+          `).run(transaction.sourceId);
+        }
+      }
+
+      let order = this.priorityOrderForMonth(input.month, transactions);
+      const movedIds = transaction.sourceType === 'recurring' && transaction.sourceId
+        ? transactions
+            .filter((item) => item.sourceType === 'recurring' && item.sourceId === transaction.sourceId)
+            .map((item) => item.id)
+        : [transaction.id];
+      const movedSet = new Set(movedIds);
+      order = order.filter((id) => !movedSet.has(id));
+      if (input.pinned) {
+        const anchor = input.beforeTransactionId
+          ? order.indexOf(input.beforeTransactionId)
+          : -1;
+        const insertion = anchor >= 0 ? anchor : order.length;
+        order.splice(insertion, 0, ...movedIds);
+      }
+
+      this.db.prepare('DELETE FROM transaction_priority_order WHERE month = ?').run(input.month);
+      const insertMonthPosition = this.db.prepare(`
+        INSERT INTO transaction_priority_order(
+          month, transaction_id, position, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `);
+      order.forEach((id, position) => {
+        insertMonthPosition.run(input.month, id, position, timestamp, timestamp);
+      });
+
+      // Apenas a ordem relativa das recorrências visíveis é substituída.
+      // Uma recorrência anual ausente no mês conserva seu lugar global.
+      const visibleRecurringOrder = [...new Set(order.map((id) => {
+        const item = transactions.find((candidate) => candidate.id === id);
+        return item?.sourceType === 'recurring' ? item.sourceId : null;
+      }).filter((id): id is string => Boolean(id)))];
+      if (visibleRecurringOrder.length) {
+        const visibleSet = new Set(visibleRecurringOrder);
+        let visibleIndex = 0;
+        const globalOrder = (this.db.prepare(`
+          SELECT recurring_id AS recurringId
+          FROM recurring_transaction_priorities
+          ORDER BY position, recurring_id
+        `).all() as unknown as Row[]).map((row) => String(row.recurringId));
+        const mergedOrder = globalOrder.map((id) => visibleSet.has(id)
+          ? visibleRecurringOrder[visibleIndex++]
+          : id);
+        this.db.prepare(`
+          UPDATE recurring_transaction_priorities
+          SET position = position + 1000000000, updated_at = ?
+        `).run(timestamp);
+        const updateRecurringPosition = this.db.prepare(`
+          UPDATE recurring_transaction_priorities SET position = ?, updated_at = ?
+          WHERE recurring_id = ?
+        `);
+        mergedOrder.forEach((id, position) => {
+          updateRecurringPosition.run(position, timestamp, id);
+        });
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   /**
@@ -934,6 +1126,7 @@ export class LionPocketDatabase {
   }
 
   deleteTransaction(id: string) {
+    this.db.prepare('DELETE FROM transaction_priority_order WHERE transaction_id = ?').run(id);
     this.db.prepare('UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ?').run(
       now(),
       now(),
@@ -1310,11 +1503,25 @@ export class LionPocketDatabase {
 
   deleteRecurringExpense(id: string) {
     const timestamp = now();
-    this.db.prepare('UPDATE recurring_expenses SET deleted_at = ?, updated_at = ? WHERE id = ?').run(
-      timestamp,
-      timestamp,
-      id,
-    );
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare(`
+        DELETE FROM transaction_priority_order
+        WHERE transaction_id IN (
+          SELECT id FROM transactions WHERE source_type = 'recurring' AND source_id = ?
+        )
+      `).run(id);
+      this.db.prepare('DELETE FROM recurring_transaction_priorities WHERE recurring_id = ?').run(id);
+      this.db.prepare('UPDATE recurring_expenses SET deleted_at = ?, updated_at = ? WHERE id = ?').run(
+        timestamp,
+        timestamp,
+        id,
+      );
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   createInstallmentPurchase(input: InstallmentPurchaseInput): InstallmentPurchase {
@@ -1845,6 +2052,8 @@ export class LionPocketDatabase {
       'recurring_expenses',
       'installment_purchases',
       'transactions',
+      'recurring_transaction_priorities',
+      'transaction_priority_order',
       'goals',
     ];
     return Object.fromEntries(

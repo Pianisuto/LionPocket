@@ -25,6 +25,7 @@ const transaction = (overrides: Partial<Transaction>): Transaction => ({
   installmentNumber: null,
   installmentTotal: null,
   isOverdue: true,
+  priorityPosition: null,
   ...overrides,
 });
 

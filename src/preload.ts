@@ -7,6 +7,7 @@ const api: LionPocketApi = {
   deleteCatalogItem: (type, id) => ipcRenderer.invoke('catalogs:delete', type, id),
   getOverview: (month) => ipcRenderer.invoke('overview:get', month),
   listTransactions: (filters) => ipcRenderer.invoke('transactions:list', filters),
+  setTransactionPriority: (input) => ipcRenderer.invoke('transactions:set-priority', input),
   saveTransaction: (input) => ipcRenderer.invoke('transactions:save', input),
   deleteTransaction: (id) => ipcRenderer.invoke('transactions:delete', id),
   settleTransaction: (id) => ipcRenderer.invoke('transactions:settle', id),

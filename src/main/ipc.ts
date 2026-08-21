@@ -10,6 +10,7 @@ import type {
   RecurringExpenseInput,
   TransactionFilters,
   TransactionInput,
+  TransactionPriorityInput,
 } from '../shared/types';
 import { LionPocketDatabase } from './database';
 import { importFinancialSpreadsheet } from './importer';
@@ -47,6 +48,9 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
   ipcMain.handle('overview:get', (_event, month: string) => database.getOverview(month));
   ipcMain.handle('transactions:list', (_event, filters: TransactionFilters) =>
     database.listTransactions(filters),
+  );
+  ipcMain.handle('transactions:set-priority', (_event, input: TransactionPriorityInput) =>
+    database.setTransactionPriority(input),
   );
   ipcMain.handle('transactions:save', (_event, input: TransactionInput) =>
     database.saveTransaction(input),

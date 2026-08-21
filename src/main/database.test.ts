@@ -999,3 +999,141 @@ describe('contas vencidas carregadas adiante', () => {
     database.db.close();
   });
 });
+
+describe('prioridades mensais', () => {
+  const createManual = (
+    database: LionPocketDatabase,
+    description: string,
+    dueDate: string,
+  ) => database.saveTransaction({
+    kind: 'expense',
+    description,
+    plannedAmount: 100,
+    dueDate,
+    status: 'planned',
+  });
+
+  const priorityNames = (database: LionPocketDatabase, month: string) => database
+    .listTransactions({ month })
+    .filter((item) => item.priorityPosition !== null)
+    .sort((left, right) => Number(left.priorityPosition) - Number(right.priorityPosition))
+    .map((item) => item.description);
+
+  it('pina, reordena e despina sem alterar a ordenação normal', () => {
+    const database = createDatabase();
+    const first = createManual(database, 'Vence primeiro', '2099-08-05');
+    const second = createManual(database, 'Vence depois', '2099-08-20');
+    const third = createManual(database, 'Outra conta', '2099-08-10');
+
+    database.setTransactionPriority({ month: '2099-08', transactionId: second.id, pinned: true });
+    database.setTransactionPriority({ month: '2099-08', transactionId: third.id, pinned: true });
+    expect(priorityNames(database, '2099-08')).toEqual(['Vence depois', 'Outra conta']);
+
+    database.setTransactionPriority({
+      month: '2099-08',
+      transactionId: third.id,
+      pinned: true,
+      beforeTransactionId: second.id,
+    });
+    expect(priorityNames(database, '2099-08')).toEqual(['Outra conta', 'Vence depois']);
+
+    database.setTransactionPriority({ month: '2099-08', transactionId: third.id, pinned: false });
+    const items = database.listTransactions({ month: '2099-08' });
+    expect(priorityNames(database, '2099-08')).toEqual(['Vence depois']);
+    expect(items.filter((item) => item.priorityPosition === null).map((item) => item.id))
+      .toEqual([first.id, third.id]);
+    database.db.close();
+  });
+
+  it('persiste o pin e a ordem depois de reabrir o banco', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'lionpocket-priorities-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'priorities.sqlite');
+    const database = new LionPocketDatabase(databasePath);
+    const first = createManual(database, 'Aluguel', '2099-08-10');
+    const second = createManual(database, 'Cartão', '2099-08-15');
+    database.setTransactionPriority({ month: '2099-08', transactionId: first.id, pinned: true });
+    database.setTransactionPriority({
+      month: '2099-08',
+      transactionId: second.id,
+      pinned: true,
+      beforeTransactionId: first.id,
+    });
+    database.db.close();
+
+    const reopened = new LionPocketDatabase(databasePath);
+    expect(priorityNames(reopened, '2099-08')).toEqual(['Cartão', 'Aluguel']);
+    reopened.db.close();
+  });
+
+  it('mantém avulsos no mês e herda pin e ordem das recorrências', () => {
+    const database = createDatabase();
+    const rent = database.saveRecurringExpense({
+      kind: 'expense', active: true, description: 'Aluguel', startMonth: '2099-07',
+      plannedAmount: 1000, dueDay: 5,
+    });
+    const card = database.saveRecurringExpense({
+      kind: 'expense', active: true, description: 'Cartão', startMonth: '2099-07',
+      plannedAmount: 500, dueDay: 10,
+    });
+    const internet = database.saveRecurringExpense({
+      kind: 'expense', active: true, description: 'Internet', startMonth: '2099-07',
+      plannedAmount: 100, dueDay: 15,
+    });
+    const august = database.listTransactions({ month: '2099-08' });
+    const bySource = (sourceId: string) => {
+      const item = august.find((candidate) => candidate.sourceId === sourceId);
+      if (!item) throw new Error('Ocorrência recorrente não criada.');
+      return item;
+    };
+    const rentOccurrence = bySource(rent.id);
+    const cardOccurrence = bySource(card.id);
+    const internetOccurrence = bySource(internet.id);
+    const oneOff = createManual(database, 'Conserto', '2099-08-18');
+
+    for (const item of [rentOccurrence, cardOccurrence, internetOccurrence, oneOff]) {
+      database.setTransactionPriority({ month: '2099-08', transactionId: item.id, pinned: true });
+    }
+    database.setTransactionPriority({
+      month: '2099-08', transactionId: internetOccurrence.id, pinned: true,
+      beforeTransactionId: cardOccurrence.id,
+    });
+    expect(priorityNames(database, '2099-08'))
+      .toEqual(['Aluguel', 'Internet', 'Cartão', 'Conserto']);
+    expect(priorityNames(database, '2099-07')).toEqual([]);
+    expect(priorityNames(database, '2099-09')).toEqual(['Aluguel', 'Internet', 'Cartão']);
+    expect(database.listTransactions({ month: '2099-09' }).some((item) =>
+      item.description === 'Conserto' && item.priorityPosition !== null)).toBe(false);
+
+    database.setTransactionPriority({
+      month: '2099-08', transactionId: cardOccurrence.id, pinned: true,
+      beforeTransactionId: rentOccurrence.id,
+    });
+    expect(priorityNames(database, '2099-10')).toEqual(['Cartão', 'Aluguel', 'Internet']);
+
+    // Excluir somente agosto não remove a configuração herdada.
+    database.deleteTransaction(rentOccurrence.id);
+    expect(priorityNames(database, '2099-09')).toContain('Aluguel');
+    database.db.close();
+  });
+
+  it('remove toda a configuração ao excluir definitivamente a recorrência', () => {
+    const database = createDatabase();
+    const recurring = database.saveRecurringExpense({
+      kind: 'expense', active: true, description: 'Academia', startMonth: '2099-08',
+      plannedAmount: 90, dueDay: 8,
+    });
+    const occurrence = database.listTransactions({ month: '2099-08' })[0];
+    database.setTransactionPriority({ month: '2099-08', transactionId: occurrence.id, pinned: true });
+    database.deleteRecurringExpense(recurring.id);
+
+    expect(database.db.prepare(`
+      SELECT COUNT(*) AS total FROM recurring_transaction_priorities WHERE recurring_id = ?
+    `).get(recurring.id)).toMatchObject({ total: 0 });
+    expect(database.db.prepare(`
+      SELECT COUNT(*) AS total FROM transaction_priority_order
+      WHERE transaction_id IN (SELECT id FROM transactions WHERE source_id = ?)
+    `).get(recurring.id)).toMatchObject({ total: 0 });
+    database.db.close();
+  });
+});

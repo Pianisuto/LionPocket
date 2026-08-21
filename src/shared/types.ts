@@ -46,6 +46,16 @@ export interface Transaction {
   installmentTotal: number | null;
   /** Derivado em tempo de consulta; o status persistido continua sendo planned. */
   isOverdue: boolean;
+  /** Derivado da configuração separada de prioridades do mês. */
+  priorityPosition: number | null;
+}
+
+export interface TransactionPriorityInput {
+  month: string;
+  transactionId: string;
+  pinned: boolean;
+  /** Insere antes deste item; nulo envia para o fim da seção. */
+  beforeTransactionId?: string | null;
 }
 
 export interface TransactionInput {
@@ -270,6 +280,7 @@ export interface LionPocketApi {
   deleteCatalogItem(type: 'category' | 'card', id: string): Promise<void>;
   getOverview(month: string): Promise<Overview>;
   listTransactions(filters: TransactionFilters): Promise<Transaction[]>;
+  setTransactionPriority(input: TransactionPriorityInput): Promise<void>;
   saveTransaction(input: TransactionInput): Promise<Transaction>;
   deleteTransaction(id: string): Promise<void>;
   settleTransaction(id: string): Promise<void>;
