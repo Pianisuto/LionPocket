@@ -2,8 +2,13 @@ name: Release LionPocket
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+    paths:
+      - package.json
+      - .github/workflows/release.yml
 
 permissions:
   contents: write
@@ -15,8 +20,11 @@ concurrency:
 jobs:
   validate:
     name: Validate release
+    if: startsWith(github.ref, 'refs/tags/') || startsWith(github.event.head_commit.message, 'Release ')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      release_tag: ${{ steps.release-context.outputs.release_tag }}
 
     steps:
       - name: Checkout repository
@@ -31,16 +39,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check tag matches package version
+      - name: Resolve and validate release version
+        id: release-context
         shell: bash
         run: |
           package_version="$(node -p "require('./package.json').version")"
-          tag_version="${GITHUB_REF_NAME#v}"
+          release_tag="v$package_version"
 
-          if [[ "$package_version" != "$tag_version" ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$release_tag" ]]; then
             echo "A tag $GITHUB_REF_NAME não corresponde à versão $package_version do package.json." >&2
             exit 1
           fi
+
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
 
       - name: Validate application
         run: |
@@ -53,21 +64,31 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      release_tag: ${{ needs.validate.outputs.release_tag }}
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
 
     steps:
       - name: Create draft release
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
 
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME já existe; os artefatos serão atualizados."
-          else
-            gh release create "$GITHUB_REF_NAME" \
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG já existe; os artefatos serão atualizados."
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
+              --draft \
+              --title "LionPocket $version" \
+              --generate-notes
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --draft \
               --title "LionPocket $version" \
               --generate-notes
@@ -80,6 +101,7 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
 
     steps:
       - name: Checkout repository
@@ -108,7 +130,7 @@ jobs:
           )
 
           foreach ($asset in $assets) {
-            gh release upload $env:GITHUB_REF_NAME $asset --repo $env:GITHUB_REPOSITORY --clobber
+            gh release upload $env:RELEASE_TAG $asset --repo $env:GITHUB_REPOSITORY --clobber
           }
 
   linux:
@@ -118,6 +140,7 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
 
     steps:
       - name: Checkout repository
@@ -138,7 +161,7 @@ jobs:
       - name: Upload Linux release assets
         shell: bash
         run: |
-          gh release upload "$GITHUB_REF_NAME" \
+          gh release upload "$RELEASE_TAG" \
             out/make/deb/x64/*.deb \
             out/make/zip/linux/x64/*.zip \
             --repo "$GITHUB_REPOSITORY" \
@@ -147,19 +170,21 @@ jobs:
   publish-release:
     name: Publish GitHub Release
     needs:
+      - validate
       - windows
       - linux
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
 
     steps:
       - name: Download release assets for checksums
         shell: bash
         run: |
           mkdir -p release-files
-          gh release download "$GITHUB_REF_NAME" \
+          gh release download "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --dir release-files
 
@@ -175,9 +200,9 @@ jobs:
       - name: Upload checksums and publish release
         shell: bash
         run: |
-          gh release upload "$GITHUB_REF_NAME" release-files/SHA256SUMS.txt \
+          gh release upload "$RELEASE_TAG" release-files/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
-          gh release edit "$GITHUB_REF_NAME" \
+          gh release edit "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --draft=false
