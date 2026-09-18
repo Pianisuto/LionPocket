@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { Transaction } from '../../shared/types';
-import { groupUpcoming } from './Dashboard';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { Overview, Transaction } from '../../shared/types';
+import { Dashboard, groupUpcoming } from './Dashboard';
 
 const transaction = (overrides: Partial<Transaction>): Transaction => ({
   id: 'transaction',
@@ -81,5 +83,38 @@ describe('agrupamento de contas a pagar', () => {
       cardInvoice: true,
       detail: '2 compras na fatura',
     }]);
+  });
+});
+
+describe('exibição de contas a pagar', () => {
+  it('mostra o vencimento da fatura no mesmo formato das outras contas', () => {
+    const overview: Overview = {
+      summary: {
+        month: '2026-07',
+        plannedIncome: 0,
+        receivedIncome: 0,
+        plannedExpenses: 100,
+        paidExpenses: 0,
+        overdueExpenses: 0,
+        projectedBalance: -100,
+        realizedBalance: 0,
+        committedPercent: 0,
+      },
+      annual: [],
+      categoryBreakdown: [],
+      upcoming: [transaction({ id: 'current', isOverdue: false })],
+      recent: [],
+      goals: [],
+    };
+
+    const markup = renderToStaticMarkup(createElement(Dashboard, {
+      overview,
+      loading: false,
+      onNavigate: () => undefined,
+      onEditTransaction: () => undefined,
+      onSettleTransactions: async () => true,
+    }));
+
+    expect(markup).toContain('<span class="date-badge"><strong>21</strong><small>jul</small></span>');
   });
 });

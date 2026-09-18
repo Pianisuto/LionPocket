@@ -6,7 +6,6 @@ import {
   Check,
   ChevronRight,
   CircleDollarSign,
-  CreditCard,
   PiggyBank,
   Plus,
   ReceiptText,
@@ -308,7 +307,7 @@ export const Dashboard = ({
             {upcoming.length ? upcoming.map((entry) => (
               <div className={`upcoming-item ${entry.overdue ? 'upcoming-item--overdue' : ''}`} key={entry.key}>
                 <button type="button" className="upcoming-item__open" onClick={() => entry.cardInvoice ? onNavigate('transactions') : onEditTransaction(entry.items[0])} aria-label={entry.cardInvoice ? `Abrir ${entry.name}` : `Editar ${entry.name}`}>
-                  <span className="date-badge">{entry.cardInvoice ? <CreditCard size={18} /> : <><strong>{formatDate(entry.dueDate, 'dd')}</strong><small>{formatDate(entry.dueDate, 'MMM')}</small></>}</span>
+                  <span className="date-badge"><strong>{formatDate(entry.dueDate, 'dd')}</strong><small>{formatDate(entry.dueDate, 'MMM')}</small></span>
                   <span className="upcoming-item__copy"><strong>{entry.name}</strong><small>{entry.detail}</small></span>
                   <span className="upcoming-item__amount">
                     <strong>{currency.format(entry.total)}</strong>
