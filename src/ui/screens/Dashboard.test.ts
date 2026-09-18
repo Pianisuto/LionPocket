@@ -49,15 +49,37 @@ describe('agrupamento de contas a pagar', () => {
     expect(groups.map((group) => group.total)).toEqual([150, 30, 80]);
   });
 
-  it('mantém lançamentos comuns separados', () => {
+  it('agrupa compras atuais do cartão e mantém lançamentos comuns separados', () => {
     const groups = groupUpcoming([
       transaction({ id: 'boleto', description: 'Moto', cardId: null, paymentMethodId: null, paymentMethodName: 'Boleto' }),
-      transaction({ id: 'current', description: 'Mercado', isOverdue: false }),
+      transaction({ id: 'current-a', description: 'Mercado', isOverdue: false }),
+      transaction({ id: 'current-b', description: 'Farmácia', plannedAmount: 50, isOverdue: false }),
     ]);
 
     expect(groups).toMatchObject([
       { name: 'Moto', total: 100, cardInvoice: false },
-      { name: 'Mercado', total: 100, cardInvoice: false },
+      {
+        name: 'Fatura NuBank',
+        total: 150,
+        overdue: false,
+        cardInvoice: true,
+        detail: '2 compras na fatura',
+      },
     ]);
+    expect(groups[1].items.map((item) => item.id)).toEqual(['current-a', 'current-b']);
+  });
+
+  it('consolida compras no crédito sem cartão identificado', () => {
+    const groups = groupUpcoming([
+      transaction({ id: 'unassigned-a', cardId: null, cardName: null, isOverdue: false }),
+      transaction({ id: 'unassigned-b', cardId: null, cardName: null, plannedAmount: 25, isOverdue: false }),
+    ]);
+
+    expect(groups).toMatchObject([{
+      name: 'Fatura sem cartão informado',
+      total: 125,
+      cardInvoice: true,
+      detail: '2 compras na fatura',
+    }]);
   });
 });

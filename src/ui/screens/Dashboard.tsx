@@ -226,7 +226,7 @@ export const groupUpcoming = (items: Transaction[]): PayableEntry[] => {
   for (const item of items) {
     const creditCard = Boolean(item.cardId)
       || item.paymentMethodName?.trim().toLocaleLowerCase('pt-BR') === 'cartão de crédito';
-    const cardInvoice = item.isOverdue && creditCard;
+    const cardInvoice = creditCard;
     const key = cardInvoice
       ? `invoice:${item.cardId ?? item.paymentMethodId ?? 'unassigned'}:${item.dueDate}`
       : `transaction:${item.id}`;
