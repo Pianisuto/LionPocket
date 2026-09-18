@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,11 @@ import { addMonths, currentMonthIso, todayIso } from '../shared/finance';
 
 const temporaryDirectories: string[] = [];
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-20T12:00:00-03:00'));
+});
+
 const createDatabase = () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'lionpocket-test-'));
   temporaryDirectories.push(directory);
@@ -14,6 +19,7 @@ const createDatabase = () => {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -722,6 +728,37 @@ describe('busca de lançamentos', () => {
 
     expect(database.listTransactions({ month: '2026-08', search: 'agua' })[0]?.description).toBe('Água');
     expect(database.listTransactions({ month: '2026-08', search: 'cartao de credito' })[0]?.description).toBe('Água');
+    database.db.close();
+  });
+
+  it('encontra parcialmente o valor efetivo em formatos monetários comuns', () => {
+    const database = createDatabase();
+    database.saveTransaction({
+      kind: 'expense',
+      description: 'Compra prevista',
+      plannedAmount: 1150,
+      dueDate: '2026-08-10',
+      status: 'planned',
+    });
+    database.saveTransaction({
+      kind: 'expense',
+      description: 'Compra ajustada',
+      plannedAmount: 80,
+      actualAmount: 2150,
+      dueDate: '2026-08-11',
+      status: 'paid',
+    });
+
+    expect(database.listTransactions({ month: '2026-08', search: '150' }).map((item) => item.description))
+      .toEqual(['Compra prevista', 'Compra ajustada']);
+    expect(database.listTransactions({ month: '2026-08', search: '150,00' }).map((item) => item.description))
+      .toEqual(['Compra prevista', 'Compra ajustada']);
+    expect(database.listTransactions({ month: '2026-08', search: 'R$ 150,00' }).map((item) => item.description))
+      .toEqual(['Compra prevista', 'Compra ajustada']);
+    expect(database.listTransactions({ month: '2026-08', search: 'R$ 1.150,00' }).map((item) => item.description))
+      .toEqual(['Compra prevista']);
+    expect(database.listTransactions({ month: '2026-08', search: 'R$ 2.150,00' }).map((item) => item.description))
+      .toEqual(['Compra ajustada']);
     database.db.close();
   });
 

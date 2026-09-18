@@ -5,17 +5,44 @@ import type { Transaction, TransactionFilters } from '../../shared/types';
 import { ConfirmDialog, EmptyState, Modal, SearchField, SelectControl } from '../components';
 import { currency, currentMonthIso, formatDate, monthLabel, overdueLabel, statusLabel } from '../format';
 
-type SortKey = 'date' | 'description' | 'category' | 'paymentMethod' | 'card' | 'status' | 'amount';
+type SortKey = 'date' | 'purchaseDate' | 'description' | 'category' | 'paymentMethod' | 'card' | 'status' | 'amount';
 type SortDirection = 'asc' | 'desc';
 
 const sortLabels: Record<SortKey, string> = {
   date: 'Vencimento',
+  purchaseDate: 'Data da compra',
   description: 'Lançamento',
   category: 'Categoria',
   paymentMethod: 'Pagamento',
   card: 'Cartão',
   status: 'Situação',
   amount: 'Valor',
+};
+
+export const sortTransactions = (
+  items: Transaction[],
+  sort: { key: SortKey; direction: SortDirection },
+) => {
+  const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
+  const textValue = (item: Transaction, key: SortKey) => {
+    if (key === 'date') return item.dueDate;
+    if (key === 'purchaseDate') return item.purchaseDate ?? '';
+    if (key === 'description') return item.description;
+    if (key === 'category') return item.categoryName ?? 'Sem categoria';
+    if (key === 'paymentMethod') return item.paymentMethodName ?? 'Não informado';
+    if (key === 'card') return item.cardName ?? '';
+    return statusLabel(item.status);
+  };
+  return [...items].sort((left, right) => {
+    if (sort.key === 'purchaseDate' && Boolean(left.purchaseDate) !== Boolean(right.purchaseDate)) {
+      return left.purchaseDate ? -1 : 1;
+    }
+    const comparison = sort.key === 'amount'
+      ? (left.actualAmount ?? left.plannedAmount) - (right.actualAmount ?? right.plannedAmount)
+      : collator.compare(textValue(left, sort.key), textValue(right, sort.key));
+    const directed = sort.direction === 'asc' ? comparison : -comparison;
+    return directed || collator.compare(left.description, right.description) || left.id.localeCompare(right.id);
+  });
 };
 
 const expenseCountsInMonth = (item: Transaction, month: string) => {
@@ -131,22 +158,7 @@ export const Transactions = ({
   }, { income: 0, expense: 0 }), [items, month]);
 
   const sortedItems = useMemo(() => {
-    const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
-    const textValue = (item: Transaction, key: SortKey) => {
-      if (key === 'date') return item.dueDate;
-      if (key === 'description') return item.description;
-      if (key === 'category') return item.categoryName ?? 'Sem categoria';
-      if (key === 'paymentMethod') return item.paymentMethodName ?? 'Não informado';
-      if (key === 'card') return item.cardName ?? '';
-      return statusLabel(item.status);
-    };
-    return [...items].sort((left, right) => {
-      const comparison = sort.key === 'amount'
-        ? (left.actualAmount ?? left.plannedAmount) - (right.actualAmount ?? right.plannedAmount)
-        : collator.compare(textValue(left, sort.key), textValue(right, sort.key));
-      const directed = sort.direction === 'asc' ? comparison : -comparison;
-      return directed || collator.compare(left.description, right.description) || left.id.localeCompare(right.id);
-    });
+    return sortTransactions(items, sort);
   }, [items, sort]);
   const priorityItems = useMemo(() => [...items]
     .filter((item) => item.priorityPosition !== null)
@@ -365,11 +377,12 @@ export const Transactions = ({
         ><GripVertical size={16} /></span>
         <span className="date-cell"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
       </span>
+      <span className="purchase-date-cell">{item.purchaseDate ? formatDate(item.purchaseDate, 'dd/MM/yyyy') : '—'}</span>
       <span className="transaction-name">
         <i style={{ background: item.categoryColor ?? 'var(--text-muted)' }}>{item.kind === 'income' ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}</i>
         <span>
           <strong>{item.description}</strong>
-          {(item.isOverdue || item.purchaseDate || item.installmentNumber || (item.status === 'paid' && item.settledDate && item.settledDate !== item.dueDate)) && (
+          {(item.isOverdue || item.installmentNumber || (item.status === 'paid' && item.settledDate && item.settledDate !== item.dueDate)) && (
             <small>{[
               item.isOverdue
                 ? item.dueDate.slice(0, 7) === month && closedMonth
@@ -379,7 +392,6 @@ export const Transactions = ({
               item.status === 'paid' && item.settledDate && item.settledDate !== item.dueDate
                 ? `Pago em ${formatDate(item.settledDate, 'dd/MM/yyyy')}`
                 : null,
-              item.purchaseDate ? `Compra em ${formatDate(item.purchaseDate, 'dd/MM/yyyy')}` : null,
               item.installmentNumber ? `${item.installmentNumber} de ${item.installmentTotal} parcelas` : null,
             ].filter(Boolean).join(' · ')}</small>
           )}
@@ -389,7 +401,7 @@ export const Transactions = ({
       <span>{item.paymentMethodName ?? 'Não informado'}</span>
       <span>{item.cardName ?? '—'}</span>
       <span><i className={`status-pill status-pill--${item.isOverdue ? 'overdue' : item.status}`}>{item.isOverdue ? 'Atrasado' : statusLabel(item.status)}</i></span>
-      <span className={item.kind === 'income' ? 'money-positive' : ''}><strong>{item.kind === 'income' ? '+' : '−'} {currency.format(item.actualAmount ?? item.plannedAmount)}</strong>{item.actualAmount !== null && item.actualAmount !== item.plannedAmount && <small>Previsto {currency.format(item.plannedAmount)}</small>}</span>
+      <span className={`transaction-amount ${item.kind === 'income' ? 'money-positive' : ''}`}><strong>{item.kind === 'income' ? '+' : '−'} {currency.format(item.actualAmount ?? item.plannedAmount)}</strong>{item.actualAmount !== null && item.actualAmount !== item.plannedAmount && <small>Previsto {currency.format(item.plannedAmount)}</small>}</span>
       <span className="row-actions">
         <button
           className={`icon-button ${pinned ? 'icon-button--pinned' : ''}`}
@@ -423,7 +435,7 @@ export const Transactions = ({
       </div>
 
       <div className="toolbar">
-        <SearchField value={search} onChange={setSearch} placeholder="Buscar lançamento, categoria ou pagamento" />
+        <SearchField value={search} onChange={setSearch} placeholder="Buscar lançamento, categoria, pagamento ou valor" />
         <SelectControl className="filter-select" ariaLabel="Filtrar por tipo" value={kind} onChange={(value) => setKind(value as NonNullable<TransactionFilters['kind']>)} options={[
           { value: 'all', label: 'Entradas e saídas' },
           { value: 'income', label: 'Só entradas' },
@@ -458,7 +470,7 @@ export const Transactions = ({
         )}
       </div>
 
-      <div className="table-card">
+      <div className="table-card table-card--transactions">
         <div className="data-table data-table--transactions">
           <div className="data-table__header" role="row">
             {(Object.keys(sortLabels) as SortKey[]).map((key) => (

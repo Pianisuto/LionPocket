@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '../../shared/types';
-import { applyPriorityChange } from './Transactions';
+import { applyPriorityChange, sortTransactions } from './Transactions';
 
 const transaction = (id: string, priorityPosition: number | null): Transaction => ({
   id,
@@ -44,5 +44,20 @@ describe('estado otimista das prioridades', () => {
       items = applyPriorityChange(items, water, false, null);
       expect(priorityIds(items)).toEqual(['internet']);
     }
+  });
+});
+
+describe('ordenação dos lançamentos', () => {
+  it('ordena a data da compra e mantém lançamentos sem data no fim', () => {
+    const items = [
+      { ...transaction('sem-data', null), purchaseDate: null },
+      { ...transaction('mais-recente', null), purchaseDate: '2026-08-20' },
+      { ...transaction('mais-antiga', null), purchaseDate: '2026-07-10' },
+    ];
+
+    expect(sortTransactions(items, { key: 'purchaseDate', direction: 'asc' }).map((item) => item.id))
+      .toEqual(['mais-antiga', 'mais-recente', 'sem-data']);
+    expect(sortTransactions(items, { key: 'purchaseDate', direction: 'desc' }).map((item) => item.id))
+      .toEqual(['mais-recente', 'mais-antiga', 'sem-data']);
   });
 });

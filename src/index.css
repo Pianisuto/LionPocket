@@ -2808,10 +2808,18 @@ button.goal-mini {
   overflow: hidden;
 }
 
+.table-card--transactions {
+  overflow-x: auto;
+}
+
+.data-table--transactions {
+  min-width: 1103px;
+}
+
 .data-table__header,
 .data-table__row {
   display: grid;
-  grid-template-columns: 108px minmax(145px, 1.8fr) minmax(100px, 1fr) minmax(112px, 1.05fr) minmax(86px, 0.8fr) 102px minmax(94px, 0.9fr) 136px;
+  grid-template-columns: 96px 112px minmax(145px, 1.8fr) minmax(96px, 1fr) minmax(108px, 1.05fr) minmax(80px, 0.8fr) 94px minmax(100px, 0.9fr) 136px;
   gap: 12px;
   align-items: center;
   padding: 0 20px;
@@ -2998,6 +3006,11 @@ button.goal-mini {
   text-transform: uppercase;
 }
 
+.purchase-date-cell {
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+
 .transaction-name {
   display: flex;
   align-items: center;
@@ -3035,12 +3048,12 @@ button.goal-mini {
   font-size: 11px;
 }
 
-.data-table__row > span:nth-child(7) strong {
+.transaction-amount strong {
   font-family: var(--font-display);
   font-size: 14px;
 }
 
-.data-table__row > span:nth-child(7) small {
+.transaction-amount small {
   display: block;
   margin-top: 2px;
   color: var(--text-muted);

@@ -46,6 +46,13 @@ const normalizeSearchText = (value: unknown) => String(value ?? '')
   .replace(/\p{Diacritic}/gu, '')
   .toLocaleLowerCase('pt-BR');
 
+const monetarySearchDigits = (value: string) => {
+  const cleaned = value.trim();
+  if (!/^(?:r\$\s*)?[\d\s.,]+$/i.test(cleaned)) return null;
+  const digits = cleaned.replace(/\D/g, '');
+  return digits || null;
+};
+
 /** Cinza-ameixa: a cor de quem ainda não escolheu uma cor. */
 export const NEUTRAL_COLOR = '#9C8AA5';
 
@@ -820,12 +827,17 @@ export class LionPocketDatabase {
       parameters.push(filters.source);
     }
     if (filters.search?.trim()) {
-      conditions.push(`search_key(
+      const monetaryDigits = monetarySearchDigits(filters.search);
+      const textCondition = `search_key(
         COALESCE(t.description, '') || ' ' || COALESCE(c.name, '') || ' ' ||
         COALESCE(pm.name, '') || ' ' || COALESCE(ca.name, '') || ' ' || COALESCE(t.notes, '')
-      ) LIKE ? ESCAPE '\\'`);
+      ) LIKE ? ESCAPE '\\'`;
+      conditions.push(monetaryDigits
+        ? `(${textCondition} OR CAST(COALESCE(t.actual_cents, t.planned_cents) AS TEXT) LIKE ?)`
+        : textCondition);
       const cleaned = normalizeSearchText(filters.search.trim()).replace(/[\\%_]/g, '\\$&');
       parameters.push(`%${cleaned}%`);
+      if (monetaryDigits) parameters.push(`%${monetaryDigits}%`);
     }
     const rows = this.db
       .prepare(`${this.transactionSelect()} WHERE ${conditions.join(' AND ')} ORDER BY
