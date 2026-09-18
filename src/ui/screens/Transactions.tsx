@@ -5,18 +5,60 @@ import type { Transaction, TransactionFilters } from '../../shared/types';
 import { ConfirmDialog, EmptyState, Modal, SearchField, SelectControl } from '../components';
 import { currency, currentMonthIso, formatDate, monthLabel, overdueLabel, statusLabel } from '../format';
 
-type SortKey = 'date' | 'description' | 'category' | 'paymentMethod' | 'card' | 'status' | 'amount';
+type SortKey = 'date' | 'purchaseDate' | 'description' | 'category' | 'paymentMethod' | 'card' | 'status' | 'amount';
 type SortDirection = 'asc' | 'desc';
 
-const sortLabels: Record<SortKey, string> = {
-  date: 'Vencimento',
-  description: 'Lançamento',
-  category: 'Categoria',
-  paymentMethod: 'Pagamento',
-  card: 'Cartão',
-  status: 'Situação',
-  amount: 'Valor',
+export const transactionColumns: Array<{ key: SortKey; label: string }> = [
+  { key: 'date', label: 'Vencimento' },
+  { key: 'description', label: 'Lançamento' },
+  { key: 'category', label: 'Categoria' },
+  { key: 'paymentMethod', label: 'Pagamento' },
+  { key: 'card', label: 'Cartão' },
+  { key: 'purchaseDate', label: 'Data da compra' },
+  { key: 'status', label: 'Situação' },
+  { key: 'amount', label: 'Valor' },
+];
+
+export const sortTransactions = (
+  items: Transaction[],
+  sort: { key: SortKey; direction: SortDirection },
+) => {
+  const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
+  const textValue = (item: Transaction, key: SortKey) => {
+    if (key === 'date') return item.dueDate;
+    if (key === 'purchaseDate') return item.purchaseDate ?? '';
+    if (key === 'description') return item.description;
+    if (key === 'category') return item.categoryName ?? 'Sem categoria';
+    if (key === 'paymentMethod') return item.paymentMethodName ?? 'Não informado';
+    if (key === 'card') return item.cardName ?? '';
+    return statusLabel(item.status);
+  };
+  return [...items].sort((left, right) => {
+    if (sort.key === 'purchaseDate' && Boolean(left.purchaseDate) !== Boolean(right.purchaseDate)) {
+      return left.purchaseDate ? -1 : 1;
+    }
+    const comparison = sort.key === 'amount'
+      ? (left.actualAmount ?? left.plannedAmount) - (right.actualAmount ?? right.plannedAmount)
+      : collator.compare(textValue(left, sort.key), textValue(right, sort.key));
+    const directed = sort.direction === 'asc' ? comparison : -comparison;
+    return directed || collator.compare(left.description, right.description) || left.id.localeCompare(right.id);
+  });
 };
+
+export const groupTransactions = (
+  items: Transaction[],
+  sortedItems: Transaction[],
+  showPriorities: boolean,
+) => ({
+  priorityItems: showPriorities
+    ? [...items]
+        .filter((item) => item.priorityPosition !== null)
+        .sort((left, right) => (left.priorityPosition ?? 0) - (right.priorityPosition ?? 0))
+    : [],
+  regularItems: showPriorities
+    ? sortedItems.filter((item) => item.priorityPosition === null)
+    : sortedItems,
+});
 
 const expenseCountsInMonth = (item: Transaction, month: string) => {
   if (item.kind !== 'expense' || item.status === 'cancelled') return false;
@@ -58,6 +100,7 @@ export const applyPriorityChange = (
 export const Transactions = ({
   month,
   refreshKey,
+  showPriorities,
   onAdd,
   onEdit,
   onChanged,
@@ -65,6 +108,7 @@ export const Transactions = ({
 }: {
   month: string;
   refreshKey: number;
+  showPriorities: boolean;
   onAdd: () => void;
   onEdit: (item: Transaction) => void;
   onChanged: () => void;
@@ -131,28 +175,12 @@ export const Transactions = ({
   }, { income: 0, expense: 0 }), [items, month]);
 
   const sortedItems = useMemo(() => {
-    const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
-    const textValue = (item: Transaction, key: SortKey) => {
-      if (key === 'date') return item.dueDate;
-      if (key === 'description') return item.description;
-      if (key === 'category') return item.categoryName ?? 'Sem categoria';
-      if (key === 'paymentMethod') return item.paymentMethodName ?? 'Não informado';
-      if (key === 'card') return item.cardName ?? '';
-      return statusLabel(item.status);
-    };
-    return [...items].sort((left, right) => {
-      const comparison = sort.key === 'amount'
-        ? (left.actualAmount ?? left.plannedAmount) - (right.actualAmount ?? right.plannedAmount)
-        : collator.compare(textValue(left, sort.key), textValue(right, sort.key));
-      const directed = sort.direction === 'asc' ? comparison : -comparison;
-      return directed || collator.compare(left.description, right.description) || left.id.localeCompare(right.id);
-    });
+    return sortTransactions(items, sort);
   }, [items, sort]);
-  const priorityItems = useMemo(() => [...items]
-    .filter((item) => item.priorityPosition !== null)
-    .sort((left, right) => (left.priorityPosition ?? 0) - (right.priorityPosition ?? 0)), [items]);
-  const regularItems = useMemo(() => sortedItems
-    .filter((item) => item.priorityPosition === null), [sortedItems]);
+  const { priorityItems, regularItems } = useMemo(
+    () => groupTransactions(items, sortedItems, showPriorities),
+    [items, showPriorities, sortedItems],
+  );
 
   const chooseSort = (key: SortKey) => {
     setSort((current) => current.key === key
@@ -352,24 +380,24 @@ export const Transactions = ({
       data-before-id={pinned ? item.id : undefined}
     >
       <span
-        className="date-cell-container"
-        onPointerDown={(event) => beginPointerDrag(event, item)}
-        onPointerMove={movePointerDrag}
-        onPointerUp={finishPointerDrag}
-        onPointerCancel={clearDrag}
-        title={pinned ? 'Arraste para reordenar ou devolver à lista' : 'Arraste para Prioridades'}
+        className={`date-cell-container ${showPriorities ? '' : 'date-cell-container--static'}`}
+        onPointerDown={showPriorities ? (event) => beginPointerDrag(event, item) : undefined}
+        onPointerMove={showPriorities ? movePointerDrag : undefined}
+        onPointerUp={showPriorities ? finishPointerDrag : undefined}
+        onPointerCancel={showPriorities ? clearDrag : undefined}
+        title={showPriorities ? (pinned ? 'Arraste para reordenar ou devolver à lista' : 'Arraste para Prioridades') : undefined}
       >
-        <span
+        {showPriorities && <span
           className="priority-drag-handle"
           aria-hidden="true"
-        ><GripVertical size={16} /></span>
+        ><GripVertical size={16} /></span>}
         <span className="date-cell"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
       </span>
       <span className="transaction-name">
         <i style={{ background: item.categoryColor ?? 'var(--text-muted)' }}>{item.kind === 'income' ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}</i>
         <span>
           <strong>{item.description}</strong>
-          {(item.isOverdue || item.purchaseDate || item.installmentNumber || (item.status === 'paid' && item.settledDate && item.settledDate !== item.dueDate)) && (
+          {(item.isOverdue || item.installmentNumber || (item.status === 'paid' && item.settledDate && item.settledDate !== item.dueDate)) && (
             <small>{[
               item.isOverdue
                 ? item.dueDate.slice(0, 7) === month && closedMonth
@@ -379,7 +407,6 @@ export const Transactions = ({
               item.status === 'paid' && item.settledDate && item.settledDate !== item.dueDate
                 ? `Pago em ${formatDate(item.settledDate, 'dd/MM/yyyy')}`
                 : null,
-              item.purchaseDate ? `Compra em ${formatDate(item.purchaseDate, 'dd/MM/yyyy')}` : null,
               item.installmentNumber ? `${item.installmentNumber} de ${item.installmentTotal} parcelas` : null,
             ].filter(Boolean).join(' · ')}</small>
           )}
@@ -388,14 +415,15 @@ export const Transactions = ({
       <span>{item.categoryName ?? 'Sem categoria'}</span>
       <span>{item.paymentMethodName ?? 'Não informado'}</span>
       <span>{item.cardName ?? '—'}</span>
+      <span className="purchase-date-cell">{item.purchaseDate ? formatDate(item.purchaseDate, 'dd/MM/yyyy') : '—'}</span>
       <span><i className={`status-pill status-pill--${item.isOverdue ? 'overdue' : item.status}`}>{item.isOverdue ? 'Atrasado' : statusLabel(item.status)}</i></span>
-      <span className={item.kind === 'income' ? 'money-positive' : ''}><strong>{item.kind === 'income' ? '+' : '−'} {currency.format(item.actualAmount ?? item.plannedAmount)}</strong>{item.actualAmount !== null && item.actualAmount !== item.plannedAmount && <small>Previsto {currency.format(item.plannedAmount)}</small>}</span>
+      <span className={`transaction-amount ${item.kind === 'income' ? 'money-positive' : ''}`}><strong>{item.kind === 'income' ? '+' : '−'} {currency.format(item.actualAmount ?? item.plannedAmount)}</strong>{item.actualAmount !== null && item.actualAmount !== item.plannedAmount && <small>Previsto {currency.format(item.plannedAmount)}</small>}</span>
       <span className="row-actions">
-        <button
+        {showPriorities && <button
           className={`icon-button ${pinned ? 'icon-button--pinned' : ''}`}
           onClick={() => void changePriority(item, !pinned)}
           title={pinned ? 'Remover das prioridades' : 'Adicionar às prioridades'}
-        >{pinned ? <PinOff size={16} /> : <Pin size={16} />}</button>
+        >{pinned ? <PinOff size={16} /> : <Pin size={16} />}</button>}
         {item.status === 'planned' && <button className="icon-button icon-button--success" onClick={() => settle(item)} title={item.kind === 'income' ? 'Marcar como recebida' : 'Marcar como paga'}><Check size={17} /></button>}
         <button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button>
         <button className="icon-button icon-button--danger" onClick={() => setPendingDelete(item)} title="Excluir"><Trash2 size={16} /></button>
@@ -423,7 +451,7 @@ export const Transactions = ({
       </div>
 
       <div className="toolbar">
-        <SearchField value={search} onChange={setSearch} placeholder="Buscar lançamento, categoria ou pagamento" />
+        <SearchField value={search} onChange={setSearch} placeholder="Buscar lançamento, categoria, pagamento ou valor" />
         <SelectControl className="filter-select" ariaLabel="Filtrar por tipo" value={kind} onChange={(value) => setKind(value as NonNullable<TransactionFilters['kind']>)} options={[
           { value: 'all', label: 'Entradas e saídas' },
           { value: 'income', label: 'Só entradas' },
@@ -458,13 +486,13 @@ export const Transactions = ({
         )}
       </div>
 
-      <div className="table-card">
+      <div className="table-card table-card--transactions">
         <div className="data-table data-table--transactions">
           <div className="data-table__header" role="row">
-            {(Object.keys(sortLabels) as SortKey[]).map((key) => (
+            {transactionColumns.map(({ key, label }) => (
               <span role="columnheader" aria-sort={sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'} key={key}>
                 <button type="button" className={sort.key === key ? 'is-active' : ''} onClick={() => chooseSort(key)}>
-                  {sortLabels[key]}
+                  {label}
                   {sort.key === key && (sort.direction === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
                 </button>
               </span>
@@ -473,7 +501,7 @@ export const Transactions = ({
           </div>
           {loading ? <div className="table-loading">Carregando seus lançamentos…</div> : (
             <>
-              <div
+              {showPriorities && <div
                 className={`priority-zone ${dragged && !dragged.pinned ? 'is-ready' : ''}`}
                 data-priority-drop="priority"
               >
@@ -495,21 +523,21 @@ export const Transactions = ({
                     data-priority-drop="priority"
                   >Soltar no fim das prioridades</div>
                 )}
-              </div>
+              </div>}
               <div
-                className={`regular-zone ${dragged?.pinned ? 'is-ready' : ''}`}
-                data-priority-drop="regular"
+                className={showPriorities ? `regular-zone ${dragged?.pinned ? 'is-ready' : ''}` : ''}
+                data-priority-drop={showPriorities ? 'regular' : undefined}
               >
-                <div className="regular-zone__heading">
+                {showPriorities && <div className="regular-zone__heading">
                   <strong>Demais lançamentos</strong>
                   {dragged?.pinned && <small>Solte aqui para despinar</small>}
-                </div>
+                </div>}
                 {regularItems.map((item) => renderRow(item, false))}
               </div>
             </>
           )}
         </div>
-        {dragged && dragPoint && (
+        {showPriorities && dragged && dragPoint && (
           <div className="priority-drag-preview" style={{ left: dragPoint.x + 14, top: dragPoint.y + 14 }}>
             <GripVertical size={14} />
             {items.find((item) => item.id === dragged.id)?.description}
