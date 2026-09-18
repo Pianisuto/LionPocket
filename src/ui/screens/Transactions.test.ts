@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '../../shared/types';
-import { applyPriorityChange, sortTransactions, transactionColumns } from './Transactions';
+import { applyPriorityChange, groupTransactions, sortTransactions, transactionColumns } from './Transactions';
 
 const transaction = (id: string, priorityPosition: number | null): Transaction => ({
   id,
@@ -64,5 +64,27 @@ describe('ordenação dos lançamentos', () => {
   it('posiciona a data da compra imediatamente antes da situação', () => {
     expect(transactionColumns.map((column) => column.key))
       .toEqual(['date', 'description', 'category', 'paymentMethod', 'card', 'purchaseDate', 'status', 'amount']);
+  });
+});
+
+describe('visibilidade das prioridades', () => {
+  it('mantém todos os lançamentos na lista normal quando a região está desativada', () => {
+    const items = [transaction('fixado', 0), transaction('comum', null)];
+    const sortedItems = sortTransactions(items, { key: 'description', direction: 'asc' });
+
+    expect(groupTransactions(items, sortedItems, false)).toEqual({
+      priorityItems: [],
+      regularItems: [items[1], items[0]],
+    });
+  });
+
+  it('separa os lançamentos fixados quando a região está ativada', () => {
+    const items = [transaction('fixado', 0), transaction('comum', null)];
+    const sortedItems = sortTransactions(items, { key: 'description', direction: 'asc' });
+
+    expect(groupTransactions(items, sortedItems, true)).toEqual({
+      priorityItems: [items[0]],
+      regularItems: [items[1]],
+    });
   });
 });

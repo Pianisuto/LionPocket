@@ -40,6 +40,28 @@ type ModalState =
   | { type: 'goal'; item?: Goal | null }
   | null;
 
+const PRIORITIES_VISIBILITY_KEY = 'lionpocket:show-priorities';
+
+export const readPriorityVisibility = (storage?: Pick<Storage, 'getItem'>) => {
+  try {
+    return (storage ?? window.localStorage).getItem(PRIORITIES_VISIBILITY_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+};
+
+export const writePriorityVisibility = (
+  visible: boolean,
+  storage?: Pick<Storage, 'setItem'>,
+) => {
+  try {
+    (storage ?? window.localStorage).setItem(PRIORITIES_VISIBILITY_KEY, String(visible));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const emptyCatalogs: Catalogs = { categories: [], paymentMethods: [], cards: [] };
 
 const views: Array<{ id: View; label: string; icon: React.ReactNode }> = [
@@ -71,11 +93,19 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [showPriorities, setShowPriorities] = useState(readPriorityVisibility);
 
   const notify = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(''), 3500);
   }, []);
+
+  const changePriorityVisibility = useCallback((visible: boolean) => {
+    setShowPriorities(visible);
+    notify(writePriorityVisibility(visible)
+      ? 'Preferência de exibição salva.'
+      : 'Preferência aplicada somente nesta sessão.');
+  }, [notify]);
 
   const refreshCatalogs = useCallback(async () => {
     setCatalogs(await window.lionPocket.getCatalogs());
@@ -220,6 +250,7 @@ export default function App() {
             <Transactions
               month={month}
               refreshKey={refreshKey}
+              showPriorities={showPriorities}
               onAdd={() => setModal({ type: 'transaction' })}
               onEdit={(item) => setModal({ type: 'transaction', item })}
               onChanged={changed}
@@ -258,6 +289,8 @@ export default function App() {
             <Settings
               catalogs={catalogs}
               month={month}
+              showPriorities={showPriorities}
+              onShowPrioritiesChange={changePriorityVisibility}
               refreshCatalogs={refreshCatalogs}
               notify={(message) => {
                 notify(message);

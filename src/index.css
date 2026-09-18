@@ -2965,6 +2965,11 @@ button.goal-mini {
   cursor: grabbing;
 }
 
+.date-cell-container--static,
+.date-cell-container--static:active {
+  cursor: default;
+}
+
 .date-cell-container .date-cell {
   flex: 1 1 auto;
 }

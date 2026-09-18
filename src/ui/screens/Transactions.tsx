@@ -45,6 +45,21 @@ export const sortTransactions = (
   });
 };
 
+export const groupTransactions = (
+  items: Transaction[],
+  sortedItems: Transaction[],
+  showPriorities: boolean,
+) => ({
+  priorityItems: showPriorities
+    ? [...items]
+        .filter((item) => item.priorityPosition !== null)
+        .sort((left, right) => (left.priorityPosition ?? 0) - (right.priorityPosition ?? 0))
+    : [],
+  regularItems: showPriorities
+    ? sortedItems.filter((item) => item.priorityPosition === null)
+    : sortedItems,
+});
+
 const expenseCountsInMonth = (item: Transaction, month: string) => {
   if (item.kind !== 'expense' || item.status === 'cancelled') return false;
   if (item.status === 'paid') return (item.settledDate ?? item.dueDate).slice(0, 7) === month;
@@ -85,6 +100,7 @@ export const applyPriorityChange = (
 export const Transactions = ({
   month,
   refreshKey,
+  showPriorities,
   onAdd,
   onEdit,
   onChanged,
@@ -92,6 +108,7 @@ export const Transactions = ({
 }: {
   month: string;
   refreshKey: number;
+  showPriorities: boolean;
   onAdd: () => void;
   onEdit: (item: Transaction) => void;
   onChanged: () => void;
@@ -160,11 +177,10 @@ export const Transactions = ({
   const sortedItems = useMemo(() => {
     return sortTransactions(items, sort);
   }, [items, sort]);
-  const priorityItems = useMemo(() => [...items]
-    .filter((item) => item.priorityPosition !== null)
-    .sort((left, right) => (left.priorityPosition ?? 0) - (right.priorityPosition ?? 0)), [items]);
-  const regularItems = useMemo(() => sortedItems
-    .filter((item) => item.priorityPosition === null), [sortedItems]);
+  const { priorityItems, regularItems } = useMemo(
+    () => groupTransactions(items, sortedItems, showPriorities),
+    [items, showPriorities, sortedItems],
+  );
 
   const chooseSort = (key: SortKey) => {
     setSort((current) => current.key === key
@@ -364,17 +380,17 @@ export const Transactions = ({
       data-before-id={pinned ? item.id : undefined}
     >
       <span
-        className="date-cell-container"
-        onPointerDown={(event) => beginPointerDrag(event, item)}
-        onPointerMove={movePointerDrag}
-        onPointerUp={finishPointerDrag}
-        onPointerCancel={clearDrag}
-        title={pinned ? 'Arraste para reordenar ou devolver à lista' : 'Arraste para Prioridades'}
+        className={`date-cell-container ${showPriorities ? '' : 'date-cell-container--static'}`}
+        onPointerDown={showPriorities ? (event) => beginPointerDrag(event, item) : undefined}
+        onPointerMove={showPriorities ? movePointerDrag : undefined}
+        onPointerUp={showPriorities ? finishPointerDrag : undefined}
+        onPointerCancel={showPriorities ? clearDrag : undefined}
+        title={showPriorities ? (pinned ? 'Arraste para reordenar ou devolver à lista' : 'Arraste para Prioridades') : undefined}
       >
-        <span
+        {showPriorities && <span
           className="priority-drag-handle"
           aria-hidden="true"
-        ><GripVertical size={16} /></span>
+        ><GripVertical size={16} /></span>}
         <span className="date-cell"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
       </span>
       <span className="transaction-name">
@@ -403,11 +419,11 @@ export const Transactions = ({
       <span><i className={`status-pill status-pill--${item.isOverdue ? 'overdue' : item.status}`}>{item.isOverdue ? 'Atrasado' : statusLabel(item.status)}</i></span>
       <span className={`transaction-amount ${item.kind === 'income' ? 'money-positive' : ''}`}><strong>{item.kind === 'income' ? '+' : '−'} {currency.format(item.actualAmount ?? item.plannedAmount)}</strong>{item.actualAmount !== null && item.actualAmount !== item.plannedAmount && <small>Previsto {currency.format(item.plannedAmount)}</small>}</span>
       <span className="row-actions">
-        <button
+        {showPriorities && <button
           className={`icon-button ${pinned ? 'icon-button--pinned' : ''}`}
           onClick={() => void changePriority(item, !pinned)}
           title={pinned ? 'Remover das prioridades' : 'Adicionar às prioridades'}
-        >{pinned ? <PinOff size={16} /> : <Pin size={16} />}</button>
+        >{pinned ? <PinOff size={16} /> : <Pin size={16} />}</button>}
         {item.status === 'planned' && <button className="icon-button icon-button--success" onClick={() => settle(item)} title={item.kind === 'income' ? 'Marcar como recebida' : 'Marcar como paga'}><Check size={17} /></button>}
         <button className="icon-button" onClick={() => onEdit(item)} title="Editar"><Pencil size={16} /></button>
         <button className="icon-button icon-button--danger" onClick={() => setPendingDelete(item)} title="Excluir"><Trash2 size={16} /></button>
@@ -485,7 +501,7 @@ export const Transactions = ({
           </div>
           {loading ? <div className="table-loading">Carregando seus lançamentos…</div> : (
             <>
-              <div
+              {showPriorities && <div
                 className={`priority-zone ${dragged && !dragged.pinned ? 'is-ready' : ''}`}
                 data-priority-drop="priority"
               >
@@ -507,21 +523,21 @@ export const Transactions = ({
                     data-priority-drop="priority"
                   >Soltar no fim das prioridades</div>
                 )}
-              </div>
+              </div>}
               <div
-                className={`regular-zone ${dragged?.pinned ? 'is-ready' : ''}`}
-                data-priority-drop="regular"
+                className={showPriorities ? `regular-zone ${dragged?.pinned ? 'is-ready' : ''}` : ''}
+                data-priority-drop={showPriorities ? 'regular' : undefined}
               >
-                <div className="regular-zone__heading">
+                {showPriorities && <div className="regular-zone__heading">
                   <strong>Demais lançamentos</strong>
                   {dragged?.pinned && <small>Solte aqui para despinar</small>}
-                </div>
+                </div>}
                 {regularItems.map((item) => renderRow(item, false))}
               </div>
             </>
           )}
         </div>
-        {dragged && dragPoint && (
+        {showPriorities && dragged && dragPoint && (
           <div className="priority-drag-preview" style={{ left: dragPoint.x + 14, top: dragPoint.y + 14 }}>
             <GripVertical size={14} />
             {items.find((item) => item.id === dragged.id)?.description}

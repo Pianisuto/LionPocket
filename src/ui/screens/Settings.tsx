@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
 import type { CatalogInput, Catalogs, MoneyKind } from '../../shared/types';
 import { ConfirmDialog, NumberField, SelectField } from '../components';
 
-export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
+export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChange, refreshCatalogs, notify }: {
   catalogs: Catalogs;
   month: string;
+  showPriorities: boolean;
+  onShowPrioritiesChange: (visible: boolean) => void;
   refreshCatalogs: () => Promise<void>;
   notify: (message: string) => void;
 }) => {
@@ -95,6 +97,18 @@ export const Settings = ({ catalogs, month, refreshCatalogs, notify }: {
       <div className="panel settings-panel">
         <header className="panel__header"><div className="settings-icon settings-icon--safe"><ShieldCheck size={20} /></div><div><h3>Privacidade local</h3><p>Nesta versão, nada sai do seu computador.</p></div></header>
         <div className="privacy-card"><ShieldCheck size={26} /><div><strong>Banco local protegido pelo sistema</strong><p>O LionPocket não envia dados para a internet. Para proteção contra acesso físico ao computador, mantenha a criptografia de disco do Linux ou Windows ativada.</p></div></div>
+      </div>
+
+      <div className="panel settings-panel settings-panel--wide">
+        <header className="panel__header"><div className="settings-icon"><Settings2 size={20} /></div><div><h3>Preferências de exibição</h3><p>Escolha quais recursos aparecem no seu dia a dia.</p></div></header>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={showPriorities}
+            onChange={(event) => onShowPrioritiesChange(event.target.checked)}
+          />
+          <span><strong>Mostrar prioridades nos lançamentos</strong><small>Exibe a área para fixar e ordenar as contas mais importantes.</small></span>
+        </label>
       </div>
 
       <div className="panel settings-panel settings-panel--wide">
