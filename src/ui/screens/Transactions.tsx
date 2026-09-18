@@ -8,16 +8,16 @@ import { currency, currentMonthIso, formatDate, monthLabel, overdueLabel, status
 type SortKey = 'date' | 'purchaseDate' | 'description' | 'category' | 'paymentMethod' | 'card' | 'status' | 'amount';
 type SortDirection = 'asc' | 'desc';
 
-const sortLabels: Record<SortKey, string> = {
-  date: 'Vencimento',
-  purchaseDate: 'Data da compra',
-  description: 'Lançamento',
-  category: 'Categoria',
-  paymentMethod: 'Pagamento',
-  card: 'Cartão',
-  status: 'Situação',
-  amount: 'Valor',
-};
+export const transactionColumns: Array<{ key: SortKey; label: string }> = [
+  { key: 'date', label: 'Vencimento' },
+  { key: 'description', label: 'Lançamento' },
+  { key: 'category', label: 'Categoria' },
+  { key: 'paymentMethod', label: 'Pagamento' },
+  { key: 'card', label: 'Cartão' },
+  { key: 'purchaseDate', label: 'Data da compra' },
+  { key: 'status', label: 'Situação' },
+  { key: 'amount', label: 'Valor' },
+];
 
 export const sortTransactions = (
   items: Transaction[],
@@ -377,7 +377,6 @@ export const Transactions = ({
         ><GripVertical size={16} /></span>
         <span className="date-cell"><strong>{formatDate(item.dueDate, 'dd')}</strong><small>{formatDate(item.dueDate, 'MMM')}</small></span>
       </span>
-      <span className="purchase-date-cell">{item.purchaseDate ? formatDate(item.purchaseDate, 'dd/MM/yyyy') : '—'}</span>
       <span className="transaction-name">
         <i style={{ background: item.categoryColor ?? 'var(--text-muted)' }}>{item.kind === 'income' ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}</i>
         <span>
@@ -400,6 +399,7 @@ export const Transactions = ({
       <span>{item.categoryName ?? 'Sem categoria'}</span>
       <span>{item.paymentMethodName ?? 'Não informado'}</span>
       <span>{item.cardName ?? '—'}</span>
+      <span className="purchase-date-cell">{item.purchaseDate ? formatDate(item.purchaseDate, 'dd/MM/yyyy') : '—'}</span>
       <span><i className={`status-pill status-pill--${item.isOverdue ? 'overdue' : item.status}`}>{item.isOverdue ? 'Atrasado' : statusLabel(item.status)}</i></span>
       <span className={`transaction-amount ${item.kind === 'income' ? 'money-positive' : ''}`}><strong>{item.kind === 'income' ? '+' : '−'} {currency.format(item.actualAmount ?? item.plannedAmount)}</strong>{item.actualAmount !== null && item.actualAmount !== item.plannedAmount && <small>Previsto {currency.format(item.plannedAmount)}</small>}</span>
       <span className="row-actions">
@@ -473,10 +473,10 @@ export const Transactions = ({
       <div className="table-card table-card--transactions">
         <div className="data-table data-table--transactions">
           <div className="data-table__header" role="row">
-            {(Object.keys(sortLabels) as SortKey[]).map((key) => (
+            {transactionColumns.map(({ key, label }) => (
               <span role="columnheader" aria-sort={sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'} key={key}>
                 <button type="button" className={sort.key === key ? 'is-active' : ''} onClick={() => chooseSort(key)}>
-                  {sortLabels[key]}
+                  {label}
                   {sort.key === key && (sort.direction === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
                 </button>
               </span>

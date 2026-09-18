@@ -2813,14 +2813,14 @@ button.goal-mini {
 }
 
 .data-table--transactions {
-  min-width: 1103px;
+  min-width: 1229px;
 }
 
 .data-table__header,
 .data-table__row {
   display: grid;
-  grid-template-columns: 96px 112px minmax(145px, 1.8fr) minmax(96px, 1fr) minmax(108px, 1.05fr) minmax(80px, 0.8fr) 94px minmax(100px, 0.9fr) 136px;
-  gap: 12px;
+  grid-template-columns: 96px minmax(170px, 1.8fr) minmax(105px, 1fr) minmax(118px, 1.05fr) minmax(88px, 0.8fr) 144px 100px minmax(104px, 0.9fr) 136px;
+  gap: 16px;
   align-items: center;
   padding: 0 20px;
 }

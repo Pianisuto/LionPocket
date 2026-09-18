@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '../../shared/types';
-import { applyPriorityChange, sortTransactions } from './Transactions';
+import { applyPriorityChange, sortTransactions, transactionColumns } from './Transactions';
 
 const transaction = (id: string, priorityPosition: number | null): Transaction => ({
   id,
@@ -59,5 +59,10 @@ describe('ordenação dos lançamentos', () => {
       .toEqual(['mais-antiga', 'mais-recente', 'sem-data']);
     expect(sortTransactions(items, { key: 'purchaseDate', direction: 'desc' }).map((item) => item.id))
       .toEqual(['mais-recente', 'mais-antiga', 'sem-data']);
+  });
+
+  it('posiciona a data da compra imediatamente antes da situação', () => {
+    expect(transactionColumns.map((column) => column.key))
+      .toEqual(['date', 'description', 'category', 'paymentMethod', 'card', 'purchaseDate', 'status', 'amount']);
   });
 });
