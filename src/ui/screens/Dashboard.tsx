@@ -6,7 +6,6 @@ import {
   Check,
   ChevronRight,
   CircleDollarSign,
-  CreditCard,
   PiggyBank,
   Plus,
   ReceiptText,
@@ -15,6 +14,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import type { Overview, Transaction } from '../../shared/types';
+import { groupCreditCardInvoices } from '../../shared/credit-cards';
 import { EmptyState, ProgressBar, Skeleton } from '../components';
 import { compactCurrency, currency, formatDate, monthLabel, overdueLabel } from '../format';
 
@@ -222,30 +222,27 @@ type PayableEntry = {
 };
 
 export const groupUpcoming = (items: Transaction[]): PayableEntry[] => {
-  const entries = new Map<string, PayableEntry>();
+  const invoices = groupCreditCardInvoices(items);
+  const invoiceItemIds = new Set(invoices.flatMap((invoice) => invoice.items.map((item) => item.id)));
+  const entries: PayableEntry[] = invoices.map((invoice) => ({
+    ...invoice,
+    cardInvoice: true,
+    detail: `${invoice.items.length} ${invoice.items.length === 1 ? 'compra' : 'compras'} na fatura`,
+  }));
   for (const item of items) {
-    const creditCard = Boolean(item.cardId)
-      || item.paymentMethodName?.trim().toLocaleLowerCase('pt-BR') === 'cartão de crédito';
-    const cardInvoice = item.isOverdue && creditCard;
-    const key = cardInvoice
-      ? `invoice:${item.cardId ?? item.paymentMethodId ?? 'unassigned'}:${item.dueDate}`
-      : `transaction:${item.id}`;
-    const current = entries.get(key) ?? {
-      key,
-      name: cardInvoice ? `Fatura ${item.cardName ?? 'sem cartão informado'}` : item.description,
+    if (invoiceItemIds.has(item.id)) continue;
+    entries.push({
+      key: `transaction:${item.id}`,
+      name: item.description,
       dueDate: item.dueDate,
-      total: 0,
+      total: item.plannedAmount,
       overdue: item.isOverdue,
-      cardInvoice,
-      items: [],
-      detail: cardInvoice ? '' : item.categoryName ?? 'Sem categoria',
-    };
-    current.items.push(item);
-    current.total += item.plannedAmount;
-    if (cardInvoice) current.detail = `${current.items.length} ${current.items.length === 1 ? 'compra' : 'compras'} na fatura`;
-    entries.set(key, current);
+      cardInvoice: false,
+      items: [item],
+      detail: item.categoryName ?? 'Sem categoria',
+    });
   }
-  return [...entries.values()]
+  return entries
     .sort((left, right) => Number(right.overdue) - Number(left.overdue)
       || left.dueDate.localeCompare(right.dueDate)
       || left.name.localeCompare(right.name, 'pt-BR'))
@@ -308,7 +305,7 @@ export const Dashboard = ({
             {upcoming.length ? upcoming.map((entry) => (
               <div className={`upcoming-item ${entry.overdue ? 'upcoming-item--overdue' : ''}`} key={entry.key}>
                 <button type="button" className="upcoming-item__open" onClick={() => entry.cardInvoice ? onNavigate('transactions') : onEditTransaction(entry.items[0])} aria-label={entry.cardInvoice ? `Abrir ${entry.name}` : `Editar ${entry.name}`}>
-                  <span className="date-badge">{entry.cardInvoice ? <CreditCard size={18} /> : <><strong>{formatDate(entry.dueDate, 'dd')}</strong><small>{formatDate(entry.dueDate, 'MMM')}</small></>}</span>
+                  <span className="date-badge"><strong>{formatDate(entry.dueDate, 'dd')}</strong><small>{formatDate(entry.dueDate, 'MMM')}</small></span>
                   <span className="upcoming-item__copy"><strong>{entry.name}</strong><small>{entry.detail}</small></span>
                   <span className="upcoming-item__amount">
                     <strong>{currency.format(entry.total)}</strong>
