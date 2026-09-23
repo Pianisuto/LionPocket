@@ -86,6 +86,15 @@ describe('groupCreditCardInvoices', () => {
     expect(invoice?.items.map((item) => item.id)).toEqual(['included-a', 'included-b']);
   });
 
+  it('soma planejados em centavos sem acumular erro de ponto flutuante', () => {
+    const [invoice] = groupCreditCardInvoices([
+      transaction({ id: 'ten-cents', plannedAmount: 0.1 }),
+      transaction({ id: 'twenty-cents', plannedAmount: 0.2 }),
+    ]);
+
+    expect(invoice.total).toBe(0.3);
+  });
+
   it('mantém faturas separadas para vencimentos ou cartões diferentes', () => {
     const invoices = groupCreditCardInvoices([
       transaction({ id: 'nubank-july' }),

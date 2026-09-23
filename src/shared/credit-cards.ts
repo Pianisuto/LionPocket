@@ -1,4 +1,5 @@
 import type { Transaction } from './types';
+import { fromCents, toCents } from './finance';
 
 export interface CreditCardInvoice {
   key: string;
@@ -32,6 +33,7 @@ const invoiceIdentity = (transaction: Transaction) => {
 
 export const groupCreditCardInvoices = (transactions: Transaction[]): CreditCardInvoice[] => {
   const invoices = new Map<string, CreditCardInvoice>();
+  const invoiceTotalsInCents = new Map<string, number>();
   for (const transaction of transactions) {
     if (transaction.kind !== 'expense' || !isCreditCardTransaction(transaction)) continue;
 
@@ -48,7 +50,9 @@ export const groupCreditCardInvoices = (transactions: Transaction[]): CreditCard
       total: 0,
     };
     current.items.push(transaction);
-    current.total += transaction.plannedAmount;
+    const totalInCents = (invoiceTotalsInCents.get(key) ?? 0) + (toCents(transaction.plannedAmount) ?? 0);
+    invoiceTotalsInCents.set(key, totalInCents);
+    current.total = fromCents(totalInCents) ?? 0;
     current.overdue ||= transaction.isOverdue;
     invoices.set(key, current);
   }
