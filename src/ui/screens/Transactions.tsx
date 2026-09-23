@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
 import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, ChevronUp, CreditCard, GripVertical, History, Pencil, Pin, PinOff, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import type { Transaction, TransactionFilters } from '../../shared/types';
+import { groupCreditCardInvoices, isCreditCardTransaction } from '../../shared/credit-cards';
 import { ConfirmDialog, EmptyState, Modal, SearchField, SelectControl } from '../components';
 import { currency, currentMonthIso, formatDate, monthLabel, overdueLabel, statusLabel } from '../format';
 
@@ -156,10 +157,7 @@ export const Transactions = ({
     window.lionPocket.listTransactions({ month, kind: 'expense', status: 'planned' })
       .then((transactions) => {
         if (!active) return;
-        setCreditCardExpenses(transactions.filter((item) =>
-          Boolean(item.cardId)
-          || item.paymentMethodName?.trim().toLocaleLowerCase('pt-BR') === 'cartão de crédito',
-        ));
+        setCreditCardExpenses(transactions.filter(isCreditCardTransaction));
       })
       .catch(() => {
         if (active) setCreditCardExpenses([]);
@@ -194,27 +192,7 @@ export const Transactions = ({
   const overdueInProjection = useMemo(() => items
     .filter((item) => item.isOverdue && expenseCountsInMonth(item, month))
     .reduce((sum, item) => sum + item.plannedAmount, 0), [items, month]);
-  const creditCardGroups = useMemo(() => {
-    const groups = new Map<string, { key: string; name: string; dueDate: string; overdue: boolean; items: Transaction[]; total: number }>();
-    for (const item of creditCardExpenses) {
-      const cardKey = item.cardId ?? item.paymentMethodId ?? 'unassigned';
-      const key = `${cardKey}:${item.dueDate}`;
-      const current = groups.get(key) ?? {
-        key,
-        name: `Fatura ${item.cardName ?? 'sem cartão informado'}`,
-        dueDate: item.dueDate,
-        overdue: item.isOverdue,
-        items: [],
-        total: 0,
-      };
-      current.items.push(item);
-      current.total += item.plannedAmount;
-      groups.set(key, current);
-    }
-    return [...groups.values()].sort((left, right) => Number(right.overdue) - Number(left.overdue)
-      || left.dueDate.localeCompare(right.dueDate)
-      || left.name.localeCompare(right.name, 'pt-BR'));
-  }, [creditCardExpenses]);
+  const creditCardGroups = useMemo(() => groupCreditCardInvoices(creditCardExpenses), [creditCardExpenses]);
   const selectedCard = creditCardGroups.find((group) => group.key === selectedCardKey) ?? creditCardGroups[0];
   const hasActiveFilters = Boolean(search)
     || kind !== 'all'

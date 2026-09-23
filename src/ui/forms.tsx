@@ -16,6 +16,7 @@ import type {
   TransactionStatus,
   TransactionSuggestion,
 } from '../shared/types';
+import { isCreditCardPaymentMethodName } from '../shared/credit-cards';
 import { DateField, Modal, MoneyField, MonthField, NumberField, SelectField } from './components';
 import { cardStatementDueDate, currentMonthIso, currency, dateForMonthDay, formatDate, isPastDate, nextCardDueDate, settlementDateFor, todayIso } from './format';
 
@@ -82,7 +83,7 @@ export const TransactionForm = ({
 
   const categories = catalogs.categories.filter((category) => category.kind === kind);
   const creditMethod = useMemo(
-    () => catalogs.paymentMethods.find((method) => method.name.toLocaleLowerCase('pt-BR') === 'cartão de crédito'),
+    () => catalogs.paymentMethods.find((method) => isCreditCardPaymentMethodName(method.name)),
     [catalogs.paymentMethods],
   );
   const selectedCard = catalogs.cards.find((item) => item.id === cardId);
@@ -396,7 +397,7 @@ export const RecurringForm = ({ item, catalogs, defaultStartMonth, onSave, onClo
   onClose: () => void;
 }) => {
   const creditMethod = useMemo(
-    () => catalogs.paymentMethods.find((method) => method.name.toLocaleLowerCase('pt-BR') === 'cartão de crédito'),
+    () => catalogs.paymentMethods.find((method) => isCreditCardPaymentMethodName(method.name)),
     [catalogs.paymentMethods],
   );
   const [kind, setKind] = useState<MoneyKind>(item?.kind ?? 'expense');
@@ -565,7 +566,7 @@ export const InstallmentForm = ({ item, catalogs, onSave, onClose }: {
   onSave: (input: InstallmentPurchaseInput) => Promise<unknown>;
   onClose: () => void;
 }) => {
-  const creditMethod = useMemo(() => catalogs.paymentMethods.find((method) => method.name === 'Cartão de crédito'), [catalogs]);
+  const creditMethod = useMemo(() => catalogs.paymentMethods.find((method) => isCreditCardPaymentMethodName(method.name)), [catalogs]);
   const dueDateForPurchase = (date: string, nextCardId: string) => {
     const card = catalogs.cards.find((candidate) => candidate.id === nextCardId);
     if (!date || !card) return date || todayIso();

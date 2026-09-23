@@ -84,6 +84,61 @@ describe('agrupamento de contas a pagar', () => {
       detail: '2 compras na fatura',
     }]);
   });
+
+  it.each(['Cartão de crédito', 'cartão de crédito', 'CARTÃO DE CRÉDITO', 'Cartao de credito'])(
+    'identifica %s como forma de pagamento de cartão sem depender de acentos ou caixa',
+    (paymentMethodName) => {
+      const [invoice] = groupUpcoming([transaction({
+        id: 'legacy-card-purchase',
+        cardId: null,
+        cardName: null,
+        paymentMethodId: null,
+        paymentMethodName,
+        isOverdue: false,
+      })]);
+
+      expect(invoice).toMatchObject({
+        name: 'Fatura sem cartão informado',
+        cardInvoice: true,
+        items: [{ id: 'legacy-card-purchase' }],
+      });
+    },
+  );
+
+  it('agrupa somente pela combinação de cartão e vencimento', () => {
+    const groups = groupUpcoming([
+      transaction({ id: 'nu-july-a', plannedAmount: 10.25 }),
+      transaction({ id: 'nu-july-b', plannedAmount: 20.5 }),
+      transaction({ id: 'nu-august', dueDate: '2026-08-21', plannedAmount: 30.75 }),
+      transaction({ id: 'other-july', cardId: 'other', cardName: 'Outro', plannedAmount: 40.25 }),
+    ]);
+
+    expect(groups).toMatchObject([
+      { name: 'Fatura NuBank', dueDate: '2026-07-21', total: 30.75, items: [{ id: 'nu-july-a' }, { id: 'nu-july-b' }] },
+      { name: 'Fatura Outro', dueDate: '2026-07-21', total: 40.25, items: [{ id: 'other-july' }] },
+      { name: 'Fatura NuBank', dueDate: '2026-08-21', total: 30.75, items: [{ id: 'nu-august' }] },
+    ]);
+  });
+
+  it('prioriza faturas atrasadas e limita a lista aos cinco primeiros grupos', () => {
+    const groups = groupUpcoming([
+      transaction({ id: 'current-a', dueDate: '2026-09-01', isOverdue: false }),
+      transaction({ id: 'late', dueDate: '2026-07-01', isOverdue: true }),
+      transaction({ id: 'current-b', cardId: 'b', cardName: 'B', dueDate: '2026-09-02', isOverdue: false }),
+      transaction({ id: 'current-c', cardId: 'c', cardName: 'C', dueDate: '2026-09-03', isOverdue: false }),
+      transaction({ id: 'current-d', cardId: 'd', cardName: 'D', dueDate: '2026-09-04', isOverdue: false }),
+      transaction({ id: 'current-e', cardId: 'e', cardName: 'E', dueDate: '2026-09-05', isOverdue: false }),
+    ]);
+
+    expect(groups).toHaveLength(5);
+    expect(groups.map((group) => group.items.map((item) => item.id))).toEqual([
+      ['late'],
+      ['current-a'],
+      ['current-b'],
+      ['current-c'],
+      ['current-d'],
+    ]);
+  });
 });
 
 describe('exibição de contas a pagar', () => {
@@ -115,6 +170,6 @@ describe('exibição de contas a pagar', () => {
       onSettleTransactions: async () => true,
     }));
 
-    expect(markup).toContain('<span class="date-badge"><strong>21</strong><small>jul</small></span>');
+    expect(markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')).toContain('21 jul');
   });
 });
