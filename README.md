@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Pianisuto/LionPocket/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/Pianisuto/LionPocket?display_name=tag&sort=semver"></a>
-  <a href="LICENSE"><img alt="Licença GPLv3" src="https://img.shields.io/badge/licen%C3%A7a-GPLv3-f05a9d"></a>
+  <a href="LICENSE"><img alt="Licença AGPLv3" src="https://img.shields.io/badge/licen%C3%A7a-AGPLv3-f05a9d"></a>
   <img alt="Linux e Windows" src="https://img.shields.io/badge/plataformas-Linux%20%7C%20Windows-6f5af0">
   <img alt="Dados locais" src="https://img.shields.io/badge/dados-100%25%20locais-35b779">
 </p>
@@ -112,4 +112,4 @@ A interface foi inspirada na clareza, velocidade e linguagem visual do [t3.chat]
 
 ## Licença
 
-Distribuído sob a [GNU General Public License v3.0](LICENSE) (`GPL-3.0-only`). Copyright © 2026 Leonardo Vulczak.
+Distribuído sob a [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Copyright © 2026 Leonardo Vulczak.
