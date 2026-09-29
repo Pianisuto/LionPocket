@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Metro is only needed while developing. Release builds use the bundled JS. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

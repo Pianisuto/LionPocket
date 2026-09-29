@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Ícone do LionPocket" width="112" height="112">
+  <img src="apps/desktop/assets/icon.png" alt="Ícone do LionPocket" width="112" height="112">
 </p>
 
 <h1 align="center">LionPocket</h1>
@@ -51,6 +51,32 @@ O LionPocket não envia seus dados financeiros para servidores externos. O banco
 
 ## Desenvolvimento
 
+O repositório usa npm workspaces. A aplicação Electron está em `apps/desktop` e o domínio compartilhável em `packages/core`; a raiz contém o lockfile único e os comandos de desenvolvimento. O core reúne tipos de domínio, datas e cálculos financeiros, regras de cartão, competência mensal e prioridades de lançamentos. Sua API pública é exposta por `@lionpocket/core` e pelos subcaminhos `/types`, `/finance`, `/credit-cards` e `/transactions`.
+
+Os contratos de janela, atualização, IPC e importação de planilhas, assim como o SQLite e a interface, permanecem em `apps/desktop`. Os comandos da raiz compilam o core antes de iniciar, testar ou empacotar o desktop; `npm run build:core` também permite compilá-lo separadamente.
+
+### Android (base mobile)
+
+O app bare React Native está em `apps/mobile`. Ele salva lançamentos em `lionpocket.sqlite` dentro do armazenamento privado do Android. O schema e as migrations versionadas estão em `apps/mobile/src/db`; essa persistência é separada do SQLite do Electron. Nesta etapa há apenas cadastro e listagem de entradas e saídas, sem conta ou conexão com servidor. O mobile usa `@lionpocket/core` para tipos financeiros, conversão de centavos e regras de data.
+
+Pré-requisitos: Node.js 22.13+ (Node 24 também funciona), JDK 17 e Android Studio com SDK Platform 37, Build Tools 37.0.0, NDK 27.1.12297006 e um emulador ou aparelho com depuração USB. Configure `ANDROID_HOME` para o diretório do SDK. O projeto Android usa Gradle Wrapper; não é necessário instalar Gradle globalmente.
+
+```bash
+npm ci
+npm run mobile:start         # terminal 1: Metro
+npm run mobile:android       # terminal 2: compila, instala e abre no aparelho
+
+# APK de desenvolvimento sem precisar de aparelho
+npm run mobile:build:android
+
+# Verificações do workspace mobile
+npm run build:core
+npm run typecheck --workspace @lionpocket/mobile
+npm run lint --workspace @lionpocket/mobile
+```
+
+O APK de debug fica em `apps/mobile/android/app/build/outputs/apk/debug/`. Após alterar `packages/core`, rode `npm run build:core` e recarregue o Metro. O Metro observa a raiz do monorepo para encontrar o workspace e as dependências instaladas pelo npm na raiz. O módulo nativo `react-native-nitro-sqlite` é conectado automaticamente pelo React Native CLI; mudanças em dependências nativas exigem novo build Android.
+
 Requisitos:
 
 - Node.js 24 ou mais recente;
@@ -82,20 +108,24 @@ npm run make:linux
 npm run make
 ```
 
-O instalador do Windows também pode ser criado em um runner Windows pelo workflow [`build-windows.yml`](.github/workflows/build-windows.yml). Os artefatos gerados localmente ficam em `out/` e não fazem parte do repositório.
+Os artefatos gerados localmente ficam em `apps/desktop/out/` e não fazem parte do repositório. O workflow [`release.yml`](.github/workflows/release.yml) compila as versões para Windows e Linux.
 
 ### Publicação de versões
 
-O workflow [`release.yml`](.github/workflows/release.yml) é disparado por tags `v*`. Ele valida testes, tipos e lint, confere se a tag corresponde à versão do `package.json`, compila Windows e Linux, anexa os binários à mesma GitHub Release, gera `SHA256SUMS.txt` e só então publica a versão.
+O workflow [`release.yml`](.github/workflows/release.yml) é disparado por tags `v*`. Ele valida testes, tipos e lint, confere se a tag corresponde à versão de `apps/desktop/package.json`, compila Windows e Linux, anexa os binários à mesma GitHub Release, gera `SHA256SUMS.txt` e só então publica a versão.
 
 Para uma atualização pequena:
 
 ```bash
-npm version patch
+npm version patch --workspace apps/desktop
+version="$(node -p "require('./apps/desktop/package.json').version")"
+git add apps/desktop/package.json package-lock.json
+git commit -m "Release v$version"
+git tag "v$version"
 git push origin main --follow-tags
 ```
 
-Use `npm version minor` ou `npm version major` quando a mudança justificar. A Release permanece como rascunho se algum build falhar, evitando publicar uma versão incompleta.
+Use `npm version minor --workspace apps/desktop` ou `npm version major --workspace apps/desktop` quando a mudança justificar. O comando com `--workspace` atualiza a versão e o lockfile, mas não cria commit nem tag. A Release permanece como rascunho se algum build falhar, evitando publicar uma versão incompleta.
 
 No Windows, o workflow também publica `RELEASES` e o pacote `.nupkg` gerados pelo Squirrel.Windows. Esses arquivos são usados pelo atualizador automático junto com o serviço público do Electron.
 

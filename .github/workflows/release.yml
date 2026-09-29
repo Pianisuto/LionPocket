@@ -7,7 +7,8 @@ on:
     tags:
       - 'v*'
     paths:
-      - package.json
+      - apps/desktop/package.json
+      - package-lock.json
       - .github/workflows/release.yml
 
 permissions:
@@ -43,11 +44,11 @@ jobs:
         id: release-context
         shell: bash
         run: |
-          package_version="$(node -p "require('./package.json').version")"
+          package_version="$(node -p "require('./apps/desktop/package.json').version")"
           release_tag="v$package_version"
 
           if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$release_tag" ]]; then
-            echo "A tag $GITHUB_REF_NAME não corresponde à versão $package_version do package.json." >&2
+            echo "A tag $GITHUB_REF_NAME não corresponde à versão $package_version de apps/desktop/package.json." >&2
             exit 1
           fi
 
@@ -123,10 +124,10 @@ jobs:
         shell: pwsh
         run: |
           $assets = @(
-            "out/make/squirrel.windows/x64/LionPocket-Instalador.exe"
-            (Get-ChildItem "out/make/squirrel.windows/x64/*.nupkg").FullName
-            "out/make/squirrel.windows/x64/RELEASES"
-            (Get-ChildItem "out/make/zip/win32/x64/*.zip").FullName
+            "apps/desktop/out/make/squirrel.windows/x64/LionPocket-Instalador.exe"
+            (Get-ChildItem "apps/desktop/out/make/squirrel.windows/x64/*.nupkg").FullName
+            "apps/desktop/out/make/squirrel.windows/x64/RELEASES"
+            (Get-ChildItem "apps/desktop/out/make/zip/win32/x64/*.zip").FullName
           )
 
           foreach ($asset in $assets) {
@@ -162,8 +163,8 @@ jobs:
         shell: bash
         run: |
           gh release upload "$RELEASE_TAG" \
-            out/make/deb/x64/*.deb \
-            out/make/zip/linux/x64/*.zip \
+            apps/desktop/out/make/deb/x64/*.deb \
+            apps/desktop/out/make/zip/linux/x64/*.zip \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 

@@ -90,3 +90,16 @@ typings/
 
 # Electron-Forge
 out/
+
+# Shared TypeScript workspace output
+packages/core/dist/
+
+# React Native / Android
+apps/mobile/android/.gradle/
+apps/mobile/android/.kotlin/
+apps/mobile/android/local.properties
+apps/mobile/android/app/.cxx/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+*.jsbundle
+.metro-health-check*
