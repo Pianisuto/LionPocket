@@ -24,18 +24,16 @@ import type {
 } from '@lionpocket/core/types';
 import {
   addDays,
-  addInterval,
   addMonths,
   calculateGoal,
-  cardStatementDueDate,
   currentMonthIso,
   dateForMonthDay,
   fromCents,
   monthRange,
-  nextCardDueDate,
   toCents,
   todayIso,
 } from '@lionpocket/core/finance';
+import { fixedRecurringDates, planInstallmentUpdate, recurringEffectiveDate, recurringOccurrence, rollingRecurringDates, type RecurringSchedule } from '@lionpocket/core/planning';
 import { expenseCountsInMonth } from '@lionpocket/core/transactions';
 
 type Row = Record<string, string | number | null>;
@@ -617,53 +615,26 @@ export class LionPocketDatabase {
     return { count: Math.max(1, Math.round(Number(item.interval_count) || 1)), unit };
   }
 
-  private recurringOccurrence(item: Row, scheduledDate: string) {
-    if (item.card_id) {
-      const purchaseDate = scheduledDate;
-      const cardDueDay = Number(item.cardDueDay ?? item.due_day);
-      const dueDate = item.cardClosingDay === null
-        ? nextCardDueDate(purchaseDate, cardDueDay)
-        : cardStatementDueDate(purchaseDate, Number(item.cardClosingDay), cardDueDay);
-      return { purchaseDate, dueDate, cardId: String(item.card_id) };
-    }
+  private recurringSchedule(item: Row): RecurringSchedule {
+    const interval = this.recurringInterval(item);
     return {
-      purchaseDate: null,
-      dueDate: scheduledDate,
-      cardId: null,
+      startMonth: String(item.start_month), startDate: this.recurringStartDate(item),
+      frequency: this.recurringFrequency(item), intervalCount: interval.count,
+      intervalUnit: interval.unit, anchorToActual: Boolean(item.anchor_to_actual),
+      manualMonths: String(item.manual_months ?? '').split(',').filter((m) => /^(0[1-9]|1[0-2])$/.test(m)),
+      dueDay: Number(item.due_day), chargeDay: item.charge_day === null ? null : Number(item.charge_day),
+      cardId: item.card_id ? String(item.card_id) : null,
     };
   }
 
+  private recurringOccurrence(item: Row, scheduledDate: string) {
+    return recurringOccurrence({ cardId: item.card_id ? String(item.card_id) : null, dueDay: Number(item.due_day) },
+      scheduledDate, { dueDay: Number(item.cardDueDay ?? item.due_day),
+        closingDay: item.cardClosingDay === null ? null : Number(item.cardClosingDay) });
+  }
+
   private fixedRecurringDates(item: Row, rangeStart: string, rangeEnd: string) {
-    const frequency = this.recurringFrequency(item);
-    if (frequency === 'manual') {
-      const day = item.card_id && item.charge_day !== null ? Number(item.charge_day) : Number(item.due_day);
-      const selectedMonths = new Set(String(item.manual_months ?? '')
-        .split(',')
-        .filter((month) => /^(0[1-9]|1[0-2])$/.test(month)));
-      const dates: string[] = [];
-      let month = `${rangeStart.slice(0, 7)}-01`;
-      while (month < rangeEnd) {
-        const monthIso = month.slice(0, 7);
-        if (
-          monthIso >= String(item.start_month)
-          && selectedMonths.has(monthIso.slice(5, 7))
-        ) dates.push(dateForMonthDay(monthIso, day));
-        month = addMonths(month, 1);
-      }
-      return dates;
-    }
-    const firstDate = this.recurringStartDate(item);
-    if (frequency === 'once') return firstDate >= rangeStart && firstDate < rangeEnd ? [firstDate] : [];
-    const interval = this.recurringInterval(item);
-    const dates: string[] = [];
-    // Cada passo parte da âncora original. Assim, 31/jan continua virando
-    // 31/mar depois do ajuste natural para 28/fev, sem acumular esse corte.
-    for (let occurrence = 0; ; occurrence += 1) {
-      const date = addInterval(firstDate, occurrence * interval.count, interval.unit);
-      if (date >= rangeEnd) break;
-      if (date >= rangeStart) dates.push(date);
-    }
-    return dates;
+    return fixedRecurringDates(this.recurringSchedule(item), rangeStart, rangeEnd);
   }
 
   ensureRecurringForMonth(month: string) {
@@ -703,30 +674,17 @@ export class LionPocketDatabase {
       const candidateStart = item.card_id ? addDays(start, -70) : start;
       let scheduledDates: string[];
       if (frequency === 'custom' && Boolean(item.anchor_to_actual)) {
-        const interval = this.recurringInterval(item);
         const history = this.db.prepare(`
           SELECT purchase_date AS purchaseDate, due_date AS dueDate,
             settled_date AS settledDate, status
           FROM transactions
           WHERE source_type = 'recurring' AND source_id = ?
         `).all(item.id) as unknown as Row[];
-        const effectiveDates = history.map((transaction) => {
-          if (item.card_id && transaction.purchaseDate) return String(transaction.purchaseDate);
-          if (
-            (transaction.status === 'paid' || transaction.status === 'received')
-            && transaction.settledDate
-          ) return String(transaction.settledDate);
-          return String(transaction.dueDate);
-        });
-        const sortedEffectiveDates = effectiveDates.sort();
-        let nextDate = sortedEffectiveDates.length
-          ? addInterval(sortedEffectiveDates[sortedEffectiveDates.length - 1], interval.count, interval.unit)
-          : this.recurringStartDate(item);
-        scheduledDates = [];
-        while (nextDate < end) {
-          if (nextDate >= candidateStart) scheduledDates.push(nextDate);
-          nextDate = addInterval(nextDate, interval.count, interval.unit);
-        }
+        scheduledDates = rollingRecurringDates(this.recurringSchedule(item), history.map((transaction) => ({
+          purchaseDate: transaction.purchaseDate ? String(transaction.purchaseDate) : null,
+          dueDate: String(transaction.dueDate), settledDate: transaction.settledDate ? String(transaction.settledDate) : null,
+          status: transaction.status as TransactionStatus,
+        })), candidateStart, end);
       } else {
         scheduledDates = this.fixedRecurringDates(item, candidateStart, end);
       }
@@ -1009,11 +967,10 @@ export class LionPocketDatabase {
         AND r.frequency = 'custom' AND r.anchor_to_actual = 1
     `).get(transactionId) as Row | undefined;
     if (!row) return;
-    const effectiveDate = row.recurringCardId && row.purchaseDate
-      ? String(row.purchaseDate)
-      : (row.status === 'paid' || row.status === 'received') && row.settledDate
-        ? String(row.settledDate)
-        : String(row.dueDate);
+    const effectiveDate = recurringEffectiveDate({ cardId: row.recurringCardId ? String(row.recurringCardId) : null }, {
+      purchaseDate: row.purchaseDate ? String(row.purchaseDate) : null, dueDate: String(row.dueDate),
+      settledDate: row.settledDate ? String(row.settledDate) : null, status: row.status as TransactionStatus,
+    });
     this.db.prepare(`
       DELETE FROM transactions
       WHERE source_type = 'recurring' AND source_id = ? AND id != ?
@@ -1616,56 +1573,26 @@ export class LionPocketDatabase {
 
     const timestamp = now();
     const cents = toCents(input.installmentAmount) ?? 0;
-    const totalInstallments = Math.round(input.totalInstallments);
-    const currentInstallment = Math.round(input.currentInstallment);
-    const startingInstallment = Number(purchase.startingInstallment);
-    const originalCurrentInstallment = Math.round(input.originalCurrentInstallment ?? currentInstallment);
-    const installmentNumberShift = currentInstallment - originalCurrentInstallment;
-    const correctedStartingInstallment = startingInstallment + installmentNumberShift;
     const description = input.description.trim();
     if (!description) throw new Error('Informe a descrição da compra.');
     if (cents < 1) throw new Error('Informe um valor de parcela maior que zero.');
-    if (
-      correctedStartingInstallment < 1
-      || totalInstallments < correctedStartingInstallment
-      || currentInstallment < correctedStartingInstallment
-      || currentInstallment > totalInstallments
-    ) {
-      throw new Error('Informe uma parcela entre 1 e o total da compra.');
-    }
-
     const transactions = this.db.prepare(`
       SELECT id, installment_number AS installmentNumber, due_date AS dueDate, status
-      FROM transactions
-      WHERE source_type = 'installment' AND source_id = ? AND deleted_at IS NULL
+      FROM transactions WHERE source_type = 'installment' AND source_id = ? AND deleted_at IS NULL
       ORDER BY installment_number
     `).all(input.id) as unknown as Row[];
+    const plan = planInstallmentUpdate(input, Number(purchase.startingInstallment), transactions.map((transaction) => ({
+      id: String(transaction.id), installmentNumber: Number(transaction.installmentNumber),
+      dueDate: String(transaction.dueDate), status: transaction.status as TransactionStatus,
+    })));
+    const totalInstallments = plan.total;
+    const currentInstallment = Math.round(input.currentInstallment);
+    const installmentNumberShift = plan.shift;
+    const correctedStartingInstallment = plan.starting;
+    const firstDueDate = plan.firstDueDate;
     const shiftedTransactions: Array<Row & { installmentNumber: number }> = transactions.map((transaction) => ({
-      ...transaction,
-      installmentNumber: Number(transaction.installmentNumber) + installmentNumberShift,
+      ...transaction, installmentNumber: Number(transaction.installmentNumber) + plan.shift,
     }));
-    const highestFinalized = shiftedTransactions.reduce((highest, transaction) =>
-      transaction.status !== 'planned'
-        ? Math.max(highest, Number(transaction.installmentNumber))
-        : highest, 0);
-    if (totalInstallments < highestFinalized) {
-      throw new Error(`O total não pode ser menor que a parcela ${highestFinalized}, que já foi concluída.`);
-    }
-
-    const firstDueDate = addMonths(input.currentDueDate, -(currentInstallment - 1));
-    const finalizedDates = new Set(
-      shiftedTransactions
-        .filter((transaction) => transaction.status !== 'planned')
-        .map((transaction) => String(transaction.dueDate)),
-    );
-    for (let installment = correctedStartingInstallment; installment <= totalInstallments; installment += 1) {
-      const existing = shiftedTransactions.find((transaction) => Number(transaction.installmentNumber) === installment);
-      if (existing?.status !== 'planned') continue;
-      const dueDate = addMonths(firstDueDate, installment - 1);
-      if (finalizedDates.has(dueDate)) {
-        throw new Error('O novo calendário coincide com uma parcela já concluída. Ajuste a parcela atual ou a data da compra.');
-      }
-    }
 
     this.db.exec('BEGIN');
     try {

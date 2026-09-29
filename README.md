@@ -55,9 +55,9 @@ O repositório usa npm workspaces. A aplicação Electron está em `apps/desktop
 
 Os contratos de janela, atualização, IPC e importação de planilhas, assim como o SQLite e a interface, permanecem em `apps/desktop`. Os comandos da raiz compilam o core antes de iniciar, testar ou empacotar o desktop; `npm run build:core` também permite compilá-lo separadamente.
 
-### Android (base mobile)
+### Android
 
-O app bare React Native está em `apps/mobile`. Ele salva lançamentos em `lionpocket.sqlite` dentro do armazenamento privado do Android. O schema e as migrations versionadas estão em `apps/mobile/src/db`; essa persistência é separada do SQLite do Electron. Nesta etapa há apenas cadastro e listagem de entradas e saídas, sem conta ou conexão com servidor. O mobile usa `@lionpocket/core` para tipos financeiros, conversão de centavos e regras de data.
+O app bare React Native está em `apps/mobile`. Ele salva lançamentos em `lionpocket.sqlite` dentro do armazenamento privado do Android. O schema e as migrations versionadas estão em `apps/mobile/src/db`; essa persistência é separada do SQLite do Electron. O painel mensal apresenta entradas e saídas planejadas e realizadas, saldo projetado e saldo realizado. É possível criar, editar, excluir com confirmação e pagar/receber lançamentos; filtrar por tipo e situação; associar e gerenciar categorias, formas de pagamento e cartões. O planejamento inclui recorrências de entradas e saídas (únicas, semanais, mensais, personalizadas e por meses escolhidos), compras parceladas com correção da série e progresso, objetivos financeiros e conclusão de lançamentos/faturas em lote. O mobile usa `@lionpocket/core` para validações, competência mensal, cálculos em centavos, ciclo do cartão, geração de recorrências, correção de parcelas e progresso de objetivos. Continua funcionando offline, sem conta ou servidor.
 
 Pré-requisitos: Node.js 22.13+ (Node 24 também funciona), JDK 17 e Android Studio com SDK Platform 37, Build Tools 37.0.0, NDK 27.1.12297006 e um emulador ou aparelho com depuração USB. Configure `ANDROID_HOME` para o diretório do SDK. O projeto Android usa Gradle Wrapper; não é necessário instalar Gradle globalmente.
 
@@ -68,14 +68,20 @@ npm run mobile:android       # terminal 2: compila, instala e abre no aparelho
 
 # APK de desenvolvimento sem precisar de aparelho
 npm run mobile:build:android
+npm run mobile:build:android:release # APK com JavaScript embutido, sem Metro
 
 # Verificações do workspace mobile
 npm run build:core
 npm run typecheck --workspace @lionpocket/mobile
 npm run lint --workspace @lionpocket/mobile
+npm run test --workspace @lionpocket/mobile
 ```
 
-O APK de debug fica em `apps/mobile/android/app/build/outputs/apk/debug/`. Após alterar `packages/core`, rode `npm run build:core` e recarregue o Metro. O Metro observa a raiz do monorepo para encontrar o workspace e as dependências instaladas pelo npm na raiz. O módulo nativo `react-native-nitro-sqlite` é conectado automaticamente pelo React Native CLI; mudanças em dependências nativas exigem novo build Android.
+O APK release inclui o JavaScript e fica em `apps/mobile/android/app/build/outputs/apk/release/`. A configuração atual usa a chave de desenvolvimento também em release; configure uma chave própria antes de distribuir. O APK de debug fica em `apps/mobile/android/app/build/outputs/apk/debug/`. Após alterar `packages/core`, rode `npm run build:core` e recarregue o Metro. O Metro observa a raiz do monorepo para encontrar o workspace e as dependências instaladas pelo npm na raiz. O módulo nativo `react-native-nitro-sqlite` é conectado automaticamente pelo React Native CLI; mudanças em dependências nativas exigem novo build Android.
+
+As migrations são aditivas e transacionais: a versão 2 acrescenta cadastros e vínculos opcionais; a versão 3 acrescenta planejamento e identidade de ocorrências sem recriar a tabela de lançamentos. Os registros da base anterior permanecem disponíveis. Exclusões são lógicas; consultas e totais ignoram registros excluídos. Os testes mobile usam o SQLite nativo do Node (`node:sqlite`), inclusive para atualizar um banco da versão 1 e verificar rollback. Use Node 22.13+ ou 24 para essas verificações.
+
+Consulte [o roteiro de uso diário](docs/mobile-daily-finance.md) e [as regras e a validação do planejamento](docs/mobile-planning.md). O botão **Hoje** retorna ao mês atual; deslizar a lista para baixo atualiza os dados locais. Datas são preenchidas no formato `AAAA-MM-DD` e valores aceitam vírgula ou ponto decimal (ex.: `125,50`).
 
 Requisitos:
 

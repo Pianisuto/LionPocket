@@ -2,7 +2,7 @@ import type { Transaction } from './types';
 import { currentMonthIso } from './finance';
 
 /** A competência de uma despesa considera pagamentos e pendências carregadas adiante. */
-export const expenseCountsInMonth = (transaction: Transaction, month: string) => {
+export const expenseCountsInMonth = (transaction: Transaction, month: string, currentMonth = currentMonthIso()) => {
   if (transaction.kind !== 'expense' || transaction.status === 'cancelled') return false;
   if (transaction.status === 'paid') {
     return (transaction.settledDate ?? transaction.dueDate).slice(0, 7) === month;
@@ -10,7 +10,7 @@ export const expenseCountsInMonth = (transaction: Transaction, month: string) =>
   if (transaction.status !== 'planned') return transaction.dueDate.slice(0, 7) === month;
   const dueMonth = transaction.dueDate.slice(0, 7);
   if (dueMonth === month) {
-    return !(transaction.isOverdue && month < currentMonthIso());
+    return !(transaction.isOverdue && month < currentMonth);
   }
   return transaction.isOverdue && dueMonth < month;
 };

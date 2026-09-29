@@ -18,6 +18,7 @@
     "icons": "npm run icons --workspace apps/desktop",
     "lint": "npm run lint --workspace @lionpocket/core && npm run lint --workspace apps/desktop && npm run lint --workspace @lionpocket/mobile",
     "typecheck": "npm run build:core && npm run typecheck --workspace apps/desktop && npm run typecheck --workspace @lionpocket/mobile",
-    "test": "npm run build:core && npm run test --workspace @lionpocket/core && npm run test --workspace apps/desktop && npm run test --workspace @lionpocket/mobile"
+    "test": "npm run build:core && npm run test --workspace @lionpocket/core && npm run test --workspace apps/desktop && npm run test --workspace @lionpocket/mobile",
+    "mobile:build:android:release": "npm run build:core && npm run build:android:release --workspace @lionpocket/mobile"
   }
 }

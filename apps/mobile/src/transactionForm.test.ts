@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTransactionForm } from './transactionForm';
+import { parseMoney, parseTransactionForm } from './transactionForm';
 
 describe('cadastro mobile de lançamentos', () => {
   it('normaliza centavos e marca uma despesa antiga como paga na competência correta', () => {
@@ -23,7 +23,21 @@ describe('cadastro mobile de lançamentos', () => {
 
   it('rejeita valores e datas inválidos', () => {
     expect(() => parseTransactionForm('expense', 'Mercado', '0', '2026-09-29', false)).toThrow();
-    expect(() => parseTransactionForm('expense', 'Mercado', '12,999', '2026-09-29', false)).toThrow();
-    expect(() => parseTransactionForm('expense', 'Mercado', '12,50', '2026-02-30', false)).toThrow();
+    expect(() =>
+      parseTransactionForm('expense', 'Mercado', '12,999', '2026-09-29', false),
+    ).toThrow();
+    expect(() =>
+      parseTransactionForm('expense', 'Mercado', '12,50', '2026-02-30', false),
+    ).toThrow();
+  });
+});
+
+describe('valores do formulário', () => {
+  it('permite realizado zero sem permitir planejado zero', () => {
+    expect(parseMoney('0,00', true)).toBe(0);
+    expect(() => parseMoney('0')).toThrow();
+    expect(() => parseMoney('Infinity')).toThrow();
+    expect(() => parseMoney('9007199254740992')).toThrow();
+    expect(() => parseMoney('-10', true)).toThrow();
   });
 });

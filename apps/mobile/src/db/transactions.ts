@@ -1,103 +1,35 @@
-import { fromCents, toCents, todayIso } from '@lionpocket/core/finance';
-import type { Transaction, TransactionInput } from '@lionpocket/core/types';
-import { open, type NitroSQLiteConnection } from 'react-native-nitro-sqlite';
-import { migrate } from './migrations';
+import type {
+  CatalogInput,
+  GoalInput,
+  InstallmentPurchaseInput,
+  RecurringExpenseInput,
+  TransactionFilters,
+  TransactionInput,
+} from '@lionpocket/core';
+import { database } from './connection';
+import { MobileRepository } from './repository';
+const repository = async () => new MobileRepository(await database());
+export const listTransactions = async (filters: TransactionFilters) =>
+  (await repository()).list(filters);
+export const getCatalogs = async () => (await repository()).catalogs();
+export const createCatalog = async (input: CatalogInput) =>
+  (await repository()).createCatalog(input);
+export const saveTransaction = async (input: TransactionInput) => (await repository()).save(input);
+export const deleteTransaction = async (id: string) => (await repository()).remove(id);
+export const settleTransaction = async (id: string) => (await repository()).settle(id);
 
-type TransactionRow = {
-  id: string;
-  kind: Transaction['kind'];
-  description: string;
-  planned_amount_cents: number;
-  actual_amount_cents: number | null;
-  due_date: string;
-  settled_date: string | null;
-  status: Transaction['status'];
-  notes: string;
-};
-
-let databasePromise: Promise<NitroSQLiteConnection> | undefined;
-
-async function database(): Promise<NitroSQLiteConnection> {
-  if (!databasePromise) {
-    databasePromise = (async () => {
-      const db = open({ name: 'lionpocket.sqlite' });
-      await migrate(db);
-      return db;
-    })().catch(error => {
-      databasePromise = undefined;
-      throw error;
-    });
-  }
-  return databasePromise;
-}
-
-function fromRow(row: TransactionRow): Transaction {
-  return {
-    id: row.id,
-    kind: row.kind,
-    description: row.description,
-    categoryId: null,
-    categoryName: null,
-    categoryColor: null,
-    plannedAmount: fromCents(row.planned_amount_cents) ?? 0,
-    actualAmount: fromCents(row.actual_amount_cents),
-    purchaseDate: null,
-    dueDate: row.due_date,
-    settledDate: row.settled_date,
-    status: row.status,
-    paymentMethodId: null,
-    paymentMethodName: null,
-    cardId: null,
-    cardName: null,
-    notes: row.notes,
-    sourceType: 'manual',
-    sourceId: null,
-    installmentNumber: null,
-    installmentTotal: null,
-    isOverdue: row.status === 'planned' && row.due_date < todayIso(),
-    priorityPosition: null,
-  };
-}
-
-export async function listTransactions(): Promise<Transaction[]> {
-  const db = await database();
-  const { rows } = await db.executeAsync<TransactionRow>(
-    `SELECT id, kind, description, planned_amount_cents, actual_amount_cents,
-            due_date, settled_date, status, notes
-     FROM transactions
-     ORDER BY due_date DESC, created_at DESC, id DESC`,
-  );
-  return rows._array.map(fromRow);
-}
-
-export async function createTransaction(input: TransactionInput): Promise<void> {
-  const db = await database();
-  const plannedCents = toCents(input.plannedAmount);
-  const actualCents = toCents(input.actualAmount);
-  if (!plannedCents || plannedCents <= 0) {
-    throw new Error('Informe um valor maior que zero.');
-  }
-  const { rows } = await db.executeAsync<{ id: string }>(
-    'SELECT lower(hex(randomblob(16))) AS id',
-  );
-  const id = rows._array[0]?.id;
-  if (!id) throw new Error('Não foi possível gerar o identificador do lançamento.');
-
-  await db.executeAsync(
-    `INSERT INTO transactions
-      (id, kind, description, planned_amount_cents, actual_amount_cents,
-       due_date, settled_date, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      input.kind,
-      input.description.trim(),
-      plannedCents,
-      actualCents,
-      input.dueDate,
-      input.settledDate ?? null,
-      input.status,
-      input.notes ?? '',
-    ],
-  );
-}
+export const deleteCatalog = async (type: CatalogInput['type'], id: string) =>
+  (await repository()).removeCatalog(type, id);
+export const listRecurring = async () => (await repository()).listRecurring();
+export const saveRecurring = async (input: RecurringExpenseInput) =>
+  (await repository()).saveRecurring(input);
+export const deleteRecurring = async (id: string) => (await repository()).removeRecurring(id);
+export const listInstallments = async (month: string) =>
+  (await repository()).listInstallments(month);
+export const saveInstallment = async (input: InstallmentPurchaseInput) =>
+  (await repository()).saveInstallment(input);
+export const deleteInstallment = async (id: string) => (await repository()).removeInstallment(id);
+export const listGoals = async () => (await repository()).listGoals();
+export const saveGoal = async (input: GoalInput) => (await repository()).saveGoal(input);
+export const deleteGoal = async (id: string) => (await repository()).removeGoal(id);
+export const settleTransactions = async (ids: string[]) => (await repository()).settleMany(ids);

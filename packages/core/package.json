@@ -25,6 +25,10 @@
     "./transactions": {
       "types": "./dist/transactions.d.ts",
       "default": "./dist/transactions.js"
+    },
+    "./planning": {
+      "types": "./dist/planning.d.ts",
+      "default": "./dist/planning.js"
     }
   },
   "scripts": {

@@ -1,6 +1,6 @@
 import type { NitroSQLiteConnection } from 'react-native-nitro-sqlite';
 
-const migrations: ReadonlyArray<ReadonlyArray<string>> = [
+export const migrations: ReadonlyArray<ReadonlyArray<string>> = [
   [
     `CREATE TABLE transactions (
       id TEXT PRIMARY KEY NOT NULL,
@@ -16,6 +16,76 @@ const migrations: ReadonlyArray<ReadonlyArray<string>> = [
     )`,
     'CREATE INDEX transactions_due_date_idx ON transactions (due_date DESC, created_at DESC)',
   ],
+  [
+    `CREATE TABLE categories (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('income', 'expense')), color TEXT NOT NULL,
+      UNIQUE(name, kind))`,
+    `CREATE TABLE payment_methods (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL UNIQUE)`,
+    `CREATE TABLE cards (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL UNIQUE,
+      due_day INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 31),
+      closing_day INTEGER CHECK (closing_day BETWEEN 1 AND 31))`,
+    'ALTER TABLE transactions ADD COLUMN category_id TEXT REFERENCES categories(id)',
+    'ALTER TABLE transactions ADD COLUMN payment_method_id TEXT REFERENCES payment_methods(id)',
+    'ALTER TABLE transactions ADD COLUMN card_id TEXT REFERENCES cards(id)',
+    'ALTER TABLE transactions ADD COLUMN purchase_date TEXT',
+    'ALTER TABLE transactions ADD COLUMN updated_at TEXT',
+    'ALTER TABLE transactions ADD COLUMN deleted_at TEXT',
+    `INSERT INTO categories VALUES
+      ('cat-food', 'Alimentação', 'expense', '#f5b65b'),
+      ('cat-home', 'Moradia', 'expense', '#8f8bff'),
+      ('cat-transport', 'Transporte', 'expense', '#73b9ff'),
+      ('cat-health', 'Saúde', 'expense', '#ed82ab'),
+      ('cat-leisure', 'Lazer', 'expense', '#9fdb89'),
+      ('cat-other-expense', 'Outras saídas', 'expense', '#aaaebc'),
+      ('cat-salary', 'Salário', 'income', '#69d4b0'),
+      ('cat-other-income', 'Outras entradas', 'income', '#73b9ff')`,
+    `INSERT INTO payment_methods VALUES
+      ('payment-pix', 'Pix'), ('payment-cash', 'Dinheiro'), ('payment-debit', 'Débito'),
+      ('payment-credit', 'Cartão de crédito'), ('payment-boleto', 'Boleto'),
+      ('payment-transfer', 'Transferência')`,
+    'CREATE INDEX transactions_status_idx ON transactions (status, due_date)',
+  ],
+  [
+    "ALTER TABLE transactions ADD COLUMN source_type TEXT NOT NULL DEFAULT 'manual'",
+    'ALTER TABLE transactions ADD COLUMN source_id TEXT',
+    'ALTER TABLE transactions ADD COLUMN installment_number INTEGER',
+    'ALTER TABLE transactions ADD COLUMN installment_total INTEGER',
+    // Stable identity survives changing the due date of an individual occurrence.
+    'ALTER TABLE transactions ADD COLUMN occurrence_date TEXT',
+    `CREATE TABLE recurring_expenses (
+      id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('income', 'expense')),
+      active INTEGER NOT NULL DEFAULT 1, description TEXT NOT NULL,
+      start_month TEXT NOT NULL, start_date TEXT NOT NULL, frequency TEXT NOT NULL,
+      interval_count INTEGER NOT NULL DEFAULT 1, interval_unit TEXT NOT NULL DEFAULT 'months',
+      anchor_to_actual INTEGER NOT NULL DEFAULT 0, manual_months TEXT NOT NULL DEFAULT '',
+      category_id TEXT REFERENCES categories(id), payment_method_id TEXT REFERENCES payment_methods(id),
+      card_id TEXT REFERENCES cards(id), planned_amount_cents INTEGER NOT NULL CHECK(planned_amount_cents > 0),
+      due_day INTEGER NOT NULL, charge_day INTEGER, notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT, deleted_at TEXT
+    )`,
+    `CREATE TABLE installment_purchases (
+      id TEXT PRIMARY KEY NOT NULL, description TEXT NOT NULL,
+      category_id TEXT REFERENCES categories(id), payment_method_id TEXT REFERENCES payment_methods(id),
+      card_id TEXT REFERENCES cards(id), installment_amount_cents INTEGER NOT NULL CHECK(installment_amount_cents > 0),
+      total_installments INTEGER NOT NULL CHECK(total_installments > 0), starting_installment INTEGER NOT NULL DEFAULT 1,
+      purchase_date TEXT, first_due_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+      notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT, deleted_at TEXT
+    )`,
+    `CREATE TABLE goals (
+      id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, item_model TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '',
+      category_id TEXT REFERENCES categories(id), target_amount_cents INTEGER NOT NULL CHECK(target_amount_cents > 0),
+      saved_amount_cents INTEGER NOT NULL CHECK(saved_amount_cents >= 0), priority TEXT NOT NULL, due_date TEXT,
+      status TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT, deleted_at TEXT
+    )`,
+    `CREATE UNIQUE INDEX transactions_generated_due_unique ON transactions(source_type, source_id, due_date)
+      WHERE source_type != 'recurring' AND source_id IS NOT NULL AND deleted_at IS NULL`,
+    `CREATE UNIQUE INDEX transactions_recurring_effective_unique ON transactions(source_id, COALESCE(purchase_date, due_date))
+      WHERE source_type = 'recurring' AND source_id IS NOT NULL AND deleted_at IS NULL`,
+    `CREATE UNIQUE INDEX transactions_recurring_occurrence_unique ON transactions(source_id, occurrence_date)
+      WHERE source_type = 'recurring' AND occurrence_date IS NOT NULL`,
+    'CREATE INDEX transactions_source_idx ON transactions(source_type, source_id)',
+  ],
 ];
 
 export async function migrate(db: NitroSQLiteConnection): Promise<void> {
@@ -26,7 +96,7 @@ export async function migrate(db: NitroSQLiteConnection): Promise<void> {
   }
 
   for (let index = currentVersion; index < migrations.length; index += 1) {
-    await db.transaction(async tx => {
+    await db.transaction(async (tx) => {
       for (const statement of migrations[index]) {
         await tx.executeAsync(statement);
       }
