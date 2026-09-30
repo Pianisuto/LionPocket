@@ -194,11 +194,18 @@ export class MobileRepository extends PlanningRepository {
           [...values, id],
         );
         if (!result.rowsAffected) throw new Error('Cadastro não encontrado.');
-      } else
+      } else {
+        const insertColumns =
+          input.type === 'category'
+            ? 'id, name, kind, color'
+            : input.type === 'card'
+              ? 'id, name, due_day, closing_day'
+              : 'id, name';
         await tx.executeAsync(
-          `INSERT INTO ${table} VALUES (?, ${values.map(() => '?').join(',')})`,
+          `INSERT INTO ${table} (${insertColumns}) VALUES (?, ${values.map(() => '?').join(',')})`,
           [id, ...values],
         );
+      }
     });
   }
 

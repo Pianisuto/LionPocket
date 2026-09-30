@@ -1,0 +1,41 @@
+{
+  "warning": "PUBLIC TEST KEYS / FIXED NONCE: NEVER USE IN AN APPLICATION",
+  "suite": "lp-sodium-v1",
+  "referenceLibsodium": "1.0.18",
+  "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "signSeedHex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+  "signPublicKeyHex": "2543b92ff1095511476adc8369db6ddc933665a11978dda1404ee1066ca9559d",
+  "boxSeedHex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+  "boxPublicKeyHex": "e240f142b821efa128c8a1b1ee98c5c2d0d6186429edeedd3cccde89f7bf754a",
+  "boxSecretKeyHex": "db37bddf3a71712960db96d3a4bdc43ea7d7ebb89680c0d374d27733cfe9bccc",
+  "plaintextCanonical": "{\"action\":\"put\",\"authoredAt\":\"2026-09-30T12:00:00.000Z\",\"dependencies\":[],\"domainSchema\":1,\"entityType\":\"transaction\",\"provenance\":{\"legacyCreatedAt\":null,\"legacyDeletedAt\":null,\"legacyUpdatedAt\":null,\"localScopeId\":\"00000000-0000-4000-8000-000000000009\",\"origin\":\"local\"},\"restoredFrom\":null,\"snapshot\":{\"actualAmountCents\":0,\"cardId\":null,\"categoryId\":null,\"description\":\"Café 🦁\",\"dueDate\":\"2026-09-30\",\"installmentNumber\":null,\"installmentTotal\":null,\"kind\":\"expense\",\"notes\":\"á\\nzero ≠ null\",\"occurrenceDate\":null,\"paymentMethodId\":null,\"plannedAmountCents\":1234,\"purchaseDate\":null,\"settledDate\":\"2026-09-30\",\"source\":{\"type\":\"manual\"},\"status\":\"paid\"}}",
+  "aadCanonical": "{\"context\":\"LionPocket/operation/v1\",\"header\":{\"commitId\":\"00000000-0000-4000-8000-000000000005\",\"cryptoSuite\":\"lp-sodium-v1\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"deviceRegistryVersion\":\"1\",\"deviceSeq\":\"9007199254740993\",\"keyVersion\":1,\"protocolVersion\":1,\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"},\"operation\":{\"nonce\":\"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3\",\"objectId\":\"00000000-0000-4000-8000-000000000007\",\"opId\":\"00000000-0000-4000-8000-000000000006\",\"parents\":[\"00000000-0000-4000-8000-000000000008\"]},\"operationCount\":1,\"operationIndex\":0}",
+  "signingCanonical": "{\"commit\":{\"commitId\":\"00000000-0000-4000-8000-000000000005\",\"cryptoSuite\":\"lp-sodium-v1\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"deviceRegistryVersion\":\"1\",\"deviceSeq\":\"9007199254740993\",\"keyVersion\":1,\"operations\":[{\"ciphertext\":\"ZnssqA9ee-UahHLNPTMj_R80pEi3_HTQhSAoCzUb2DIDdw1y-M4VPgaVB3SNoQw0Wf2d-9yd3_jy9Bd_GbZbTEs0SJYw7DsoRgbviNJuWcZaNI2-V5Q6i6jjKHPdTBscjlJ7VzCwA5yLOlsuIAi46vXvL5Khin9z5M-4n2YVYjK8fUSY53Ebz0nuZv7-Q-sdLqCtZq6kWYwmYVAVgBPbPaeAsQKXN54TKBF26z41RPgXI27ydCFpHab9M5B6EPFIaOLIyD1RGTjKXPUcJKSw2IlMGA8XJQaR9CyajVrUXs2CDt0Zh0X0dp7Lpx9gCuHB-DwCzT3HrSgrXmLfkr5x7pQNt5B1x3rHr_Vqz41oeWE4SWglVwZ4zxLuruPCST2kNUK70ACbVBGTWIRVZIRsE8Pt8Cukr1VsKrkAecy4tzyZGngvhv2CvSWBO12gKYLKKTwfJVYk1X93PXuKd1hv3XRiKfu0gdIxPnJCKSclg65-kXbEZI6pzr0GjKKki0F0Hk_M1TGLqtLS2Pmq6w1b3JnXv7zwWzJeZYyoaxyWvZWMq_OUWHhEkjUsQP2OWMps6McUPQe3CE_ScQEGmgZPDXGpr8M58yO2QojfeUb-_VdY06ftBtljJOF-Ur5uxx0gP_xVRAJIAS29ebPzLgwXWxCw_4-4ppO6k83WvPkmOPo4SXMWJJQZXEOABpxGGyQTvbUpzUbLJ2MEGkEQe9An8B4ZTjTPo8EuhOQyppLa67u36qw1iSnbA3R3SIi1WgNi6boZqeeRWRLv4hhkQtqpvOPu8use8G8_RuKvRiWm-BQKHbsyrWR7pYPH2Er6o0mpA1A65WVdULHSBTw1GeG8I9mMr6_YrM1pqupA6fCRCjB_lWi0uXrbifqExNvpvEiKTRAb7Pm-XFsP\",\"nonce\":\"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3\",\"objectId\":\"00000000-0000-4000-8000-000000000007\",\"opId\":\"00000000-0000-4000-8000-000000000006\",\"parents\":[\"00000000-0000-4000-8000-000000000008\"]}],\"protocolVersion\":1,\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"},\"context\":\"LionPocket/commit/v1\"}",
+  "envelope": {
+    "protocolVersion": 1,
+    "serverId": "00000000-0000-4000-8000-000000000001",
+    "serverEpoch": "00000000-0000-4000-8000-000000000002",
+    "vaultId": "00000000-0000-4000-8000-000000000003",
+    "deviceId": "00000000-0000-4000-8000-000000000004",
+    "deviceSeq": "9007199254740993",
+    "commitId": "00000000-0000-4000-8000-000000000005",
+    "keyVersion": 1,
+    "deviceRegistryVersion": "1",
+    "cryptoSuite": "lp-sodium-v1",
+    "operations": [
+      {
+        "opId": "00000000-0000-4000-8000-000000000006",
+        "objectId": "00000000-0000-4000-8000-000000000007",
+        "parents": [
+          "00000000-0000-4000-8000-000000000008"
+        ],
+        "nonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3",
+        "ciphertext": "ZnssqA9ee-UahHLNPTMj_R80pEi3_HTQhSAoCzUb2DIDdw1y-M4VPgaVB3SNoQw0Wf2d-9yd3_jy9Bd_GbZbTEs0SJYw7DsoRgbviNJuWcZaNI2-V5Q6i6jjKHPdTBscjlJ7VzCwA5yLOlsuIAi46vXvL5Khin9z5M-4n2YVYjK8fUSY53Ebz0nuZv7-Q-sdLqCtZq6kWYwmYVAVgBPbPaeAsQKXN54TKBF26z41RPgXI27ydCFpHab9M5B6EPFIaOLIyD1RGTjKXPUcJKSw2IlMGA8XJQaR9CyajVrUXs2CDt0Zh0X0dp7Lpx9gCuHB-DwCzT3HrSgrXmLfkr5x7pQNt5B1x3rHr_Vqz41oeWE4SWglVwZ4zxLuruPCST2kNUK70ACbVBGTWIRVZIRsE8Pt8Cukr1VsKrkAecy4tzyZGngvhv2CvSWBO12gKYLKKTwfJVYk1X93PXuKd1hv3XRiKfu0gdIxPnJCKSclg65-kXbEZI6pzr0GjKKki0F0Hk_M1TGLqtLS2Pmq6w1b3JnXv7zwWzJeZYyoaxyWvZWMq_OUWHhEkjUsQP2OWMps6McUPQe3CE_ScQEGmgZPDXGpr8M58yO2QojfeUb-_VdY06ftBtljJOF-Ur5uxx0gP_xVRAJIAS29ebPzLgwXWxCw_4-4ppO6k83WvPkmOPo4SXMWJJQZXEOABpxGGyQTvbUpzUbLJ2MEGkEQe9An8B4ZTjTPo8EuhOQyppLa67u36qw1iSnbA3R3SIi1WgNi6boZqeeRWRLv4hhkQtqpvOPu8use8G8_RuKvRiWm-BQKHbsyrWR7pYPH2Er6o0mpA1A65WVdULHSBTw1GeG8I9mMr6_YrM1pqupA6fCRCjB_lWi0uXrbifqExNvpvEiKTRAb7Pm-XFsP"
+      }
+    ],
+    "signature": "djdcMG5w6pN_hXeXoi5azzSQhgmhORWRVuVH1cY-9kaxYpq073HicDqW0kDuTFaoi80QtQDxGXAiAY1z23t7Dw"
+  },
+  "envelopeSha256Hex": "0f2e05f83dc76ca36ae407cccfe401a3fa565fc873941046e738573df359adc5",
+  "keyBundleCanonical": "{\"formatVersion\":1,\"keyVersion\":1,\"recipientDeviceId\":\"00000000-0000-4000-8000-000000000004\",\"registryVersion\":\"1\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\",\"vaultKey\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"}",
+  "sealedBox": "KQKB2x9bxjzXIcFjQ0F3hHZfMFBFi-Ez29-M2Ig5a0TnLA_cWO6eoQ2l260ZLuBMNawml22rD_CpdPr3ORkIxbOkeB984TgJeMkz9clAMz-w3VKF8fKVldVq3SNr44RltXLJRiRjuVqouV9VQ8wssxd3ut9bluHlI3toEbhFgto0ljYO4PPw5Ar3PXOca6HQRqEqhpuI8f7bk9ATQcSGa-hoRC7f3gSMgyrvDdOOfFv-Qj61d2po88bNeZMz024bSE8hdbaMJKAjTrKhyU3ZqYUCQeiuA6UV3dNzt9mEgwj4QYcUFYdzCt_L4xxDPOU4AkqS86zxQAT8XCZP6gEowa6VYcOBcwRXmwRyKnJhniN8y8YLA_-DDyuvQV7Y8YZnIFrU2OBO1mDEkr2ywBEDSTNS0i8XdMrFHmOC6pclGDyadxXKb7FNetCY9hPsb6lR88Y0jWo0dWjURtZE316MIwbu_wLYQKGXM-e0B3YpHSQpjiDG"
+}

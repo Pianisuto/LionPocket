@@ -93,6 +93,7 @@ out/
 
 # Shared TypeScript workspace output
 packages/core/dist/
+packages/sync-protocol/dist/
 
 # React Native / Android
 apps/mobile/android/.gradle/

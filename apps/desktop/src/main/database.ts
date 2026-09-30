@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { initializeLocalSchema } from './migrationProtection';
 import type {
   CatalogInput,
   Catalogs,
@@ -123,10 +124,17 @@ export class LionPocketDatabase {
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
-    this.db.function('search_key', { deterministic: true }, normalizeSearchText);
-    this.db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
-    this.migrate();
-    this.seed();
+    try {
+      this.db.function('search_key', { deterministic: true }, normalizeSearchText);
+      this.db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
+      initializeLocalSchema(this.db, path, () => {
+        this.migrate();
+        this.seed();
+      });
+    } catch (cause) {
+      this.db.close();
+      throw cause;
+    }
   }
 
   private migrate() {

@@ -160,7 +160,7 @@ export async function migrate(
     );
   }
 
-  if (currentVersion > 0 && currentVersion < 5 && protectCurrent)
+  if (currentVersion > 0 && currentVersion < migrations.length && protectCurrent)
     await protectCurrent();
 
   for (let index = currentVersion; index < migrations.length; index += 1) {
@@ -175,7 +175,6 @@ export async function migrate(
         });
       }
       if (
-        index === 4 &&
         (await tx.executeAsync('PRAGMA foreign_key_check')).rows._array.length
       )
         throw new Error(

@@ -1,0 +1,62 @@
+{
+  "plaintext": {
+    "domainSchema": 1,
+    "entityType": "transaction",
+    "action": "put",
+    "authoredAt": "2026-09-30T12:00:00.000Z",
+    "provenance": {
+      "localScopeId": "00000000-0000-4000-8000-000000000009",
+      "origin": "local",
+      "legacyCreatedAt": null,
+      "legacyUpdatedAt": null,
+      "legacyDeletedAt": null
+    },
+    "dependencies": [],
+    "restoredFrom": null,
+    "snapshot": {
+      "kind": "expense",
+      "description": "Café 🦁",
+      "categoryId": null,
+      "plannedAmountCents": 1234,
+      "actualAmountCents": 0,
+      "purchaseDate": null,
+      "dueDate": "2026-09-30",
+      "settledDate": "2026-09-30",
+      "status": "paid",
+      "paymentMethodId": null,
+      "cardId": null,
+      "notes": "á\nzero ≠ null",
+      "source": {
+        "type": "manual"
+      },
+      "installmentNumber": null,
+      "installmentTotal": null,
+      "occurrenceDate": null
+    }
+  },
+  "plaintextCanonical": "{\"action\":\"put\",\"authoredAt\":\"2026-09-30T12:00:00.000Z\",\"dependencies\":[],\"domainSchema\":1,\"entityType\":\"transaction\",\"provenance\":{\"legacyCreatedAt\":null,\"legacyDeletedAt\":null,\"legacyUpdatedAt\":null,\"localScopeId\":\"00000000-0000-4000-8000-000000000009\",\"origin\":\"local\"},\"restoredFrom\":null,\"snapshot\":{\"actualAmountCents\":0,\"cardId\":null,\"categoryId\":null,\"description\":\"Café 🦁\",\"dueDate\":\"2026-09-30\",\"installmentNumber\":null,\"installmentTotal\":null,\"kind\":\"expense\",\"notes\":\"á\\nzero ≠ null\",\"occurrenceDate\":null,\"paymentMethodId\":null,\"plannedAmountCents\":1234,\"purchaseDate\":null,\"settledDate\":\"2026-09-30\",\"source\":{\"type\":\"manual\"},\"status\":\"paid\"}}",
+  "commit": {
+    "protocolVersion": 1,
+    "serverId": "00000000-0000-4000-8000-000000000001",
+    "serverEpoch": "00000000-0000-4000-8000-000000000002",
+    "vaultId": "00000000-0000-4000-8000-000000000003",
+    "deviceId": "00000000-0000-4000-8000-000000000004",
+    "deviceSeq": "9007199254740993",
+    "commitId": "00000000-0000-4000-8000-000000000005",
+    "keyVersion": 1,
+    "deviceRegistryVersion": "1",
+    "cryptoSuite": "lp-sodium-v1",
+    "operations": [
+      {
+        "opId": "00000000-0000-4000-8000-000000000006",
+        "objectId": "00000000-0000-4000-8000-000000000007",
+        "parents": [
+          "00000000-0000-4000-8000-000000000008"
+        ],
+        "nonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3",
+        "ciphertext": ""
+      }
+    ]
+  },
+  "aadCanonical": "{\"context\":\"LionPocket/operation/v1\",\"header\":{\"commitId\":\"00000000-0000-4000-8000-000000000005\",\"cryptoSuite\":\"lp-sodium-v1\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"deviceRegistryVersion\":\"1\",\"deviceSeq\":\"9007199254740993\",\"keyVersion\":1,\"protocolVersion\":1,\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"},\"operation\":{\"nonce\":\"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3\",\"objectId\":\"00000000-0000-4000-8000-000000000007\",\"opId\":\"00000000-0000-4000-8000-000000000006\",\"parents\":[\"00000000-0000-4000-8000-000000000008\"]},\"operationCount\":1,\"operationIndex\":0}"
+}
