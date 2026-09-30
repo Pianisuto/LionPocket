@@ -14,22 +14,43 @@ export const listTransactions = async (filters: TransactionFilters) =>
 export const getCatalogs = async () => (await repository()).catalogs();
 export const createCatalog = async (input: CatalogInput) =>
   (await repository()).createCatalog(input);
-export const saveTransaction = async (input: TransactionInput) => (await repository()).save(input);
-export const deleteTransaction = async (id: string) => (await repository()).remove(id);
-export const settleTransaction = async (id: string) => (await repository()).settle(id);
+export const saveTransaction = async (input: TransactionInput) =>
+  (await repository()).save(input);
+export const deleteTransaction = async (id: string) =>
+  (await repository()).remove(id);
+export const settleTransaction = async (id: string) =>
+  (await repository()).settle(id);
 
 export const deleteCatalog = async (type: CatalogInput['type'], id: string) =>
   (await repository()).removeCatalog(type, id);
 export const listRecurring = async () => (await repository()).listRecurring();
 export const saveRecurring = async (input: RecurringExpenseInput) =>
   (await repository()).saveRecurring(input);
-export const deleteRecurring = async (id: string) => (await repository()).removeRecurring(id);
+export const deleteRecurring = async (id: string) =>
+  (await repository()).removeRecurring(id);
 export const listInstallments = async (month: string) =>
   (await repository()).listInstallments(month);
 export const saveInstallment = async (input: InstallmentPurchaseInput) =>
   (await repository()).saveInstallment(input);
-export const deleteInstallment = async (id: string) => (await repository()).removeInstallment(id);
+export const deleteInstallment = async (id: string) =>
+  (await repository()).removeInstallment(id);
 export const listGoals = async () => (await repository()).listGoals();
-export const saveGoal = async (input: GoalInput) => (await repository()).saveGoal(input);
-export const deleteGoal = async (id: string) => (await repository()).removeGoal(id);
-export const settleTransactions = async (ids: string[]) => (await repository()).settleMany(ids);
+export const saveGoal = async (input: GoalInput) =>
+  (await repository()).saveGoal(input);
+export const deleteGoal = async (id: string) =>
+  (await repository()).removeGoal(id);
+export const settleTransactions = async (ids: string[]) =>
+  (await repository()).settleMany(ids);
+export const setTransactionPriority = async (
+  input: import('@lionpocket/core').TransactionPriorityInput,
+) => (await repository()).setPriority(input);
+export const suggestTransactions = async (
+  kind: import('@lionpocket/core').MoneyKind,
+  term: string,
+) => (await repository()).suggest(kind, term);
+export const getAnnual = async (year: string) =>
+  (await repository()).annual(year);
+export const getMonthlyOverview = async (month: string) =>
+  (await repository()).monthlyOverview(month);
+export const completeStandardCategories = async () =>
+  (await repository()).completeStandardCategories();

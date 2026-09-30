@@ -22,7 +22,7 @@ describe('cadastro mobile de lançamentos', () => {
   });
 
   it('rejeita valores e datas inválidos', () => {
-    expect(() => parseTransactionForm('expense', 'Mercado', '0', '2026-09-29', false)).toThrow();
+    expect(parseTransactionForm('expense', 'Mercado', '0', '2026-09-29', false).plannedAmount).toBe(0);
     expect(() =>
       parseTransactionForm('expense', 'Mercado', '12,999', '2026-09-29', false),
     ).toThrow();

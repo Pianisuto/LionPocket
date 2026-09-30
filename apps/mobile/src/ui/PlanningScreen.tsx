@@ -1,8 +1,27 @@
+import { useAppearance } from './Appearance';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Linking,
+  Modal,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { addMonths } from '@lionpocket/core';
-import type { Catalogs, Goal, InstallmentPurchase, RecurringExpense } from '@lionpocket/core';
+import {
+  addMonths,
+  externalGoalUrl,
+  toCents,
+  fromCents,
+} from '@lionpocket/core';
+import type {
+  Catalogs,
+  Goal,
+  InstallmentPurchase,
+  RecurringExpense,
+} from '@lionpocket/core';
 import {
   deleteGoal,
   deleteInstallment,
@@ -14,7 +33,14 @@ import {
   saveInstallment,
   saveRecurring,
 } from '../db/transactions';
-import { Button, dateLabel, money, styles } from './components';
+import {
+  Button,
+  IconButton,
+  ScreenHeader,
+  dateLabel,
+  money,
+  useStyles,
+} from './components';
 import {
   frequencies,
   GoalEditor,
@@ -25,7 +51,11 @@ import {
 
 export type PlanningArea = 'recurring' | 'installments' | 'goals';
 type Purchase = InstallmentPurchase & { paymentMethodId: string | null };
-const titles = { recurring: 'Recorrências', installments: 'Parcelamentos', goals: 'Objetivos' };
+const titles = {
+  recurring: 'Recorrências',
+  installments: 'Parcelamentos',
+  goals: 'Objetivos',
+};
 const statusLabel = {
   planned: 'Planejado',
   paid: 'Pago',
@@ -48,13 +78,17 @@ export function PlanningScreen({
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const styles = useStyles();
+  const { colors } = useAppearance();
   const [recurring, setRecurring] = useState<RecurringExpense[]>([]),
     [purchases, setPurchases] = useState<Purchase[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]),
     [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
-  const [editor, setEditor] = useState<RecurringExpense | Purchase | Goal | 'new' | null>(null);
+  const [editor, setEditor] = useState<
+    RecurringExpense | Purchase | Goal | 'new' | null
+  >(null);
   const pending = useRef(false),
     revision = useRef(0);
   const load = useCallback(async () => {
@@ -132,7 +166,26 @@ export function PlanningScreen({
       ],
     );
   const items: Array<RecurringExpense | Purchase | Goal> =
-    area === 'recurring' ? recurring : area === 'installments' ? purchases : goals;
+    area === 'recurring'
+      ? recurring
+      : area === 'installments'
+        ? purchases
+        : goals;
+  const goalTotals = goals
+    .filter((g) => g.status !== 'cancelled')
+    .reduce(
+      (sum, g) => ({
+        saved: sum.saved + (toCents(g.savedAmount) ?? 0),
+        target: sum.target + (toCents(g.targetAmount) ?? 0),
+      }),
+      { saved: 0, target: 0 },
+    );
+  const recurringTotal = (kind: 'income' | 'expense') =>
+    fromCents(
+      recurring
+        .filter((r) => r.active && r.kind === kind)
+        .reduce((sum, r) => sum + (toCents(r.plannedAmount) ?? 0), 0),
+    ) ?? 0;
   return (
     <Modal
       visible
@@ -142,6 +195,7 @@ export function PlanningScreen({
       }}
     >
       <SafeAreaView style={styles.safe}>
+        <ScreenHeader title={titles[area]} onClose={onClose} disabled={busy} />
         <FlatList
           data={loading ? [] : items}
           keyExtractor={(i) => i.id}
@@ -152,26 +206,72 @@ export function PlanningScreen({
           }}
           ListHeaderComponent={
             <View style={styles.content}>
-              <View style={styles.row}>
-                <Text style={[styles.title, { flex: 1 }]}>{titles[area]}</Text>
-                <Button label="Fechar" disabled={busy} onPress={onClose} />
-              </View>
               {area === 'installments' && (
                 <>
-                  <Text style={styles.heading}>{month.split('-').reverse().join('/')}</Text>
+                  <Text style={styles.heading}>
+                    {month.split('-').reverse().join('/')}
+                  </Text>
                   <View style={styles.row}>
-                    <Button
+                    <IconButton
+                      icon="left"
                       label="Mês anterior"
                       disabled={busy || month === '1000-01'}
-                      onPress={() => onMonth(addMonths(`${month}-01`, -1).slice(0, 7))}
+                      onPress={() =>
+                        onMonth(addMonths(`${month}-01`, -1).slice(0, 7))
+                      }
                     />
-                    <Button
+                    <IconButton
+                      icon="right"
                       label="Próximo mês"
                       disabled={busy || month === '9999-12'}
-                      onPress={() => onMonth(addMonths(`${month}-01`, 1).slice(0, 7))}
+                      onPress={() =>
+                        onMonth(addMonths(`${month}-01`, 1).slice(0, 7))
+                      }
                     />
                   </View>
                 </>
+              )}
+              {!loading && area === 'goals' && (
+                <View style={styles.card}>
+                  <Text style={styles.heading}>
+                    {money(fromCents(goalTotals.saved) ?? 0)} guardados
+                  </Text>
+                  <Text style={styles.muted}>
+                    de {money(fromCents(goalTotals.target) ?? 0)} em objetivos
+                    não cancelados
+                  </Text>
+                  <Progress
+                    value={
+                      goalTotals.target
+                        ? goalTotals.saved / goalTotals.target
+                        : 0
+                    }
+                    label="Progresso geral dos objetivos"
+                  />
+                </View>
+              )}
+              {!loading && area === 'recurring' && (
+                <View style={styles.card}>
+                  <Text style={styles.positive}>
+                    {money(recurringTotal('income'))} em entradas ativas
+                  </Text>
+                  <Text style={styles.danger}>
+                    {money(recurringTotal('expense'))} em saídas ativas
+                  </Text>
+                </View>
+              )}
+              {!loading && area === 'installments' && (
+                <Text style={styles.heading}>
+                  {money(
+                    fromCents(
+                      purchases.reduce(
+                        (sum, p) => sum + (toCents(p.installmentAmount) ?? 0),
+                        0,
+                      ),
+                    ) ?? 0,
+                  )}{' '}
+                  em parcelas neste mês
+                </Text>
               )}
               <Text style={styles.muted}>
                 {area === 'recurring'
@@ -192,13 +292,17 @@ export function PlanningScreen({
                 disabled={busy || loading}
                 onPress={() => setEditor('new')}
               />
-              {loading && <ActivityIndicator color="#b9adff" />}
+              {loading && <ActivityIndicator color={colors.primary} />}
               {error ? (
                 <>
                   <Text accessibilityRole="alert" style={styles.error}>
                     {error}
                   </Text>
-                  <Button label="Tentar novamente" disabled={busy} onPress={() => void load()} />
+                  <Button
+                    label="Tentar novamente"
+                    disabled={busy}
+                    onPress={() => void load()}
+                  />
                 </>
               ) : null}
             </View>
@@ -213,12 +317,19 @@ export function PlanningScreen({
             ) : undefined
           }
           renderItem={({ item }) => (
-            <View style={[styles.card, { marginHorizontal: 20, marginBottom: 12 }]}>
+            <View
+              style={[styles.card, { marginHorizontal: 20, marginBottom: 12 }]}
+            >
               {'startMonth' in item ? (
                 <>
                   <Text style={styles.heading}>{item.description}</Text>
-                  <Text style={item.kind === 'income' ? styles.positive : styles.danger}>
-                    {item.kind === 'income' ? 'Entrada' : 'Saída'} · {money(item.plannedAmount)}
+                  <Text
+                    style={
+                      item.kind === 'income' ? styles.positive : styles.danger
+                    }
+                  >
+                    {item.kind === 'income' ? 'Entrada' : 'Saída'} ·{' '}
+                    {money(item.plannedAmount)}
                   </Text>
                   <Text style={styles.text}>
                     {item.active ? 'Ativa' : 'Pausada'} ·{' '}
@@ -226,40 +337,55 @@ export function PlanningScreen({
                   </Text>
                   <Text style={styles.muted}>
                     Desde {item.startMonth}
-                    {item.frequency !== 'manual' ? ` · ${dateLabel(item.startDate)}` : ''}
+                    {item.frequency !== 'manual'
+                      ? ` · ${dateLabel(item.startDate)}`
+                      : ''}
                     {item.frequency === 'custom'
                       ? ` · a cada ${item.intervalCount} ${{ days: 'dias', weeks: 'semanas', months: 'meses', years: 'anos' }[item.intervalUnit]}`
                       : ''}
                   </Text>
                   {item.frequency === 'manual' && (
-                    <Text style={styles.muted}>Meses: {item.manualMonths.join(', ')}</Text>
+                    <Text style={styles.muted}>
+                      Meses: {item.manualMonths.join(', ')}
+                    </Text>
                   )}
                   {item.cardName && (
                     <Text style={styles.muted}>
-                      {item.cardName} · cobrança {item.chargeDay ?? 'pela data'} · fatura conforme
-                      fechamento
+                      {item.cardName} · cobrança {item.chargeDay ?? 'pela data'}{' '}
+                      · fatura conforme fechamento
                     </Text>
                   )}
                   <Text style={styles.muted}>
-                    {[item.categoryName, item.paymentMethodName].filter(Boolean).join(' · ')}
+                    {[item.categoryName, item.paymentMethodName]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </Text>
-                  {item.notes ? <Text style={styles.muted}>{item.notes}</Text> : null}
+                  {item.notes ? (
+                    <Text style={styles.muted}>{item.notes}</Text>
+                  ) : null}
                   <Button
                     label={item.active ? 'Pausar' : 'Reativar'}
                     disabled={busy}
-                    onPress={() => act(() => saveRecurring({ ...item, active: !item.active }))}
+                    onPress={() =>
+                      act(() =>
+                        saveRecurring({ ...item, active: !item.active }),
+                      )
+                    }
                   />
                 </>
               ) : 'viewedInstallment' in item ? (
                 <>
                   <Text style={styles.heading}>{item.description}</Text>
-                  <Text style={styles.text}>{money(item.installmentAmount)} por parcela</Text>
                   <Text style={styles.text}>
-                    Parcela {item.viewedInstallment} de {item.totalInstallments} ·{' '}
-                    {statusLabel[item.viewedStatus]}
+                    {money(item.installmentAmount)} por parcela
+                  </Text>
+                  <Text style={styles.text}>
+                    Parcela {item.viewedInstallment} de {item.totalInstallments}{' '}
+                    · {statusLabel[item.viewedStatus]}
                   </Text>
                   <Text style={styles.muted}>
-                    {dateLabel(item.viewedDueDate)} · {item.cardName ?? 'Sem cartão'}
+                    {dateLabel(item.viewedDueDate)} ·{' '}
+                    {item.cardName ?? 'Sem cartão'}
                   </Text>
                   <Progress
                     value={item.viewedInstallment / item.totalInstallments}
@@ -267,16 +393,24 @@ export function PlanningScreen({
                   />
                   <Text style={styles.muted}>
                     {item.paidInstallments} pagas até este mês ·{' '}
-                    {Math.max(0, item.totalInstallments - item.viewedInstallment)} restantes após
-                    este mês
+                    {Math.max(
+                      0,
+                      item.totalInstallments - item.viewedInstallment,
+                    )}{' '}
+                    restantes após este mês
                   </Text>
                 </>
               ) : (
                 <>
                   <Text style={styles.heading}>{item.name}</Text>
                   <Text style={styles.text}>
-                    {goalStatuses.find((s) => s.value === item.status)?.label} · Prioridade{' '}
-                    {{ high: 'alta', medium: 'média', low: 'baixa' }[item.priority]}
+                    {goalStatuses.find((s) => s.value === item.status)?.label} ·
+                    Prioridade{' '}
+                    {
+                      { high: 'alta', medium: 'média', low: 'baixa' }[
+                        item.priority
+                      ]
+                    }
                   </Text>
                   <Text style={styles.positive}>
                     {money(item.savedAmount)} de {money(item.targetAmount)}
@@ -285,31 +419,66 @@ export function PlanningScreen({
                     value={item.progress}
                     label={`${Math.round(item.progress * 100)}% guardado`}
                   />
-                  <Text style={styles.text}>Faltam {money(item.remainingAmount)}</Text>
+                  <Text style={styles.text}>
+                    Faltam {money(item.remainingAmount)}
+                  </Text>
                   {item.suggestedMonthlyAmount != null && (
                     <Text style={styles.muted}>
                       Sugestão mensal: {money(item.suggestedMonthlyAmount)}
                     </Text>
                   )}
                   {item.dueDate && (
-                    <Text style={styles.muted}>Prazo: {dateLabel(item.dueDate)}</Text>
-                  )}
-                  {item.itemModel ? <Text style={styles.muted}>{item.itemModel}</Text> : null}
-                  {item.link ? (
-                    <Text selectable style={styles.muted}>
-                      {item.link}
+                    <Text style={styles.muted}>
+                      Prazo: {dateLabel(item.dueDate)}
                     </Text>
+                  )}
+                  {item.itemModel ? (
+                    <Text style={styles.muted}>{item.itemModel}</Text>
                   ) : null}
-                  {item.notes ? <Text style={styles.muted}>{item.notes}</Text> : null}
+                  {item.link ? (
+                    <Button
+                      label="Abrir link"
+                      disabled={busy}
+                      onPress={() => {
+                        try {
+                          void Linking.openURL(
+                            externalGoalUrl(item.link),
+                          ).catch(() =>
+                            setError(
+                              'Não foi possível abrir o link neste aparelho.',
+                            ),
+                          );
+                        } catch (cause) {
+                          setError(
+                            cause instanceof Error
+                              ? cause.message
+                              : 'Link inválido.',
+                          );
+                        }
+                      }}
+                    />
+                  ) : null}
+                  {item.notes ? (
+                    <Text style={styles.muted}>{item.notes}</Text>
+                  ) : null}
                 </>
               )}
               <View style={styles.row}>
-                <Button label="Editar" disabled={busy} onPress={() => setEditor(item)} />
+                <Button
+                  label="Editar"
+                  disabled={busy}
+                  onPress={() => setEditor(item)}
+                />
                 <Button
                   label="Excluir"
                   tone="danger"
                   disabled={busy}
-                  onPress={() => remove(item.id, 'name' in item ? item.name : item.description)}
+                  onPress={() =>
+                    remove(
+                      item.id,
+                      'name' in item ? item.name : item.description,
+                    )
+                  }
                 />
               </View>
             </View>
@@ -348,18 +517,24 @@ export function PlanningScreen({
   );
 }
 function Progress({ value, label }: { value: number; label: string }) {
+  const { colors } = useAppearance();
   return (
     <View
       accessibilityRole="progressbar"
       accessibilityLabel={label}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(value * 100) }}
-      style={{ height: 8, borderRadius: 4, backgroundColor: '#343e53', overflow: 'hidden' }}
+      style={{
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: colors.surface3,
+        overflow: 'hidden',
+      }}
     >
       <View
         style={{
           height: 8,
           width: `${Math.min(100, Math.max(0, value * 100))}%`,
-          backgroundColor: '#a99bf9',
+          backgroundColor: colors.primary,
         }}
       />
     </View>

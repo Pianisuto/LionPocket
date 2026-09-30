@@ -1,5 +1,8 @@
 # Planejamento local no LionPocket Mobile
 
+> Estado atualizado: [paridade funcional local](mobile-functional-parity.md). O novo bloco completa os fluxos restantes, adiciona preferências e migração v5 com suporte a valores zero.
+
+
 Este bloco complementa o [uso financeiro diário](mobile-daily-finance.md). A implementação segue as decisões de produto: React Native bare, Android, SQLite privado do aplicativo, funcionamento offline e domínio compartilhado com o desktop. Não há backend, conta ou sincronização. As alterações locais do bloco anterior foram preservadas.
 
 ## Fluxos disponíveis
@@ -45,7 +48,7 @@ Operações de série, geração e lotes usam exclusivamente o handle `tx` das t
 
 ## Diferenças restantes em relação ao desktop
 
-Ainda não estão disponíveis no mobile: prioridades/ordenação manual mensal, sugestões de lançamentos, busca textual, filtros de origem/pagamento, painel anual, detalhamento por categoria, importação/exportação e interface de backups. Os cadastros iniciais continuam sendo o subconjunto da entrega anterior. O valor planejado precisa ser positivo por compatibilidade com o schema móvel anterior; o desktop aceita zero em lançamentos manuais. Datas continuam sem calendário nativo; links de objetivos são exibidos como texto selecionável. A situação inicial dos lançamentos móveis é Planejado, sem a sugestão automática de realização para meses antigos usada pelo desktop.
+Prioridades/ordenação mensal, sugestões do histórico, busca e filtros avançados, painel anual com categorias, importação/exportação e backup/restauração foram concluídos no [bloco local-first complementar](mobile-local-first.md). Os cadastros completos, valores zero, calendário Android, links de objetivos e sugestão automática de realização foram concluídos no [bloco de paridade funcional](mobile-functional-parity.md).
 
 ## Verificações executadas em 29/09/2026
 

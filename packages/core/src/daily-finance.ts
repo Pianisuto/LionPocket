@@ -71,8 +71,8 @@ export function validateTransaction(input: TransactionInput, catalogs?: Catalogs
     Number.isFinite(value) &&
     Number.isSafeInteger(toCents(value)) &&
     (allowZero ? (toCents(value) ?? -1) >= 0 : (toCents(value) ?? 0) > 0);
-  if (!validAmount(input.plannedAmount))
-    throw new Error('Informe um valor planejado maior que zero.');
+  if (!validAmount(input.plannedAmount, true))
+    throw new Error('Informe um valor planejado igual ou maior que zero.');
   if (input.actualAmount != null && !validAmount(input.actualAmount, true))
     throw new Error('Informe um valor realizado igual ou maior que zero.');
   if (!isValidDate(input.dueDate))

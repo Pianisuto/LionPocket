@@ -1,7 +1,19 @@
 import React, { useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Modal, ScrollView, Text, View } from 'react-native';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { cardStatementDueDate, isValidDate, nextCardDueDate } from '@lionpocket/core';
+import {
+  cardStatementDueDate,
+  externalGoalUrl,
+  isValidDate,
+  nextCardDueDate,
+} from '@lionpocket/core';
 import type {
   Catalogs,
   Goal,
@@ -13,7 +25,15 @@ import type {
   RecurringExpenseInput,
 } from '@lionpocket/core';
 import { parseMoney } from '../transactionForm';
-import { Button, Choice, Field, styles } from './components';
+import {
+  Button,
+  Choice,
+  DateField,
+  MonthField,
+  Field,
+  ScreenHeader,
+  useStyles,
+} from './components';
 
 function Editor({
   title,
@@ -26,6 +46,7 @@ function Editor({
   onSave: () => Promise<void>;
   children: React.ReactNode;
 }) {
+  const styles = useStyles();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const pending = useRef(false);
@@ -38,7 +59,9 @@ function Editor({
     try {
       await onSave();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Não foi possível salvar.');
+      setError(
+        cause instanceof Error ? cause.message : 'Não foi possível salvar.',
+      );
     } finally {
       pending.current = false;
       setBusy(false);
@@ -54,24 +77,26 @@ function Editor({
     >
       <SafeAreaView style={styles.safe}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-            <View style={styles.row}>
-              <Text style={[styles.heading, { flex: 1 }]}>{title}</Text>
-              <Button label="Voltar" disabled={busy} onPress={onClose} />
-            </View>
+          <ScreenHeader title={title} onClose={onClose} disabled={busy} />
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.content}
+          >
             {children}
             {error ? (
               <Text accessibilityRole="alert" style={styles.error}>
                 {error}
               </Text>
             ) : null}
+          </ScrollView>
+          <View style={styles.formFooter}>
             <Button
               label={busy ? 'Salvando…' : 'Salvar'}
               tone="primary"
               disabled={busy}
               onPress={() => void save()}
             />
-          </ScrollView>
+          </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
@@ -115,7 +140,10 @@ function References({
         onChange={setPayment}
         options={[
           { value: '', label: 'Sem forma de pagamento' },
-          ...catalogs.paymentMethods.map((p) => ({ value: p.id, label: p.name })),
+          ...catalogs.paymentMethods.map((p) => ({
+            value: p.id,
+            label: p.name,
+          })),
         ]}
       />
       {kind === 'expense' && (
@@ -153,10 +181,13 @@ export function RecurringEditor({
   onClose: () => void;
   onSave: (input: RecurringExpenseInput) => Promise<void>;
 }) {
+  const styles = useStyles();
   const [description, setDescription] = useState(item?.description ?? '');
   const [kind, setKind] = useState<MoneyKind>(item?.kind ?? 'expense');
   const [active, setActive] = useState(item?.active ?? true);
-  const [amount, setAmount] = useState(String(item?.plannedAmount ?? '').replace('.', ','));
+  const [amount, setAmount] = useState(
+    String(item?.plannedAmount ?? '').replace('.', ','),
+  );
   const [startMonth, setStartMonth] = useState(item?.startMonth ?? month);
   const [startDate, setStartDate] = useState(item?.startDate ?? `${month}-01`);
   const [frequency, setFrequency] = useState(item?.frequency ?? 'monthly');
@@ -180,7 +211,7 @@ export function RecurringEditor({
           kind,
           active,
           description,
-          plannedAmount: parseMoney(amount),
+          plannedAmount: parseMoney(amount, true),
           startMonth,
           startDate,
           frequency,
@@ -211,7 +242,12 @@ export function RecurringEditor({
           setCard('');
         }}
       />
-      <Field label="Valor previsto" value={amount} numeric onChange={setAmount} />
+      <Field
+        label="Valor previsto"
+        value={amount}
+        numeric
+        onChange={setAmount}
+      />
       <Choice
         label="Situação"
         value={active ? 'active' : 'paused'}
@@ -227,18 +263,26 @@ export function RecurringEditor({
         options={frequencies}
         onChange={(v) => setFrequency(v as typeof frequency)}
       />
-      <Field label="Mês de início" value={startMonth} onChange={setStartMonth} hint="AAAA-MM" />
+      <MonthField
+        label="Mês de início"
+        value={startMonth}
+        onChange={setStartMonth}
+      />
       {frequency !== 'monthly' && frequency !== 'manual' && (
-        <Field
+        <DateField
           label="Primeira ocorrência"
           value={startDate}
           onChange={setStartDate}
-          hint="AAAA-MM-DD"
         />
       )}
       {frequency === 'custom' && (
         <>
-          <Field label="A cada" value={interval} numeric onChange={setInterval} />
+          <Field
+            label="A cada"
+            value={interval}
+            numeric
+            onChange={setInterval}
+          />
           <Choice
             label="Unidade"
             value={unit}
@@ -260,8 +304,8 @@ export function RecurringEditor({
             ]}
           />
           <Text style={styles.muted}>
-            A data efetiva desloca as próximas previsões. Para cartão, usa a data da compra; para
-            outras formas, o pagamento ou recebimento.
+            A data efetiva desloca as próximas previsões. Para cartão, usa a
+            data da compra; para outras formas, o pagamento ou recebimento.
           </Text>
         </>
       )}
@@ -269,13 +313,17 @@ export function RecurringEditor({
         <View style={styles.field}>
           <Text style={styles.label}>Meses do ano</Text>
           <View style={styles.row}>
-            {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map((m) => (
+            {Array.from({ length: 12 }, (_, i) =>
+              String(i + 1).padStart(2, '0'),
+            ).map((m) => (
               <Button
                 key={m}
                 label={`${m}${months.includes(m) ? ' ✓' : ''}`}
                 onPress={() =>
                   setMonths(
-                    months.includes(m) ? months.filter((v) => v !== m) : [...months, m].sort(),
+                    months.includes(m)
+                      ? months.filter((v) => v !== m)
+                      : [...months, m].sort(),
                   )
                 }
               />
@@ -305,19 +353,26 @@ export function RecurringEditor({
             />
           )}
           <Text style={styles.muted}>
-            A cobrança entra na fatura conforme fechamento e vencimento do cartão.
+            A cobrança entra na fatura conforme fechamento e vencimento do
+            cartão.
           </Text>
         </>
       ) : (
         (frequency === 'monthly' || frequency === 'manual') && (
-          <Field label="Dia previsto" value={day} numeric onChange={setDay} hint="1 a 31" />
+          <Field
+            label="Dia previsto"
+            value={day}
+            numeric
+            onChange={setDay}
+            hint="1 a 31"
+          />
         )
       )}
       <Field label="Observações" value={notes} multiline onChange={setNotes} />
       {item && (
         <Text style={styles.muted}>
-          A edição atualiza previsões abertas. Valores realizados e histórico concluído são
-          preservados. Pausar impede novas ocorrências.
+          A edição atualiza previsões abertas. Valores realizados e histórico
+          concluído são preservados. Pausar impede novas ocorrências.
         </Text>
       )}
     </Editor>
@@ -336,8 +391,11 @@ export function InstallmentEditor({
   onClose: () => void;
   onSave: (input: InstallmentPurchaseInput) => Promise<void>;
 }) {
+  const styles = useStyles();
   const [description, setDescription] = useState(item?.description ?? '');
-  const [amount, setAmount] = useState(String(item?.installmentAmount ?? '').replace('.', ','));
+  const [amount, setAmount] = useState(
+    String(item?.installmentAmount ?? '').replace('.', ','),
+  );
   const [total, setTotal] = useState(String(item?.totalInstallments ?? 12));
   const [current, setCurrent] = useState(String(item?.viewedInstallment ?? 1));
   const [date, setDate] = useState(item?.viewedDueDate ?? `${month}-10`);
@@ -377,9 +435,24 @@ export function InstallmentEditor({
       }
     >
       <Field label="Descrição" value={description} onChange={setDescription} />
-      <Field label="Valor por parcela" value={amount} numeric onChange={setAmount} />
-      <Field label="Total de parcelas" value={total} numeric onChange={setTotal} />
-      <Field label="Parcela atual" value={current} numeric onChange={setCurrent} />
+      <Field
+        label="Valor por parcela"
+        value={amount}
+        numeric
+        onChange={setAmount}
+      />
+      <Field
+        label="Total de parcelas"
+        value={total}
+        numeric
+        onChange={setTotal}
+      />
+      <Field
+        label="Parcela atual"
+        value={current}
+        numeric
+        onChange={setCurrent}
+      />
       <References
         catalogs={catalogs}
         kind="expense"
@@ -393,16 +466,16 @@ export function InstallmentEditor({
           if (!item) suggestDue(v, purchase);
         }}
       />
-      <Field
+      <DateField
         label="Data da compra"
         value={purchase}
         onChange={(v) => {
           setPurchase(v);
           if (!item) suggestDue(card, v);
         }}
-        hint="AAAA-MM-DD; opcional"
+        optional
       />
-      <Field
+      <DateField
         label="Vencimento da parcela atual"
         value={date}
         onChange={setDate}
@@ -435,12 +508,17 @@ export function GoalEditor({
   onClose: () => void;
   onSave: (input: GoalInput) => Promise<void>;
 }) {
+  const styles = useStyles();
   const [name, setName] = useState(item?.name ?? ''),
     [model, setModel] = useState(item?.itemModel ?? '');
   const [link, setLink] = useState(item?.link ?? ''),
     [category, setCategory] = useState(item?.categoryId ?? '');
-  const [target, setTarget] = useState(String(item?.targetAmount ?? '').replace('.', ','));
-  const [saved, setSaved] = useState(String(item?.savedAmount ?? 0).replace('.', ','));
+  const [target, setTarget] = useState(
+    String(item?.targetAmount ?? '').replace('.', ','),
+  );
+  const [saved, setSaved] = useState(
+    String(item?.savedAmount ?? 0).replace('.', ','),
+  );
   const [priority, setPriority] = useState(item?.priority ?? 'medium'),
     [status, setStatus] = useState(item?.status ?? 'planned');
   const [date, setDate] = useState(item?.dueDate ?? ''),
@@ -454,9 +532,9 @@ export function GoalEditor({
           id: item?.id,
           name,
           itemModel: model,
-          link,
+          link: link.trim() ? externalGoalUrl(link) : '',
           categoryId: category || null,
-          targetAmount: parseMoney(target),
+          targetAmount: parseMoney(target, true),
           savedAmount: parseMoney(saved, true),
           priority,
           status,
@@ -469,7 +547,8 @@ export function GoalEditor({
       <Field label="Valor alvo" value={target} numeric onChange={setTarget} />
       <Field label="Valor guardado" value={saved} numeric onChange={setSaved} />
       <Text style={styles.muted}>
-        O valor guardado acompanha o objetivo; não cria um lançamento de entrada ou saída.
+        O valor guardado acompanha o objetivo; não cria um lançamento de entrada
+        ou saída.
       </Text>
       <Choice
         label="Situação"
@@ -487,14 +566,16 @@ export function GoalEditor({
           { value: 'low', label: 'Baixa' },
         ]}
       />
-      <Field label="Prazo" value={date} onChange={setDate} hint="AAAA-MM-DD; opcional" />
+      <DateField label="Prazo" value={date} onChange={setDate} optional />
       <Choice
         label="Categoria"
         value={category}
         onChange={setCategory}
         options={[
           { value: '', label: 'Sem categoria' },
-          ...catalogs.categories.map((c) => ({ value: c.id, label: c.name })),
+          ...catalogs.categories
+            .filter((c) => c.kind === 'expense' || c.id === category)
+            .map((c) => ({ value: c.id, label: c.name })),
         ]}
       />
       <Field label="Modelo ou item" value={model} onChange={setModel} />

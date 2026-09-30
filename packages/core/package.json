@@ -43,5 +43,9 @@
     "eslint": "^8.57.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "fast-xml-parser": "^5.10.1"
   }
 }

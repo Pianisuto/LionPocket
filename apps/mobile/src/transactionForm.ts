@@ -17,7 +17,7 @@ export function parseTransactionForm(
   dueDate: string,
   settled: boolean,
 ): TransactionInput {
-  const amount = parseMoney(amountText);
+  const amount = parseMoney(amountText, true);
   const input: TransactionInput = {
     kind,
     description: description.trim(),

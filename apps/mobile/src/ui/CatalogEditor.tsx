@@ -1,5 +1,13 @@
 import React, { useRef, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Modal, ScrollView, Text, View } from 'react-native';
+import {
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type {
   CatalogInput,
@@ -9,23 +17,26 @@ import type {
   MoneyKind,
   SimpleCatalogItem,
 } from '@lionpocket/core';
-import { Button, Choice, Field, styles } from './components';
+import { Button, Choice, Field, ScreenHeader, useStyles } from './components';
 export function CatalogEditor({
   catalogs,
   onClose,
   onSave,
   onDelete,
+  onCompleteDefaults,
 }: {
   catalogs: Catalogs;
   onClose: () => void;
+  onCompleteDefaults: () => Promise<void>;
   onSave: (input: CatalogInput) => Promise<void>;
   onDelete: (type: CatalogInput['type'], id: string) => Promise<void>;
 }) {
+  const styles = useStyles();
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [type, setType] = useState<CatalogInput['type']>('card');
   const [name, setName] = useState('');
   const [id, setId] = useState<string | undefined>();
-  const [color, setColor] = useState('#8f8bff');
+  const [color, setColor] = useState('#ff4d9d');
   const [kind, setKind] = useState<MoneyKind>('expense');
   const [dueDay, setDueDay] = useState('10');
   const [closingDay, setClosingDay] = useState('');
@@ -54,7 +65,9 @@ export function CatalogEditor({
       setId(undefined);
       setSuccess('Cadastro salvo. Disponível nos lançamentos.');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Falha ao salvar cadastro.');
+      setError(
+        cause instanceof Error ? cause.message : 'Falha ao salvar cadastro.',
+      );
     } finally {
       pending.current = false;
       setBusy(false);
@@ -76,15 +89,12 @@ export function CatalogEditor({
     >
       <SafeAreaView style={styles.safe}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+          <ScreenHeader title={'Cadastros'} onClose={onClose} disabled={busy} />
           <ScrollView
             ref={scroll}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.content}
           >
-            <View style={styles.row}>
-              <Text style={[styles.heading, { flex: 1 }]}>Cadastros</Text>
-              <Button label="Fechar" onPress={onClose} disabled={busy} />
-            </View>
             <Choice
               label="Cadastro"
               value={type}
@@ -126,7 +136,12 @@ export function CatalogEditor({
               </>
             )}
             {type === 'category' && (
-              <Field label="Cor" value={color} onChange={setColor} hint="#RRGGBB" />
+              <Field
+                label="Cor"
+                value={color}
+                onChange={setColor}
+                hint="#RRGGBB"
+              />
             )}
             <Field label="Nome" value={name} onChange={setName} />
             {type === 'card' && (
@@ -147,6 +162,28 @@ export function CatalogEditor({
                 />
               </>
             )}
+            <Button
+              label="Adicionar categorias padrão faltantes"
+              disabled={busy}
+              onPress={() => {
+                if (pending.current) return;
+                pending.current = true;
+                setBusy(true);
+                setError('');
+                void onCompleteDefaults()
+                  .catch((cause) =>
+                    setError(
+                      cause instanceof Error
+                        ? cause.message
+                        : 'Falha ao adicionar categorias.',
+                    ),
+                  )
+                  .finally(() => {
+                    pending.current = false;
+                    setBusy(false);
+                  });
+              }}
+            />
             {error ? (
               <Text accessibilityRole="alert" style={styles.error}>
                 {error}
@@ -154,7 +191,13 @@ export function CatalogEditor({
             ) : null}
             {success ? <Text style={styles.positive}>{success}</Text> : null}
             <Button
-              label={busy ? 'Salvando…' : id ? 'Salvar cadastro' : 'Adicionar cadastro'}
+              label={
+                busy
+                  ? 'Salvando…'
+                  : id
+                    ? 'Salvar cadastro'
+                    : 'Adicionar cadastro'
+              }
               tone="primary"
               disabled={busy}
               onPress={() => void save()}
@@ -165,8 +208,8 @@ export function CatalogEditor({
                 <Text style={styles.heading}>{item.name}</Text>
                 {'dueDay' in item && (
                   <Text style={styles.muted}>
-                    Fecha {(item as CreditCard).closingDay ?? 'não informado'} · vence{' '}
-                    {(item as CreditCard).dueDay}
+                    Fecha {(item as CreditCard).closingDay ?? 'não informado'} ·
+                    vence {(item as CreditCard).dueDay}
                   </Text>
                 )}
                 {'color' in item && (
@@ -221,7 +264,9 @@ export function CatalogEditor({
                                 })
                                 .catch((cause) =>
                                   setError(
-                                    cause instanceof Error ? cause.message : 'Falha ao excluir.',
+                                    cause instanceof Error
+                                      ? cause.message
+                                      : 'Falha ao excluir.',
                                   ),
                                 )
                                 .finally(() => {
@@ -237,7 +282,9 @@ export function CatalogEditor({
                 </View>
               </View>
             ))}
-            {!items.length && <Text style={styles.muted}>Nenhum cadastro disponível.</Text>}
+            {!items.length && (
+              <Text style={styles.muted}>Nenhum cadastro disponível.</Text>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>

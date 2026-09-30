@@ -205,6 +205,8 @@ export function planInstallmentUpdate(
   return { shift, starting, total, firstDueDate, entries };
 }
 export function validateInstallment(input: InstallmentPurchaseInput, catalogs: Catalogs) {
+  if ((toCents(input.installmentAmount) ?? 0) < 1)
+    throw new Error('Informe um valor de parcela maior que zero.');
   validateTransaction(
     {
       ...input,
@@ -229,7 +231,7 @@ export function validateGoal(input: GoalInput, catalogs: Catalogs) {
     ![input.targetAmount, input.savedAmount].every(
       (v) => Number.isFinite(v) && Number.isSafeInteger(toCents(v)),
     ) ||
-    input.targetAmount <= 0 ||
+    input.targetAmount < 0 ||
     input.savedAmount < 0
   )
     throw new Error('Informe valores válidos para o objetivo.');

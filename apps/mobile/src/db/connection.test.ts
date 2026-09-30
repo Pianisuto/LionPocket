@@ -3,6 +3,7 @@ import type { NitroSQLiteConnection } from 'react-native-nitro-sqlite';
 
 const mocks = vi.hoisted(() => ({ open: vi.fn(), migrate: vi.fn() }));
 vi.mock('react-native-nitro-sqlite', () => ({ open: mocks.open }));
+vi.mock('../files/native', () => ({ localFiles: { prepareFile: vi.fn() } }));
 vi.mock('./migrations', () => ({ migrate: mocks.migrate }));
 const state = globalThis as typeof globalThis & {
   lionPocketDatabase?: Promise<NitroSQLiteConnection>;

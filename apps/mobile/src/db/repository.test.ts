@@ -19,11 +19,12 @@ function connection() {
   };
   const db = {
     executeAsync,
-    transaction: async (action: (tx: { executeAsync: typeof executeAsync }) => Promise<void>) => {
+    transaction: async <T>(action: (tx: { executeAsync: typeof executeAsync }) => Promise<T>) => {
       sqlite.exec('BEGIN');
       try {
-        await action({ executeAsync });
+        const result = await action({ executeAsync });
         sqlite.exec('COMMIT');
+        return result;
       } catch (error) {
         sqlite.exec('ROLLBACK');
         throw error;
@@ -225,10 +226,10 @@ describe('uso financeiro diário em SQLite', () => {
     const { db } = connection();
     await migrate(db);
     const repository = new MobileRepository(db);
-    await repository.createCatalog({ type: 'category', name: 'Educação', kind: 'expense' });
+    await repository.createCatalog({ type: 'category', name: 'Educação personalizada', kind: 'expense' });
     await repository.createCatalog({ type: 'paymentMethod', name: 'Pagamento personalizado' });
     const catalogs = await repository.catalogs();
-    const categoryId = catalogs.categories.find((item) => item.name === 'Educação')?.id;
+    const categoryId = catalogs.categories.find((item) => item.name === 'Educação personalizada')?.id;
     const paymentMethodId = catalogs.paymentMethods.find(
       (item) => item.name === 'Pagamento personalizado',
     )?.id;
@@ -245,7 +246,7 @@ describe('uso financeiro diário em SQLite', () => {
     );
     const items = await repository.list({ month: '2026-09' });
     expect(items[0]).toMatchObject({
-      categoryName: 'Educação',
+      categoryName: 'Educação personalizada',
       paymentMethodName: 'Pagamento personalizado',
       actualAmount: 0,
     });
