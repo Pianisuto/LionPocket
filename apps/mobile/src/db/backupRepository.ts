@@ -1,3 +1,4 @@
+import { syncTables, syncColumns, validateSyncBackup, disableRestoredSync } from '@lionpocket/sync-local';
 import {
   isValidDate,
   validateMonth,
@@ -22,8 +23,10 @@ export const backupTables = [
   'transaction_priority_order',
   'local_import_records',
   'local_preferences',
+  ...syncTables,
 ] as const;
 const columns: Record<string, string[]> = {
+  ...syncColumns,
   categories: ['id', 'name', 'kind', 'color'],
   payment_methods: ['id', 'name'],
   cards: ['id', 'name', 'due_day', 'closing_day'],
@@ -132,6 +135,7 @@ export function tablesForVersion(version: number): string[] {
     );
   return backupTables.filter(
     (t) =>
+      (!syncTables.includes(t) || version >= 6) &&
       (t !== 'local_preferences' || version >= 5) &&
       (version === 1
         ? t === 'transactions'
@@ -185,6 +189,11 @@ export async function verifyDatabase(
     )
       throw new Error(`Estrutura incompatível: ${table}.`);
   }
+  if (version >= 6) {
+    const data: BackupData = {};
+    for (const table of syncTables) data[table] = (await db.executeAsync<BackupRow>(`SELECT * FROM ${table}`)).rows._array;
+    validateSyncBackup(data);
+  }
   const check = (await db.executeAsync<BackupRow>('PRAGMA integrity_check'))
     .rows._array;
   if (check.length !== 1 || Object.values(check[0])[0] !== 'ok')
@@ -213,6 +222,7 @@ export async function captureBackup(db: Connection): Promise<LocalBackup> {
   });
 }
 function validateRows(data: BackupData, version: number) {
+  if (version >= 6) validateSyncBackup(data);
   const tables = tablesForVersion(version);
   if (
     Object.keys(data).some((t) => !tables.includes(t)) ||
@@ -303,7 +313,8 @@ export async function restoreBackup(
     throw new Error('Migre a cópia antes de restaurar.');
   validateRows(backup.data, backup.schemaVersion);
   await protectCurrent(); // A failure to save the recovery copy must abort replacement.
-  await db.transaction((tx) =>
-    replaceRows(tx, backup.data, backup.schemaVersion),
-  );
+  await db.transaction(async (tx) => {
+    await replaceRows(tx, backup.data, backup.schemaVersion);
+    await tx.executeAsync(disableRestoredSync);
+  });
 }

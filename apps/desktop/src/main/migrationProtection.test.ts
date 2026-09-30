@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LionPocketDatabase } from './database';
+import { syncTables } from '@lionpocket/sync-local';
 import { initializeLocalSchema } from './migrationProtection';
 import { captureDatabaseManifest, projectLegacyColumns } from '../../../../tools/sync-stage0/database-manifest.cjs';
 
@@ -52,6 +53,34 @@ describe('proteção de migrations desktop', () => {
     expect(readdirSync(directory).filter((name) => name.includes('.pre-migration-'))).toHaveLength(1);
     reopened.saveTransaction({ kind: 'expense', description: 'Local sem conta', plannedAmount: 0, actualAmount: 0, dueDate: '2026-09-30', status: 'paid', settledDate: '2026-09-30' });
     expect(reopened.listTransactions({ month: '2026-09' }).some((t) => t.description === 'Local sem conta' && t.actualAmount === 0)).toBe(true);
+  });
+  it('v11 → v12 is additive and does not replay financial corrections', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'lion-stage1-v11-')); directories.push(directory);
+    const path = join(directory,'synthetic-v11.sqlite');
+    const initial = new LionPocketDatabase(path); connections.push(initial.db);
+    const input = {kind:'expense' as const,description:'Preserve every old byte',plannedAmount:0,dueDate:'2026-09-30',status:'planned' as const};
+    initial.saveTransaction(input);
+    initial.saveRecurringExpense({kind:'expense',description:'Historical audit',active:true,startMonth:'2026-09',plannedAmount:0,dueDay:30});
+    initial.db.exec("UPDATE recurring_expenses SET start_month='legacy literal'; DELETE FROM migrations WHERE version=12");
+    for(const table of [...syncTables].reverse()) initial.db.exec(`DROP TABLE ${table}`);
+    const before=captureDatabaseManifest(initial.db);
+    const migrated=new LionPocketDatabase(path);connections.push(migrated.db);
+    const financial = {...before,tables:before.tables.filter((t)=>t.name!=='migrations')};
+    expect(projectLegacyColumns(migrated.db,financial)).toEqual(financial.tables.map(({name,columns,rows})=>({name,columns,rows})));
+    expect(captureDatabaseManifest(recovery(directory))).toEqual(before);
+    expect(migrated.db.prepare('SELECT mode,local_scope_id FROM sync_local_state').get()).toMatchObject({mode:'disabled',local_scope_id:null});
+  });
+  it('falha tardia na migration real v12 reverte sidecars e preserva a base v11', () => {
+    const directory=mkdtempSync(join(tmpdir(),'lion-stage1-ddl-'));directories.push(directory);
+    const path=join(directory,'synthetic-v11.sqlite'),initial=new LionPocketDatabase(path);connections.push(initial.db);
+    initial.saveTransaction({kind:'expense',description:'Preservar',plannedAmount:0,dueDate:'2026-09-30',status:'planned'});
+    initial.db.exec('DELETE FROM migrations WHERE version=12');
+    for(const table of [...syncTables].reverse())initial.db.exec(`DROP TABLE ${table}`);
+    initial.db.exec('CREATE TABLE sync_inbox(blocked TEXT)'); // Failure at the last additive DDL.
+    const before=captureDatabaseManifest(initial.db);
+    expect(()=>new LionPocketDatabase(path)).toThrow('already exists');
+    expect(captureDatabaseManifest(initial.db)).toEqual(before);
+    expect(captureDatabaseManifest(recovery(directory))).toEqual(before);
   });
   it('reverte DDL e escrita tardia; a cópia conserva a versão anterior', () => {
     const { path, db, directory } = legacy(), before = captureDatabaseManifest(db);

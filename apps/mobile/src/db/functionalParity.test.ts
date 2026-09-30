@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { syncTables } from '@lionpocket/sync-local';
 import { fileURLToPath } from 'node:url';
 import { MobileRepository } from './repository';
 import { migrate, migrations } from './migrations';
@@ -42,7 +43,13 @@ async function mobile(version = migrations.length) {
   for (const migration of migrations.slice(0, version))
     for (const sql of migration) await native.db.executeAsync(sql);
   await native.db.executeAsync(`PRAGMA user_version = ${version}`);
-  return { ...native, repo: new MobileRepository(native.db) };
+  const repo = new MobileRepository(native.db);
+  if (version < 6) {
+    // Fixture construction emulates the historical app, which had no sync hook.
+    const current = repo as unknown as { recordManualSync(tx: unknown, id: string): Promise<void> };
+    vi.spyOn(current, 'recordManualSync').mockResolvedValue();
+  }
+  return { ...native, repo };
 }
 const input = (
   description: string,
@@ -126,9 +133,9 @@ describe('paridade funcional e atualização protegida', () => {
     expect(protect).toHaveBeenCalledTimes(1);
     const after = await captureBackup(db);
     const { local_preferences, ...financial } = after.data;
-    expect(financial).toEqual(before.data);
+    expect(Object.fromEntries(Object.entries(financial).filter(([table]) => !syncTables.includes(table)))).toEqual(before.data);
     expect(local_preferences).toEqual([]);
-    await verifyDatabase(db, 5);
+    await verifyDatabase(db, migrations.length);
     await migrate(db, protect);
     expect(protect).toHaveBeenCalledTimes(1);
     await repo.save(input('Valor zero', { plannedAmount: 0 }));
@@ -192,7 +199,7 @@ describe('paridade funcional e atualização protegida', () => {
     const snapshot = await captureBackup(current.db),
       second = sqliteTestConnection();
     cleanup.push(() => second.sqlite.close());
-    const restored = await loadBackupData(second.db, snapshot.data, 5);
+    const restored = await loadBackupData(second.db, snapshot.data, migrations.length);
     expect(restored.data).toEqual(snapshot.data);
     await restoreBackup(current.db, restored, async () => {});
     expect(await readPreferences(current.db)).toEqual({
@@ -201,7 +208,7 @@ describe('paridade funcional e atualização protegida', () => {
       leoPets: 12,
       leoAccessory: 'crown',
     });
-    await verifyDatabase(current.db, 5);
+    await verifyDatabase(current.db, migrations.length);
   });
   it('preferências invalidas são ignoradas na leitura e rejeitadas atomicamente na gravação', async () => {
     const { db, sqlite } = await mobile();

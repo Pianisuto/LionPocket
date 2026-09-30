@@ -1,0 +1,303 @@
+{
+  "date": "2026-09-30",
+  "result": "PASS",
+  "scope": "Stage 1 local foundation, synthetic banks only",
+  "syncEnabledByDefault": false,
+  "remoteCapabilities": [],
+  "isolation": {
+    "androidApplicationId": "com.lionpocketmobile.cryptospike",
+    "androidAvd": "LionPocket_API_36",
+    "androidAbi": "x86_64",
+    "androidApi": 36,
+    "avdReadOnly": true,
+    "snapshots": false,
+    "desktopUserDataAndDatabase": "random /tmp directories",
+    "personalDatabaseOpened": false,
+    "keysInReports": "fixed PUBLIC crypto fixture material only; no generated storage secrets"
+  },
+  "bindings": {
+    "libsodium-wrappers-sumo": {
+      "version": "0.8.4",
+      "integrity": "sha512-ql7hcgulKZ3ekfa2DGAogcCKsWU0diA/0nArz1CFzh93WQdb46/Kj18ka/Hifq6uA3Ush34Pc6vU/6HXeRwUkg=="
+    },
+    "libsodium-sumo": {
+      "version": "0.8.4",
+      "integrity": "sha512-TMtHShQfVVsaxDygyapvUC3o7YsPgXa/hRWeIgzyFz6w5k/1hirGptCxp1U7XwW3rCskaTTYKgV10v86UiGgNw=="
+    },
+    "react-native-libsodium": {
+      "version": "1.7.0",
+      "integrity": "sha512-0I2FcCeyR2HUiUOIvoukteZFMY2WIhPCQ6OOOYy33nQiyGFpwW6I4ky/f18SdSN84n/GLvgC9DOF0fJaKTYYJg=="
+    },
+    "react-native": {
+      "version": "0.87.1",
+      "integrity": "sha512-DJKG6ANoD7BtrE4z9DewiSD7/RxCX73lK5Pu49aUr85P3333Dm2roTiP0rRjQNDZdVizHSOmstWfwF/o9EjCRA=="
+    },
+    "react-native-nitro-sqlite": {
+      "version": "10.0.0",
+      "integrity": "sha512-3+tcmKWjS2covvqBsK3EvpiClSekllwVOTRO3BzwsapIf/hvawcbippcPi1gcwEORS41UcQr0oI/QgYoJrjK2Q=="
+    },
+    "electron": {
+      "version": "43.4.0",
+      "integrity": "sha512-3qxGF0CeQbiox5oWV1JlbWGQ1VerbmDhTFqW4sJ8h7uqTHniFYPObXJcDna0DMh32et0fFyKzz0YY8lJv3t5jg=="
+    }
+  },
+  "reports": {
+    "peerInputElectron": {
+      "result": "PASS",
+      "checks": 103,
+      "sealedBox": "kHD3fI6SMhPZpWuQdwaKAv7K6Y9d_413t1WcLIfmwGAewG62BgwiLpWf6QZZdGWGF19_0KQETVt6HuBNmUaex3UX5sJ03grxbBrDs1od-_E74gjMwjKJZ6NJsVS3agAb_Bvd7RvoU4vHqcNNtyzumXP5U8VpZ1EXHZYl1btClth02CAJL7i1bXyQl368j1-EyqH3yo-AXK81AZngowgSyIJZRHP4xADMvqsSAHGKOKCNbv64qFRrsGtRNHBTexwSJtacLhw0J9IWvXqI55plYj93JydVPmXiL9xcFyzmusv98muaXOepicWeds-vWF211KAWY-n9kSvIEZtKKoT6IXYEqv7Pbdo3AcKGl4lJPz4-6y5piKczhOUXD99Ghb1-gN8xB_q5NCqYYiX4V6DgNntKzHMrN_Qu_501zI_dqa0vTfqcpUm_Z0KxUiMpFYMZ6mCYwj5hP7et2v0HSLCzwSugZEmsjyORqqeEY-nblWUcS22B",
+      "runtime": "Electron main app adapters",
+      "electron": "43.4.0",
+      "node": "24.18.1",
+      "libsodium": "1.0.22",
+      "local": {
+        "result": "PASS",
+        "checks": 42,
+        "faultCases": 11,
+        "revisions": 4,
+        "outbox": 4,
+        "schemaVersion": 12,
+        "reopen": "PASS",
+        "bank": "/tmp/lion-stage1-desktop-AGCQP4/synthetic-desktop.sqlite"
+      },
+      "secrets": {
+        "result": "PASS",
+        "checks": 7,
+        "backend": "gnome_libsecret",
+        "available": true
+      }
+    },
+    "androidDebug": {
+      "result": "PASS",
+      "checks": 104,
+      "sealedBox": "r3OSCza9qtofdojg1S0ouL9sFdI6fsfgSyx1lT70_mYXWxEB2vqKFghv-uBUI0tXblPpmNgJu8i0WoH-Ipql0BzVM5609sUVBK9Ak395pnq76xEjCxhdSHQDKzEV6MGlFsH8b0vOZgSgTuoe6i-5o7gFmpKkDxQgO3-DUU8cP5MXke9jiWCyTiy4WtHpg2ZyTE45YGZdETA0ELfrZjUluRyiVLC4-OpVwMITUeeFzGvN63lcqvOzXD962d3rONe3l5qMmT0NjnK8GNjiWAm8zlWoWrbS38NMqpy1-AHX4j9dgIQw-MXyVR2uRWuHjm-ItQxkN8QgO2Awe6w70VIpNWJ6KMx3o9hgTPJmAw5tdXljlP8nePqtkLI4r7GvHBJgWvOtorasCpyqaHswFZo0qLbsp9zRxtcVM5Vc6ocVmZQRZIk3SGZACWLO5wZdS_ZnWM-kCKb_gK3FtQvCLmZTQhLOSJSQfj3A7rn7eOLVwfA3D7oJ",
+      "local": {
+        "result": "PASS",
+        "checks": 44,
+        "faultCases": 12,
+        "revisions": 4,
+        "outbox": 4,
+        "schemaVersion": 6,
+        "reopen": "PASS",
+        "staging": "PASS",
+        "restore": "PASS",
+        "bank": "stage1-android-df4012d8-b597-4a1e-97c8-4c2628fbfc50.sqlite"
+      },
+      "secrets": {
+        "result": "PASS",
+        "checks": 10,
+        "persistence": "Android Keystore + noBackupFilesDir"
+      },
+      "database": {
+        "result": "PASS",
+        "checks": 198,
+        "driver": "react-native-nitro-sqlite 10.0.0",
+        "sqlite": "3.49.0",
+        "schemas": [
+          "1→6",
+          "2→6",
+          "3→6",
+          "4→6",
+          "5→6"
+        ],
+        "syntheticFixturesOnly": true
+      },
+      "runtime": "Android/Hermes/JSI app adapters",
+      "api": 36,
+      "reactNative": "0.87.1",
+      "binding": "1.7.0",
+      "libsodium": "1.0.21",
+      "keystore": {
+        "result": "PASS",
+        "checks": 6,
+        "algorithm": "AES-256-GCM",
+        "securityLevel": 0,
+        "hardwareClaim": false
+      }
+    },
+    "androidRelease": {
+      "result": "PASS",
+      "checks": 104,
+      "sealedBox": "IR6_eBX3Zt4qnLHYLdrf4v3CM0D_8lchbiyBE4cqUQIAh3FQwcOUhpkhojdpSXEI6eEym_9HB1tg9OYPPOVNjz05TYEvUsKud_J36T5rUzRgGW2FBO-b09uRNA8eGRbVQt8sicusLiKj7yMcbxN9Hv8RLuH2UQOKHy6XJ7UY9Cej-7GoUgmp19shDUM_-WmE4sysJ-8T_uJr1XpQvY6jTLPbGgk_NKEtbFHtJXz0-HuYNUPFe9j0no92U1seJWj08ielaq1tqC3mvR6pNXwOaNON1GdW5_s8r9LZveSlLjTtvFvTuYfehLbFdA9Bhm1FU45w9JGjewUIIMoKZZqECISbTsvbdNKTfF_eYxa2YRjwgYutdv_TnYCwtqv1nvb0e2gAVIG9PYs1mcZdUvVOc1l83RKcLaPf7PEY6tUykJFRU3gBvnsSP_vo5mRzZ0ykLGES5LrHEvtAKCK_WdJtG5ELaZRBIdhker3gt51ZQkPRMJ6A",
+      "local": {
+        "result": "PASS",
+        "checks": 44,
+        "faultCases": 12,
+        "revisions": 4,
+        "outbox": 4,
+        "schemaVersion": 6,
+        "reopen": "PASS",
+        "staging": "PASS",
+        "restore": "PASS",
+        "bank": "stage1-android-a377a4ac-b6ea-443d-b74b-eedc1c963deb.sqlite"
+      },
+      "secrets": {
+        "result": "PASS",
+        "checks": 10,
+        "persistence": "Android Keystore + noBackupFilesDir"
+      },
+      "database": {
+        "result": "PASS",
+        "checks": 198,
+        "driver": "react-native-nitro-sqlite 10.0.0",
+        "sqlite": "3.49.0",
+        "schemas": [
+          "1→6",
+          "2→6",
+          "3→6",
+          "4→6",
+          "5→6"
+        ],
+        "syntheticFixturesOnly": true
+      },
+      "runtime": "Android/Hermes/JSI app adapters",
+      "api": 36,
+      "reactNative": "0.87.1",
+      "binding": "1.7.0",
+      "libsodium": "1.0.21",
+      "keystore": {
+        "result": "PASS",
+        "checks": 6,
+        "algorithm": "AES-256-GCM",
+        "securityLevel": 0,
+        "hardwareClaim": false
+      }
+    },
+    "electronWithAndroidDebug": {
+      "result": "PASS",
+      "checks": 104,
+      "sealedBox": "3s2GLikPM4yLIEQZFKM5lnLtT1YKTmmEr6u7myoB9QDF4jBzP5gXnfOXwHPZxvSsT9dl89z-_wD53ysW64yRMvllC2T_o24vfTN6VUOxaXOJ6kzteIAZvD0Crudf4pOE5868wFLqyPR27-6BFVkn-JtIhC_twIKfznn1nKlAt2W1pjmkxIm_M8DX1jtpUWqFC5_KbAn_BRGUwRoRNbD76gamO4te9wJQn0Cda4eb3pY8pYTTkBmCi_Xo-V0hMbDFyz3wpHItQzLHoXbuxp79q9FWIWO6IFuwRcR9W6Mn3j72or_7nLo84IhCucZ88qNmM7C9mKptWeozQQ56aay0E5LGXsA8b_Qh4X5KtCcX4UeEj7hV6VIPBMoJsnBYvFFM5z1uGDoT3D9OJWgb74Mdf2lqLFxWmuvQ9peqfGlpGmcQvuIZPdOyJUC3qnloUmQImSLJjdchUpIosPJrE7PF9jelWzDu_GCvBeZAiLoEZwcqCn7Q",
+      "runtime": "Electron main app adapters",
+      "electron": "43.4.0",
+      "node": "24.18.1",
+      "libsodium": "1.0.22",
+      "local": {
+        "result": "PASS",
+        "checks": 44,
+        "faultCases": 12,
+        "revisions": 4,
+        "outbox": 4,
+        "schemaVersion": 12,
+        "reopen": "PASS",
+        "bank": "/tmp/lion-stage1-desktop-rIRLfc/synthetic-desktop.sqlite"
+      },
+      "secrets": {
+        "result": "PASS",
+        "checks": 7,
+        "backend": "gnome_libsecret",
+        "available": true
+      }
+    },
+    "electronWithAndroidRelease": {
+      "result": "PASS",
+      "checks": 104,
+      "sealedBox": "5tcKUUjcxAsbux5qCPe4uxbw-do5GqMR4uKUoDe_jSFWWVtclIL8x9I2267a8ImgIT-WmJyoreMIoK5ty2rQQwREs3RYiRFhXecvNH7I8cHpP44KFVADnCmxcWW9PJO978WjxmPc2_Sr1FOYiejNESo0cacNOCahOLjabQb-FxGHCHVXfOOuQ30k-bwZFbFmuyIb67C3YOTknEsW9N-1lddr0uJ0QbGbNMQM_hOq_iJTyFO9vQhQrVF6k2VdDriRIjauDROCyFX316BUBnwuAmvV2x1LhAxtruq0ijVQAehvekUAfPkL2WjpU-6GE5JfP5Cd-Rs4LPue8IcXudej8Jkf1m2XaPBP9vRxHv3wOghyCs2Qw3rVAwid8tmdlObpbPNzvBvqaZzh3EvvW-vNoS8gvO2LGUF8FMUWi3JJIo8ZOosZtL-98-XPC72m-gilcC8S6RixyHkiOFO98kTFigj1fGHpJduE71LLm2yYPzWP1qTr",
+      "runtime": "Electron main app adapters",
+      "electron": "43.4.0",
+      "node": "24.18.1",
+      "libsodium": "1.0.22",
+      "local": {
+        "result": "PASS",
+        "checks": 44,
+        "faultCases": 12,
+        "revisions": 4,
+        "outbox": 4,
+        "schemaVersion": 12,
+        "reopen": "PASS",
+        "bank": "/tmp/lion-stage1-desktop-XPfQFZ/synthetic-desktop.sqlite"
+      },
+      "secrets": {
+        "result": "PASS",
+        "checks": 7,
+        "backend": "gnome_libsecret",
+        "available": true
+      }
+    }
+  },
+  "peerInputNote": "peerInputElectron is the initial main report used to embed its random public-fixture sealed box into both Android APKs; final main reports exercise 12 SQL failures and open both Android boxes.",
+  "verification": {
+    "monorepoTests": {
+      "core": 61,
+      "desktop": 67,
+      "mobile": 81,
+      "syncProtocol": 35,
+      "syncLocal": 2,
+      "total": 246
+    },
+    "desktopTestsInElectronNode": 67,
+    "typecheck": "PASS",
+    "lint": "PASS, zero warnings",
+    "diffCheck": "PASS",
+    "sodiumCAbi": {
+      "libsodium": "1.0.18",
+      "goldenCrypto": "PASS",
+      "goldenControl": "PASS",
+      "sealedBoxOpen": [
+        "androidDebug",
+        "androidRelease",
+        "electronWithAndroidRelease"
+      ]
+    }
+  },
+  "fixtureSha256": {
+    "control.json": "14b7c5e81071d191de1c215ead4c988f970620108e0f8f78e64415510997bb1b",
+    "crypto-input.json": "bcbc7334e82d2e9eb06e30ae842deff22306afa2057d2499e367959fef720724",
+    "crypto.json": "63f4fcaf899d1c12a4abb3cd66d8fb5196f56515e94b432d15dea81cae5d1b88",
+    "serialization.json": "8ffc2a4f04309ed63c6e7453c569a786caba15c4c72ff235efca1b5b4ca80d1a"
+  },
+  "artifactSha256": {
+    "androidDebugApk": "153272b33dccf6ce2752f63230a2976fa4c46653d761fd408f5391362dc194c2",
+    "androidReleaseApk": "b97d8b27bd2b3d1f3e0c0f2a2c289b0497cd8a0fa7bb7af7856fe46df571c2ad",
+    "electronTestBundle": "59e246ff82b95ee1ed954955690ccb6d8e7292964e136d051da8bbb39f759c29"
+  },
+  "sourceSha256": {
+    "apps/desktop/package.json": "5f530edbefb5362277fc5a2fbe24f63b54747ed9128a0cc4f9776487d3921a06",
+    "apps/desktop/src/main/database.ts": "6654997819f06514c2e92d5fdb0a78ed6acf3dfe910685fd1429b847143287ba",
+    "apps/desktop/src/main/ipc.ts": "8547b26d37b4f716031278091e725c1061c55792a198e108e74a61f0c7c73568",
+    "apps/desktop/src/main/migrationProtection.test.ts": "8d0ee7efbfefffe305236807c709513855ac8c0338d69ff75268777ef22081f4",
+    "apps/desktop/src/main/migrationProtection.ts": "f14d8370c09097681a6d450bb39afcc0c84445bbde411417bad0cff0d80cab1d",
+    "apps/desktop/src/main/sync/crypto.ts": "be18bda7309be2780a321c2cdc37dc906878c46115dc3c324d11a29cf93c0947",
+    "apps/desktop/src/main/sync/manualSync.test.ts": "913b89cb52e2e2b9e74595d7fef01fb3d8296553b7a75cc69dc82d22cafb174e",
+    "apps/desktop/src/main/sync/secretStore.test.ts": "ae29d8d5d3a39c9c14d7d844eb3d2bfe1b016f2f7184145786361fcec17932c3",
+    "apps/desktop/src/main/sync/secretStore.ts": "7e0934295f09fa4cc3bcd50bebb56c00ddbad769fdcea66916ce524758e70963",
+    "apps/mobile/android/app/src/main/java/com/lionpocketmobile/MainApplication.kt": "bb323bbf1b103033e1875e1c57df2f6ef2125ce1d73393f42f709224817e6b39",
+    "apps/mobile/android/app/src/main/java/com/lionpocketmobile/SyncSecretsModule.kt": "8cb795e764a7e41610dca40c22c4e40deea0900e270ee11945d57005c00a7798",
+    "apps/mobile/package.json": "6935d210295fa9a2dfff92f78d14056efb0e483dcc49ced56cd2aaa791815a91",
+    "apps/mobile/src/db/backupRepository.ts": "22e31507413929e84749fb36a578a1933425f4c7e7d050303d3f80a5d9be92d9",
+    "apps/mobile/src/db/functionalParity.test.ts": "b71df0c5e8bc092694fe6fba1db2334a040dbe6e3186bf7e7a405743301fc211",
+    "apps/mobile/src/db/importRepository.ts": "7c5c5c2024fb93b02f757b50210b31c76c7f444420e98e471a69f829359e2520",
+    "apps/mobile/src/db/manualSync.test.ts": "93f12106ebe31847960810e3307999419e0b0a92a2ffc9d01956d9af1daf5769",
+    "apps/mobile/src/db/migrationProtection.test.ts": "2c5421226bb8b96be94c60b9bc21cbb0b61542f6dc1f68282ec840e501de109a",
+    "apps/mobile/src/db/migrations.ts": "dda9bf36ff20522b2fe2fab33e6cad636b304871380528f199d1deebd42adce7",
+    "apps/mobile/src/db/repository.ts": "017df3111f416ca718f91b82525f8e3b899b1bff64edd99a0e21364d71370159",
+    "apps/mobile/src/files/localData.ts": "427fcc45aac02a32fe807030839b0e7e832bd608e5b71d11e29adf10ecee9236",
+    "apps/mobile/src/sync/crypto.ts": "7e08e75bda1d0bb54a8c1018f46b4967f93b33630b0f9328ef1014b1332fc3a1",
+    "apps/mobile/src/sync/secretStore.ts": "59fc286866c52bc8454020e59dc672613ac6111f84f1b5f7c4c393fe2c7e444b",
+    "package-lock.json": "0bb0ff9e23b38859cf2475db20e0d69c23c1422375b4a05190c50ba7e400a95e",
+    "package.json": "b0cb1ca3f849e50a3638dd870ac061c75339637338268adb148a9abbb801fa5c",
+    "packages/core/src/local-files.ts": "89580f021d2de4a6df028fb279eaaf3ed231ac7d068dba692261da9a260b366b",
+    "packages/sync-local/.eslintrc.json": "3fbfedf591376e53bc1b5d4ad12fd9f76468c8bca982db7e1f860f89d4a4c2a9",
+    "packages/sync-local/package.json": "f25ed6ec3108cc1a35b469c94a7bae44fe2330052754514248a9cf71df3c71a1",
+    "packages/sync-local/src/backup.ts": "79fd3eedf0b660bfb392fcf8bc16acf29c376c353fc1ef17a81db165be856f97",
+    "packages/sync-local/src/index.ts": "731fd84f9b6c98af9878ca5d95ce9752a4d9275b64b4985b2e94426595c39a36",
+    "packages/sync-local/src/manual.test.ts": "f6d60ef2290e7e6d8f991b41ff43546f62b099363a69992346968bb648e7aea5",
+    "packages/sync-local/src/manual.ts": "7a752b820d2424d568b417475c0f105361618f945cda9e44e520a47bc96ff379",
+    "packages/sync-local/src/schema.ts": "2d607dc201c379f9f011c295fafc2cc5aa1c0259b5ade9d0bdf97c520c6c22a9",
+    "packages/sync-local/src/secrets.ts": "0b7ff4000d1e4bd0ffbb0c8fd0d3c6e6564868d534acd97a3d09a45a241f76ad",
+    "packages/sync-local/tsconfig.json": "b2eff8f3924ee1995bb1662d1820b7ea434f7d01cd2f1c39e8ce5cb7b0d4bc69",
+    "tools/sync-stage0/native-harness/storage-checks.js": "ba9e2d515d360b2446b9988d06aebd387da16f139c381080acaf6e8c2062ee2f",
+    "tools/sync-stage0/prepare-native-harness.cjs": "f2f4fb27301606797b901fd21cf3361f7c2f76afdca011e61648cb92cc6faa10",
+    "tools/sync-stage1/SecretStoreProbeModule.kt": "3c4723a0731e65e82fcace6611a5e2ad9ec095b9f7ad91191bfdd318682adf41",
+    "tools/sync-stage1/android-index.js": "03314fcb2ebaeeee067f95a50b5d7455d53b926700e8ae3442b7cee0318496f6",
+    "tools/sync-stage1/build-electron.cjs": "ac10e6a7de7b4702c686408ee8b9203a39c77de0df3de6e91dee81e4537110d3",
+    "tools/sync-stage1/electron.ts": "22cfc1a9436223bdf058f1f766d6e147b6020c3e3d9028362651b97b243a20f8",
+    "tools/sync-stage1/manual-checks.cjs": "317a572de3005d7192341d3617ff16680cd910f807fbc8c032b056e618d1e852",
+    "tools/sync-stage1/prepare-android.cjs": "5ead8bc0da1a1f823e8c9907e3e4efcb65b5fd8510d69bdea25141272db3f4bc"
+  },
+  "limitations": [
+    "Android emulator software Keystore; no hardware claim",
+    "release build signed with public debug key, not distributed product",
+    "no API/login/network/onboarding/trust provisioning",
+    "Windows, physical arm64, packaged upgrade and independent security review remain pending"
+  ]
+}

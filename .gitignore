@@ -104,3 +104,5 @@ apps/mobile/android/app/build/
 apps/mobile/android/build/
 *.jsbundle
 .metro-health-check*
+
+packages/sync-local/dist/

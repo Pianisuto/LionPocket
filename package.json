@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build:core": "npm run build --workspace @lionpocket/core",
+    "build:core": "npm run build --workspace @lionpocket/core && npm run build:local-sync",
     "mobile:start": "npm run build:core && npm run start --workspace @lionpocket/mobile",
     "mobile:android": "npm run build:core && npm run android --workspace @lionpocket/mobile",
     "mobile:build:android": "npm run build:core && npm run build:android --workspace @lionpocket/mobile",
@@ -16,10 +16,12 @@
     "make:linux": "npm run build:core && npm run make:linux --workspace apps/desktop",
     "publish": "npm run build:core && npm run publish --workspace apps/desktop",
     "icons": "npm run icons --workspace apps/desktop",
-    "lint": "npm run lint --workspace @lionpocket/core && npm run lint --workspace apps/desktop && npm run lint --workspace @lionpocket/mobile && npm run lint --workspace @lionpocket/sync-protocol",
-    "typecheck": "npm run build:core && npm run typecheck --workspace apps/desktop && npm run typecheck --workspace @lionpocket/mobile && npm run typecheck --workspace @lionpocket/sync-protocol",
-    "test": "npm run build:core && npm run test --workspace @lionpocket/core && npm run test --workspace apps/desktop && npm run test --workspace @lionpocket/mobile && npm run test --workspace @lionpocket/sync-protocol",
+    "lint": "npm run lint --workspace @lionpocket/core && npm run lint --workspace apps/desktop && npm run lint --workspace @lionpocket/mobile && npm run lint --workspace @lionpocket/sync-protocol && npm run lint --workspace @lionpocket/sync-local",
+    "typecheck": "npm run build:core && npm run typecheck --workspace apps/desktop && npm run typecheck --workspace @lionpocket/mobile && npm run typecheck --workspace @lionpocket/sync-protocol && npm run typecheck --workspace @lionpocket/sync-local",
+    "test": "npm run build:core && npm run test --workspace @lionpocket/core && npm run test --workspace apps/desktop && npm run test --workspace @lionpocket/mobile && npm run test --workspace @lionpocket/sync-protocol && npm run test --workspace @lionpocket/sync-local",
     "mobile:build:android:release": "npm run build:core && npm run build:android:release --workspace @lionpocket/mobile",
-    "build:contracts": "npm run build:core && npm run build --workspace @lionpocket/sync-protocol"
+    "build:contracts": "npm run build:core",
+    "build:local-sync": "npm run build --workspace @lionpocket/sync-protocol && npm run build --workspace @lionpocket/sync-local",
+    "sync:stage1:electron:build": "npm run build:core && node tools/sync-stage1/build-electron.cjs"
   }
 }

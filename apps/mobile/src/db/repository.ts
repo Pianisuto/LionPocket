@@ -1,3 +1,5 @@
+import { type SqlWorkflow, type SqlRow, activateSyntheticManualPilot, recordManualMutation } from '@lionpocket/sync-local';
+import type { Connection, Query } from './planningRepository';
 import {
   fromCents,
   toCents,
@@ -91,6 +93,32 @@ function fromRow(row: Row): Transaction {
 }
 
 export class MobileRepository extends PlanningRepository {
+  constructor(db: Connection, private readonly syncUuid?: () => string) { super(db); }
+
+  private async runSyncWorkflow(tx: Query, workflow: SqlWorkflow): Promise<void> {
+    let step = workflow.next();
+    while (!step.done) {
+      const { sql, params } = step.value;
+      step = workflow.next((await tx.executeAsync<SqlRow>(sql, params)).rows._array);
+    }
+  }
+
+  private uuid = (): string => {
+    if (!this.syncUuid) throw new Error('Native CSPRNG required for the synthetic sync pilot.');
+    return this.syncUuid();
+  };
+
+  /** Only an isolated empty synthetic bank. Not exposed through UI. */
+  async enableSyntheticManualSyncPilot(): Promise<void> {
+    await this.db.transaction((tx) => this.runSyncWorkflow(tx, activateSyntheticManualPilot(this.uuid)));
+  }
+
+  private async recordManualSync(tx: Query, id: string): Promise<void> {
+    const row = (await tx.executeAsync<SqlRow>('SELECT * FROM transactions WHERE id = ?', [id])).rows._array[0];
+    if (!row) throw new Error('Lançamento não encontrado.');
+    await this.runSyncWorkflow(tx, recordManualMutation(row, this.uuid, new Date().toISOString()));
+  }
+
   async monthlyOverview(month: string) {
     const items = await this.list({ month });
     return monthlyOverview(items, await this.listGoals(), month);
@@ -441,6 +469,7 @@ export class MobileRepository extends PlanningRepository {
         input.cardId ?? null,
         input.purchaseDate ?? null,
       ];
+      const id = input.id ?? await newId(tx);
       if (input.id) {
         const result = await tx.executeAsync(
           `UPDATE transactions SET kind = ?, description = ?,
@@ -455,19 +484,22 @@ export class MobileRepository extends PlanningRepository {
           `INSERT INTO transactions (kind, description, planned_amount_cents,
         actual_amount_cents, due_date, settled_date, status, notes, category_id, payment_method_id,
         card_id, purchase_date, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [...values, await newId(tx)],
+          [...values, id],
         );
       }
       if (input.id) await this.resetRolling(tx, input.id);
+      await this.recordManualSync(tx, id);
     });
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.db.executeAsync(
-      `UPDATE transactions SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`,
-      [id],
-    );
-    if (!result.rowsAffected) throw new Error('Lançamento não encontrado.');
+    await this.db.transaction(async (tx) => {
+      const result = await tx.executeAsync(
+        `UPDATE transactions SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`, [id]);
+      if (!result.rowsAffected) throw new Error('Lançamento não encontrado.');
+      await tx.executeAsync('DELETE FROM transaction_priority_order WHERE transaction_id = ?', [id]);
+      await this.recordManualSync(tx, id);
+    });
   }
 
   async settle(id: string): Promise<void> {
@@ -488,7 +520,7 @@ export class MobileRepository extends PlanningRepository {
           [todayIso(), id],
         );
         count += result.rowsAffected;
-        if (result.rowsAffected) await this.resetRolling(tx, id);
+        if (result.rowsAffected) { await this.resetRolling(tx, id); await this.recordManualSync(tx, id); }
       }
     });
     return count;

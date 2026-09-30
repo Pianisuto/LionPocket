@@ -1,3 +1,4 @@
+import { syncTables } from '@lionpocket/sync-local';
 import {
   toCents,
   validateTransaction,
@@ -189,7 +190,10 @@ export function mergeBackupData(
     cardIds = new Map<string, string>();
   let added = 0,
     skipped = 0;
-  for (const table of backupTables)
+  if (incoming.sync_local_state?.some((state) => state.local_scope_id !== null)
+    || syncTables.some((table) => table !== 'sync_local_state' && (incoming[table]?.length ?? 0) > 0))
+    throw new Error('Importar uma linhagem de sync exige onboarding, fora do piloto atual. Use restauração do backup na mesma plataforma.');
+  for (const table of backupTables.filter((table) => !syncTables.includes(table)))
     for (const original of incoming[table]) {
       const row = { ...original };
       if (row.category_id && categoryIds.has(String(row.category_id)))

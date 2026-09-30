@@ -121,7 +121,7 @@ export async function prepareImport(file: PickedFile): Promise<PreparedImport> {
         loadBackupData(
           db,
           parsed.desktop ? { ...desktopBackupData(parsed.data), local_preferences: [] } : parsed.data,
-          parsed.desktop ? migrations.length : parsed.schemaVersion,
+          parsed.desktop ? (parsed.schemaVersion === 6 ? 6 : 5) : parsed.schemaVersion,
         ),
       );
       if (parsed.desktop) {

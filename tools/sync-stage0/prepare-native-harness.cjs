@@ -24,7 +24,13 @@ packageJson.name = '@lionpocket/mobile-crypto-spike';
 delete packageJson.dependencies['@lionpocket/core'];
 packageJson.dependencies['react-native-libsodium'] = '1.7.0';
 writeFileSync(join(app, 'package.json'), JSON.stringify(packageJson, null, 2) + '\n');
-writeFileSync(manifest, JSON.stringify({ name: 'lionpocket-native-crypto-spike', private: true, workspaces: ['apps/mobile'] }, null, 2) + '\n');
+writeFileSync(manifest, JSON.stringify({ name: 'lionpocket-native-crypto-spike', private: true, workspaces: ['apps/mobile','packages/*'] }, null, 2) + '\n');
+for (const name of ['core','sync-protocol','sync-local']) {
+  const destination = join(target,'packages',name); mkdirSync(destination,{recursive:true});
+  const pkg = JSON.parse(readFileSync(join(repo,'packages',name,'package.json'),'utf8')); delete pkg.devDependencies;
+  writeFileSync(join(destination,'package.json'),JSON.stringify(pkg,null,2));
+  cpSync(join(repo,'packages',name,'dist'),join(destination,'dist'),{recursive:true});
+}
 for (const name of ['babel.config.js', 'metro.config.js']) cpSync(join(repo, 'apps/mobile', name), join(app, name));
 const gradle = join(app, 'android/app/build.gradle');
 writeFileSync(gradle, readFileSync(gradle, 'utf8').replace('react {', 'react {\n    debuggableVariants = [] // Offline spike: bundle JS even in debug.').replace('applicationId "com.lionpocketmobile"', 'applicationId "com.lionpocketmobile.cryptospike"'));

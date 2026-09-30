@@ -1,6 +1,7 @@
+import { syncMigration, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { initializeLocalSchema } from './migrationProtection';
+import { initializeLocalSchema, hasCurrentFinancialSchema } from './migrationProtection';
 import type {
   CatalogInput,
   Catalogs,
@@ -137,7 +138,40 @@ export class LionPocketDatabase {
     }
   }
 
+  private atomic<T>(action: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    try { const result = action(); this.db.exec('COMMIT'); return result; }
+    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+
+  private runSyncWorkflow(workflow: SqlWorkflow): void {
+    let step = workflow.next();
+    while (!step.done) {
+      const { sql, params = [] } = step.value;
+      step = workflow.next(this.db.prepare(sql).all(...params) as SqlRow[]);
+    }
+  }
+
+  /** Only an isolated empty synthetic bank. Not exposed through IPC/UI. */
+  enableSyntheticManualSyncPilot(): void {
+    this.atomic(() => this.runSyncWorkflow(activateSyntheticManualPilot(randomUUID)));
+  }
+
+  private recordManualSync(id: string): void {
+    const row = this.db.prepare('SELECT *, NULL AS occurrence_date FROM transactions WHERE id = ?').get(id) as SqlRow | undefined;
+    if (!row) throw new Error('Lançamento não encontrado.');
+    this.runSyncWorkflow(recordManualMutation(row, randomUUID, now()));
+  }
+
   private migrate() {
+    const hasMarkers = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'migrations'").get();
+    if (hasMarkers) {
+      const versions = this.db.prepare('SELECT version FROM migrations').all().map((r) => Number(r.version));
+      if (hasCurrentFinancialSchema(this.db, versions)) {
+        this.migrateSyncSidecars();
+        return;
+      }
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS migrations (
         version INTEGER PRIMARY KEY,
@@ -373,6 +407,14 @@ export class LionPocketDatabase {
       this.db.exec("UPDATE recurring_transaction_priorities SET pinned_from_month = '0000-01'");
     }
     this.db.exec("INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (11, datetime('now'))");
+    this.migrateSyncSidecars();
+  }
+
+  private migrateSyncSidecars(): void {
+    if (!this.db.prepare('SELECT 1 FROM migrations WHERE version = 12').get()) {
+      for (const sql of syncMigration) this.db.exec(sql);
+      this.db.exec("INSERT INTO migrations(version, applied_at) VALUES (12, datetime('now'))");
+    }
   }
 
   private seed() {
@@ -988,6 +1030,10 @@ export class LionPocketDatabase {
   }
 
   saveTransaction(input: TransactionInput): Transaction {
+    return this.atomic(() => this.saveTransactionAtomic(input));
+  }
+
+  private saveTransactionAtomic(input: TransactionInput): Transaction {
     const id = input.id ?? randomUUID();
     const timestamp = now();
     const actualCents = toCents(input.actualAmount);
@@ -1039,6 +1085,7 @@ export class LionPocketDatabase {
       );
     }
     this.resetRollingRecurringProjections(id);
+    this.recordManualSync(id);
     return this.getTransaction(id);
   }
 
@@ -1086,22 +1133,24 @@ export class LionPocketDatabase {
   }
 
   deleteTransaction(id: string) {
-    this.db.prepare('DELETE FROM transaction_priority_order WHERE transaction_id = ?').run(id);
-    this.db.prepare('UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ?').run(
-      now(),
-      now(),
-      id,
-    );
+    this.atomic(() => {
+      this.getTransaction(id);
+      this.db.prepare('DELETE FROM transaction_priority_order WHERE transaction_id = ?').run(id);
+      const timestamp = now();
+      this.db.prepare('UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ?').run(timestamp, timestamp, id);
+      this.recordManualSync(id);
+    });
   }
 
   settleTransaction(id: string) {
-    const transaction = this.getTransaction(id);
-    const status = transaction.kind === 'income' ? 'received' : 'paid';
-    this.db.prepare(`
-      UPDATE transactions SET status = ?, actual_cents = COALESCE(actual_cents, planned_cents),
-        settled_date = COALESCE(settled_date, ?), updated_at = ? WHERE id = ?
-    `).run(status, todayIso(), now(), id);
-    this.resetRollingRecurringProjections(id);
+    this.atomic(() => {
+      const transaction = this.getTransaction(id);
+      const status = transaction.kind === 'income' ? 'received' : 'paid';
+      this.db.prepare(`UPDATE transactions SET status = ?, actual_cents = COALESCE(actual_cents, planned_cents),
+        settled_date = COALESCE(settled_date, ?), updated_at = ? WHERE id = ?`).run(status, todayIso(), now(), id);
+      this.resetRollingRecurringProjections(id);
+      this.recordManualSync(id);
+    });
   }
 
   /**
@@ -1127,7 +1176,7 @@ export class LionPocketDatabase {
       for (const id of ids) {
         const changed = Number(statement.run(today, timestamp, id).changes);
         settled += changed;
-        if (changed) this.resetRollingRecurringProjections(id);
+        if (changed) { this.resetRollingRecurringProjections(id); this.recordManualSync(id); }
       }
       this.db.exec('COMMIT');
     } catch (error) {
@@ -1974,7 +2023,13 @@ export class LionPocketDatabase {
     };
   }
 
-  exportData() {
+  verifySyncBackupState(): void {
+    const data = Object.fromEntries(syncTables.map((table) => [table, this.db.prepare(`SELECT * FROM ${table}`).all() as SqlRow[]]));
+    validateSyncBackup(data);
+  }
+
+  exportData(includeSync = false) {
+    if (includeSync) this.verifySyncBackupState();
     const tables = [
       'categories',
       'payment_methods',
@@ -1985,6 +2040,7 @@ export class LionPocketDatabase {
       'recurring_transaction_priorities',
       'transaction_priority_order',
       'goals',
+      ...(includeSync ? syncTables : []),
     ];
     return Object.fromEntries(
       tables.map((table) => [table, this.db.prepare(`SELECT * FROM ${table}`).all()]),

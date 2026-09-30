@@ -89,6 +89,7 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
       filters: [{ name: 'Cópia do LionPocket', extensions: ['sqlite'] }],
     });
     if (selection.canceled || !selection.filePath) return null;
+    database.verifySyncBackupState();
     await backup(database.db, selection.filePath);
     return selection.filePath;
   });
@@ -102,7 +103,7 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
     if (selection.canceled || !selection.filePath) return null;
     await fs.writeFile(
       selection.filePath,
-      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data: database.exportData() }, null, 2),
+      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), schemaVersion: 12, data: database.exportData(true) }, null, 2),
       'utf8',
     );
     return selection.filePath;

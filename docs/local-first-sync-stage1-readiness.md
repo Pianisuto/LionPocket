@@ -58,3 +58,7 @@ Conflitos seguem a proposta: contabilizar última base comum válida; rascunhos 
 5. Executar os oito critérios da [Etapa 1 da proposta](local-first-sync-proposal.md#etapa-1--fluxo-vertical-mínimo-ambiente-de-desenvolvimento): retry após perda de resposta, crash/reabertura, ramo concorrente, exclusão offline, zero/NULL, isolamento/revogação e uso local sem conta.
 
 Não há bloqueio técnico conhecido para **começar esse trabalho**. Ainda não há fluxo vertical aceito. Antes de dados reais/release: aparelho arm64 físico, Windows e cofres reais, APK distribuível/upgrade sem apagar dados, fixtures desktop adicionais, storage cheio/interrupção, revisão independente de trust/recovery/rotação e ensaio completo de restore/epoch. SQLite/exports locais em claro e SQLCipher continuam decisão separada. Onboarding de bases preenchidas, importações/planejamento e retenção finita pertencem às etapas posteriores.
+
+## Primeira parte implementada
+
+A [fundação local do piloto manual](local-first-sync-stage1-local-foundation.md) implementa os bindings/cofres, migrations aditivas mobile 6/desktop 12, backup/staging e escrita manual + sidecars/outbox atômica, verificados em bancos sintéticos separados. As afirmações anteriores sobre ausência de migrations/adapters descrevem o estado de entrada, antes dessa implementação. Sync continua desativado por padrão, sem capabilities remotas, API, login, transporte ou onboarding. Validadores de trust/registry, pareamento e prova HTTP continuam pendentes; não confundir esta primeira parte com a aceitação do fluxo vertical completo.

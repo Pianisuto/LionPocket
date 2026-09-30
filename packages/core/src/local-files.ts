@@ -172,7 +172,8 @@ export function parseBackupJson(content: string): {
   const desktop = object.platform === undefined;
   if (!desktop && object.platform !== 'mobile')
     throw new Error('Plataforma de backup desconhecida.');
-  const schemaVersion = desktop ? 4 : object.schemaVersion;
+  const schemaVersion = desktop ? (object.schemaVersion === 12 ? 6 : 4) : object.schemaVersion;
+  if (desktop && object.schemaVersion !== undefined && object.schemaVersion !== 12) throw new Error('Versão desktop desconhecida.');
   if (typeof schemaVersion !== 'number' || !Number.isInteger(schemaVersion) || schemaVersion < 1)
     throw new Error('Versão do banco inválida.');
   const data = object.data as Record<string, unknown>;
@@ -219,7 +220,7 @@ export function desktopBackupData(data: BackupData): BackupData {
         mapped.start_date = dateForMonthDay(String(mapped.start_month), Number(mapped.due_day));
       if (table === 'transactions')
         mapped.occurrence_date =
-          mapped.source_type === 'recurring' ? (mapped.purchase_date ?? mapped.due_date) : null;
+          mapped.occurrence_date ?? (mapped.source_type === 'recurring' ? (mapped.purchase_date ?? mapped.due_date) : null);
       return mapped;
     });
   }

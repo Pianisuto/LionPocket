@@ -39,7 +39,31 @@ describe('fixtures históricas e preparação aditiva mobile', () => {
     await migrate(db, protect);
     expect(protect).toHaveBeenCalledTimes(1);
   });
-  it('protege também uma futura atualização de v5 e inclui a última escrita em WAL', async () => {
+  it('v5 → v6 acrescenta somente sidecars, preservando domínio e backup anterior', async () => {
+    const {db,sqlite} = fixture(4);
+    await db.transaction(async(tx)=>{for(const sql of migrations[4]) await tx.executeAsync(sql);await tx.executeAsync('PRAGMA user_version=5');});
+    const before=captureDatabaseManifest(sqlite);
+    const originalTransaction=db.transaction.bind(db);
+    db.transaction=(action)=>originalTransaction(async(tx)=>{
+      const execute=tx.executeAsync.bind(tx);
+      tx.executeAsync=(async(...args: Parameters<typeof tx.executeAsync>)=>{
+        const result=await execute(...args);
+        if(args[0]==='PRAGMA user_version = 6') throw new Error('Late real v6 failure');
+        return result;
+      }) as typeof tx.executeAsync;
+      return action(tx);
+    });
+    await expect(migrate(db,async()=>{})).rejects.toThrow('Late real v6 failure');
+    expect(captureDatabaseManifest(sqlite)).toEqual(before);
+    db.transaction=originalTransaction;
+    const protect=vi.fn(async()=>{expect(captureDatabaseManifest(sqlite)).toEqual(before);});
+    await migrate(db,protect);
+    expect(protect).toHaveBeenCalledTimes(1);
+    expect(projectLegacyColumns(sqlite,before)).toEqual(before.tables.map(({name,columns,rows})=>({name,columns,rows})));
+    await verifyDatabase(db,6);
+    expect(sqlite.prepare('SELECT mode,local_scope_id FROM sync_local_state').get()).toMatchObject({mode:'disabled',local_scope_id:null});
+  });
+  it('protege também uma futura atualização da versão atual e inclui a última escrita em WAL', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'lion-mobile-stage0-')); directories.push(directory);
     const path = join(directory, 'live.sqlite'), native = sqliteTestConnection(path); connections.push(native.sqlite);
     await migrate(native.db);
@@ -47,7 +71,7 @@ describe('fixtures históricas e preparação aditiva mobile', () => {
     const repo = new MobileRepository(native.db);
     await repo.save({ kind: 'expense', description: 'Zero e null', plannedAmount: 0, actualAmount: null, dueDate: '2026-09-30', status: 'planned' });
     const before = captureDatabaseManifest(native.sqlite);
-    // Test-only v6. No production migration number or sync table is reserved/applied.
+    // Test-only next migration after the current production schema.
     const mutable = migrations as string[][];
     mutable.push(['CREATE TABLE preparation_metadata(id TEXT PRIMARY KEY)']);
     try {

@@ -1,9 +1,33 @@
+import { syncColumns } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-export const desktopSchemaVersion = 11;
+export const desktopSchemaVersion = 12;
 
-/** No sync metadata. Protect the pre-upgrade SQLite state, including committed WAL. */
+const financialColumns: Record<string, string[]> = {
+    categories: ['id'],
+    payment_methods: ['id'],
+    goals: ['id'],
+    cards: ['due_day', 'closing_day'],
+    transactions: ['purchase_date'],
+    installment_purchases: ['starting_installment', 'purchase_date'],
+    recurring_expenses: ['kind', 'start_month', 'card_id', 'charge_day', 'start_date', 'frequency', 'interval_count', 'interval_unit', 'anchor_to_actual', 'manual_months'],
+    recurring_transaction_priorities: ['pinned_from_month'],
+    transaction_priority_order: ['month'],
+  };
+
+export function hasCurrentFinancialSchema(db: DatabaseSync, versions: number[]): boolean {
+  return Array.from({ length: 11 }, (_, index) => index + 1).every((version) => versions.includes(version))
+    && columnsPresent(db, financialColumns);
+}
+function columnsPresent(db: DatabaseSync, required: Record<string, string[]>): boolean {
+  return Object.entries(required).every(([table, columns]) => {
+    const actual = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
+    return columns.every((column) => actual.includes(column));
+  });
+}
+
+/** Additive financial and sync metadata. Protect the pre-upgrade SQLite state, including committed WAL. */
 export function initializeLocalSchema(db: DatabaseSync, path: string, upgrade: () => void): void {
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();
   const existing = tables.length > 0;
@@ -15,23 +39,9 @@ export function initializeLocalSchema(db: DatabaseSync, path: string, upgrade: (
     throw new Error('O banco foi criado por uma versão mais nova do LionPocket.');
 
   // Historical markers were also used for seeds; inspect additive columns as well.
-  const requiredColumns: Record<string, string[]> = {
-    categories: ['id'],
-    payment_methods: ['id'],
-    goals: ['id'],
-    cards: ['due_day', 'closing_day'],
-    transactions: ['purchase_date'],
-    installment_purchases: ['starting_installment', 'purchase_date'],
-    recurring_expenses: ['kind', 'start_month', 'card_id', 'charge_day', 'start_date', 'frequency', 'interval_count', 'interval_unit', 'anchor_to_actual', 'manual_months'],
-    recurring_transaction_priorities: ['pinned_from_month'],
-    transaction_priority_order: ['month'],
-  };
   const complete = Array.from({ length: desktopSchemaVersion }, (_, index) => index + 1)
     .every((version) => versions.includes(version))
-    && Object.entries(requiredColumns).every(([table, columns]) => {
-      const actual = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
-      return columns.every((column) => actual.includes(column));
-    });
+    && hasCurrentFinancialSchema(db, versions) && columnsPresent(db, syncColumns);
   if (complete) return; // Do not replay historical data corrections on current databases.
 
   if (existing && path !== ':memory:') {
