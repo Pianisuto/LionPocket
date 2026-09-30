@@ -78,3 +78,62 @@ export const syncMigration = [
     state TEXT NOT NULL CHECK(state IN ('received','applied','quarantined')),
     envelope_json TEXT NOT NULL, last_error TEXT)`,
 ];
+
+export const foundationColumns = Object.fromEntries(
+  Object.entries(syncColumns).map(([table, columns]) => [table, [...columns]]),
+);
+export const foundationTables = [...syncTables];
+syncColumns.sync_local_state.push('binding_id', 'pull_upper_bound');
+syncColumns.sync_inbox.push('accepted_registry_version');
+syncColumns.sync_outbox.push('receipt_json');
+syncColumns.sync_bindings = [
+  'binding_id',
+  'local_scope_id',
+  'endpoint',
+  'server_id',
+  'server_epoch',
+  'vault_id',
+  'device_id',
+  'pin_json',
+  'registry_json',
+  'checkpoint_json',
+];
+syncColumns.sync_revision_origin = [
+  'revision_id',
+  'device_id',
+  'device_seq',
+  'registry_version',
+  'log_position',
+];
+syncColumns.sync_conflicts = [
+  'conflict_id',
+  'object_id',
+  'heads_json',
+  'base_revision_id',
+  'resolution_id',
+];
+syncColumns.sync_rejected = ['revision_id', 'last_error'];
+syncTables.push(
+  'sync_bindings',
+  'sync_revision_origin',
+  'sync_conflicts',
+  'sync_rejected',
+);
+export const transportMigration = [
+  'ALTER TABLE sync_local_state ADD COLUMN binding_id TEXT',
+  'ALTER TABLE sync_local_state ADD COLUMN pull_upper_bound TEXT',
+  'ALTER TABLE sync_inbox ADD COLUMN accepted_registry_version TEXT',
+  'ALTER TABLE sync_outbox ADD COLUMN receipt_json TEXT',
+  `CREATE TABLE sync_bindings (binding_id TEXT PRIMARY KEY, local_scope_id TEXT NOT NULL,
+    endpoint TEXT NOT NULL, server_id TEXT NOT NULL, server_epoch TEXT NOT NULL, vault_id TEXT NOT NULL, device_id TEXT NOT NULL,
+    pin_json TEXT NOT NULL, registry_json TEXT NOT NULL, checkpoint_json TEXT NOT NULL)`,
+  `CREATE TABLE sync_revision_origin (revision_id TEXT PRIMARY KEY REFERENCES sync_revisions(revision_id), device_id TEXT NOT NULL,
+    device_seq TEXT NOT NULL, registry_version TEXT NOT NULL, log_position TEXT)`,
+  `CREATE TABLE sync_conflicts (conflict_id TEXT PRIMARY KEY, object_id TEXT NOT NULL REFERENCES sync_identity(object_id),
+    heads_json TEXT NOT NULL, base_revision_id TEXT REFERENCES sync_revisions(revision_id), resolution_id TEXT REFERENCES sync_revisions(revision_id))`,
+  'CREATE TABLE sync_rejected (revision_id TEXT PRIMARY KEY REFERENCES sync_revisions(revision_id), last_error TEXT NOT NULL)',
+  'CREATE UNIQUE INDEX sync_conflict_open ON sync_conflicts(object_id) WHERE resolution_id IS NULL',
+  `CREATE TRIGGER sync_outbox_immutable BEFORE UPDATE OF envelope_json,envelope_sha256,payload_json,commit_id ON sync_outbox
+    WHEN OLD.envelope_json IS NOT NULL AND (NEW.envelope_json IS NOT OLD.envelope_json OR NEW.envelope_sha256 IS NOT OLD.envelope_sha256 OR NEW.payload_json IS NOT OLD.payload_json OR NEW.commit_id IS NOT OLD.commit_id)
+    BEGIN SELECT RAISE(ABORT,'Prepared envelope is immutable'); END`,
+];

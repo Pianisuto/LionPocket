@@ -83,7 +83,7 @@ As migrations são aditivas e transacionais: a versão 2 acrescenta cadastros e 
 
 Consulte [o roteiro de uso diário](docs/mobile-daily-finance.md) e [as regras e a validação do planejamento](docs/mobile-planning.md). O botão **Hoje** retorna ao mês atual; deslizar a lista para baixo atualiza os dados locais. Datas são preenchidas no formato `AAAA-MM-DD` e valores aceitam vírgula ou ponto decimal (ex.: `125,50`).
 
-A [proposta de sincronização local-first](docs/local-first-sync-proposal.md) registra o desenho para desktop/mobile, self-hosted e Lion Pocket Cloud, o impacto nos bancos existentes, o fluxo vertical inicial e as decisões pendentes. A [Etapa 0](docs/local-first-sync-stage0.md) foi concluída, com [vetores nativos e decisões para iniciar a Etapa 1](docs/local-first-sync-stage1-readiness.md). A sincronização continua desativada e ainda não está implementada.
+A [proposta de sincronização local-first](docs/local-first-sync-proposal.md) registra o desenho para desktop/mobile, self-hosted e Lion Pocket Cloud. A [Etapa 0](docs/local-first-sync-stage0.md), a fundação local e o provisioning evoluíram para o [fluxo manual desktop ↔ Android da Etapa 1](docs/local-first-sync-stage1-transport.md), restrito a bancos sintéticos e opt-in de desenvolvimento. A sincronização continua desativada por padrão.
 
 Requisitos:
 
@@ -151,3 +151,6 @@ A interface foi inspirada na clareza, velocidade e linguagem visual do [t3.chat]
 ## Licença
 
 Distribuído sob a [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Copyright © 2026 Leonardo Vulczak.
+
+
+O ambiente com Keycloak/PostgreSQL e pareamento está no [guia de provisioning](docs/local-first-sync-stage1-provisioning.md). O [guia de transporte manual](docs/local-first-sync-stage1-transport.md) descreve envio cifrado idempotente, inbox/outbox duráveis, conflitos, backups e reprodução nativa. Somente `manualTransaction` pode ser anunciado no opt-in sintético; dados pessoais e demais entidades permanecem fora do piloto.

@@ -5,10 +5,12 @@ import {
   assertUuid,
   canonicalStringify,
 } from '@lionpocket/sync-protocol';
-import { syncColumns, syncTables } from './schema';
+import { foundationColumns as syncColumns, foundationTables as syncTables } from './schema';
+import { validateTransportBackup } from './transport-backup';
 import type { SqlRow } from './manual';
 /** This is local backup validation, not an untrusted network decoder. */
-export function validateSyncBackup(data: Record<string, SqlRow[]>): void {
+export function validateSyncBackup(data: Record<string, SqlRow[]>, version = data.sync_bindings ? 7 : 6): void {
+  if (version >= 7) return validateTransportBackup(data);
   for (const table of syncTables) {
     if (!Array.isArray(data[table]))
       throw new Error(`Missing sync table: ${table}`);
@@ -214,4 +216,4 @@ export function validateSyncBackup(data: Record<string, SqlRow[]>): void {
 }
 /** Restore preserves lineage/history/pending payloads but never resumes a device/session. */
 export const disableRestoredSync =
-  "UPDATE sync_local_state SET mode = 'disabled', server_id = NULL, server_epoch = NULL, vault_id = NULL, device_id = NULL, device_seq = '0', received_cursor = '0', applied_cursor = '0' WHERE id = 1";
+  "UPDATE sync_local_state SET mode = 'disabled' WHERE id = 1";

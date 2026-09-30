@@ -1,3 +1,4 @@
+import { DevelopmentSync } from './DevelopmentSync';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -143,6 +144,7 @@ export function DataScreen({
               {notice}
             </Text>
           ) : null}
+          <DevelopmentSync onChanged={onChanged} />
           <View style={styles.card}>
             <Text style={styles.heading}>Exportar</Text>
             <Button

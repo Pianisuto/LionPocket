@@ -43,6 +43,7 @@ mkdirSync(join(app, 'protocol'), { recursive: true });
 for (const name of ['canonical.js', 'envelope.js', 'control.js']) cpSync(join(repo, 'packages/sync-protocol/dist', name), join(app, 'protocol', name));
 const java = join(app, 'android/app/src/main/java/com/lionpocketmobile');
 cpSync(join(__dirname, 'native-harness/CryptoSpikeReportModule.kt'), join(java, 'CryptoSpikeReportModule.kt'));
+cpSync(join(repo,'apps/mobile/android/app/src/main/java/com/lionpocketmobile/SyncIdentityModule.kt'),join(java,'SyncIdentityModule.kt'));
 const application = join(java, 'MainApplication.kt');
 writeFileSync(application, readFileSync(application, 'utf8').replace('context = applicationContext,', 'context = applicationContext,\n      useDevSupport = false,').replace('add(LocalFilesPackage())', 'add(CryptoSpikeReportPackage())\n          add(LocalFilesPackage())'));
 

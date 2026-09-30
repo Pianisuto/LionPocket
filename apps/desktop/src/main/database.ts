@@ -1,4 +1,4 @@
-import { syncMigration, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
+import { syncMigration, transportMigration, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type LocalSyncDatabase, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { initializeLocalSchema, hasCurrentFinancialSchema } from './migrationProtection';
@@ -155,6 +155,10 @@ export class LionPocketDatabase {
   /** Only an isolated empty synthetic bank. Not exposed through IPC/UI. */
   enableSyntheticManualSyncPilot(): void {
     this.atomic(() => this.runSyncWorkflow(activateSyntheticManualPilot(randomUUID)));
+  }
+
+  syncDatabase(): LocalSyncDatabase {
+    return { read: async (sql, params = []) => this.db.prepare(sql).all(...params) as SqlRow[], run: async (workflow) => this.atomic(() => this.runSyncWorkflow(workflow)) };
   }
 
   private recordManualSync(id: string): void {
@@ -414,6 +418,10 @@ export class LionPocketDatabase {
     if (!this.db.prepare('SELECT 1 FROM migrations WHERE version = 12').get()) {
       for (const sql of syncMigration) this.db.exec(sql);
       this.db.exec("INSERT INTO migrations(version, applied_at) VALUES (12, datetime('now'))");
+    }
+    if (!this.db.prepare('SELECT 1 FROM migrations WHERE version = 13').get()) {
+      for (const sql of transportMigration) this.db.exec(sql);
+      this.db.exec("INSERT INTO migrations(version, applied_at) VALUES (13, datetime('now'))");
     }
   }
 

@@ -1,4 +1,4 @@
-import { syncTables, syncColumns, validateSyncBackup, disableRestoredSync } from '@lionpocket/sync-local';
+import { syncTables, syncColumns, foundationColumns, foundationTables, transportMigration, validateSyncBackup, disableRestoredSync } from '@lionpocket/sync-local';
 import {
   isValidDate,
   validateMonth,
@@ -135,7 +135,7 @@ export function tablesForVersion(version: number): string[] {
     );
   return backupTables.filter(
     (t) =>
-      (!syncTables.includes(t) || version >= 6) &&
+      (!syncTables.includes(t) || (foundationTables.includes(t) ? version >= 6 : version >= 7)) &&
       (t !== 'local_preferences' || version >= 5) &&
       (version === 1
         ? t === 'transactions'
@@ -153,6 +153,7 @@ export function tablesForVersion(version: number): string[] {
   );
 }
 function columnsForVersion(table: string, version: number) {
+  if (version === 6 && foundationTables.includes(table)) return foundationColumns[table];
   if (table === 'transactions')
     return version === 1
       ? columns.transactions.slice(0, 10)
@@ -167,12 +168,12 @@ export async function verifyDatabase(
 ): Promise<void> {
   const tables = tablesForVersion(version);
   const objects = (
-    await db.executeAsync<{ name: string; type: string }>(
-      "SELECT name, type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND type != 'index'",
+    await db.executeAsync<{ name: string; type: string; sql: string }>(
+      "SELECT name, type, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND type != 'index'",
     )
   ).rows._array;
   if (
-    objects.some((o) => o.type !== 'table' || !tables.includes(o.name)) ||
+    objects.some((o) => o.type === 'trigger' ? version < 7 || o.sql !== transportMigration[transportMigration.length - 1] : o.type !== 'table' || !tables.includes(o.name)) ||
     tables.some((t) => !objects.some((o) => o.name === t))
   )
     throw new Error(
@@ -191,8 +192,8 @@ export async function verifyDatabase(
   }
   if (version >= 6) {
     const data: BackupData = {};
-    for (const table of syncTables) data[table] = (await db.executeAsync<BackupRow>(`SELECT * FROM ${table}`)).rows._array;
-    validateSyncBackup(data);
+    for (const table of (version >= 7 ? syncTables : foundationTables)) data[table] = (await db.executeAsync<BackupRow>(`SELECT * FROM ${table}`)).rows._array;
+    validateSyncBackup(data, version);
   }
   const check = (await db.executeAsync<BackupRow>('PRAGMA integrity_check'))
     .rows._array;
@@ -222,7 +223,7 @@ export async function captureBackup(db: Connection): Promise<LocalBackup> {
   });
 }
 function validateRows(data: BackupData, version: number) {
-  if (version >= 6) validateSyncBackup(data);
+  if (version >= 6) validateSyncBackup(data, version);
   const tables = tablesForVersion(version);
   if (
     Object.keys(data).some((t) => !tables.includes(t)) ||

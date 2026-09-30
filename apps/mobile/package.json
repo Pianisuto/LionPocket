@@ -14,14 +14,15 @@
   },
   "dependencies": {
     "@lionpocket/core": "0.1.0",
+    "@lionpocket/sync-local": "0.1.0",
+    "@lionpocket/sync-protocol": "0.1.0",
     "react": "19.2.8",
     "react-native": "0.87.1",
+    "react-native-app-auth": "8.4.1",
     "react-native-libsodium": "1.7.0",
     "react-native-nitro-modules": "0.37.1",
     "react-native-nitro-sqlite": "10.0.0",
-    "react-native-safe-area-context": "^5.5.2",
-    "@lionpocket/sync-local": "0.1.0",
-    "@lionpocket/sync-protocol": "0.1.0"
+    "react-native-safe-area-context": "^5.5.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

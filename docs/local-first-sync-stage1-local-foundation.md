@@ -119,3 +119,12 @@ O preparador copia o código real dos apps/pacotes para o harness, sem patches d
 A fundação deixa prontos os bindings/cofres, schema aditivo comum, transação manual→história/outbox, preservação/validação de backup e ensaios nativos reproduzíveis. O próximo fluxo deverá implementar provisioning/trust e registry, pedido de pareamento, prova HTTP/replay e decoder limitado; depois binding remoto, preparação cifrada imutável da outbox, recibos/retry/inbox/projeção/conflictos, e API/Keycloak/PKCE conforme o readiness. Essas partes precisam de verificações próprias antes de habilitar capabilities.
 
 Este PR não implementa API, login, transporte, onboarding, registro de aparelhos, rotação/recovery, projeção remota nem UI de conflitos. Zero capabilities remotas e nenhum botão de adesão. Os critérios completos de fluxo vertical da Etapa 1 ainda não estão aceitos. Permanecem os gates anteriores para dados reais/publicação: arm64 físico, Windows/cofres reais, upgrade do produto distribuído, falhas de storage/interrupção e revisão independente de trust/recovery/restore/epoch.
+
+
+## Continuação: provisioning implementado
+
+O [fluxo de provisioning/trust/pareamento sintético](local-first-sync-stage1-provisioning.md) agora implementa API de controle com PostgreSQL/Keycloak, PKCE, grants encadeados, comparação de fingerprint, entrega de DEK cifrada, decoder limitado e prova HTTP com nonces duráveis. As afirmações acima sobre API/login/trust pendentes registram o estado de entrada ou o recorte anterior. Envio financeiro, cursores, inbox/outbox remota, projeção e conflitos permanecem pendentes; capabilities financeiras seguem vazias.
+
+## Continuação: transporte manual
+
+O [fluxo vertical desktop ↔ Android](local-first-sync-stage1-transport.md) acrescenta transporte, conflitos e backup dos novos sidecars, com migrações aditivas desktop 13/Android 7. A fundação v12/v6 e seus resultados acima são históricos. O piloto continua desativado por padrão e restrito a bases sintéticas separadas.

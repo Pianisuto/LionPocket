@@ -62,3 +62,12 @@ Não há bloqueio técnico conhecido para **começar esse trabalho**. Ainda não
 ## Primeira parte implementada
 
 A [fundação local do piloto manual](local-first-sync-stage1-local-foundation.md) implementa os bindings/cofres, migrations aditivas mobile 6/desktop 12, backup/staging e escrita manual + sidecars/outbox atômica, verificados em bancos sintéticos separados. As afirmações anteriores sobre ausência de migrations/adapters descrevem o estado de entrada, antes dessa implementação. Sync continua desativado por padrão, sem capabilities remotas, API, login, transporte ou onboarding. Validadores de trust/registry, pareamento e prova HTTP continuam pendentes; não confundir esta primeira parte com a aceitação do fluxo vertical completo.
+
+
+## Continuação: provisioning implementado
+
+O [fluxo de provisioning/trust/pareamento sintético](local-first-sync-stage1-provisioning.md) agora implementa API de controle com PostgreSQL/Keycloak, PKCE, grants encadeados, comparação de fingerprint, entrega de DEK cifrada, decoder limitado e prova HTTP com nonces duráveis. As afirmações acima sobre API/login/trust pendentes registram o estado de entrada ou o recorte anterior. Envio financeiro, cursores, inbox/outbox remota, projeção e conflitos permanecem pendentes; capabilities financeiras seguem vazias.
+
+## Continuação: transporte manual
+
+O [fluxo vertical desktop ↔ Android](local-first-sync-stage1-transport.md) implementa commits cifrados idempotentes, cursores scoped, inbox/quarentena/projeção, conflitos e migrações desktop 13/Android 7. Seu guia contém o aceite e os limites atuais. Os estados anteriores neste documento são históricos; capabilities financeiras continuam vazias por padrão, com `manualTransaction` disponível somente no opt-in sintético após o aceite.

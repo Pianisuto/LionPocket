@@ -89,6 +89,7 @@ android {
         applicationId "com.lionpocketmobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        manifestPlaceholders += [appAuthRedirectScheme: 'com.lionpocketmobile.syncdev']
         versionCode 2
         versionName "0.3.9"
     }

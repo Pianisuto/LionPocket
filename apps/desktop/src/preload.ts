@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { LionPocketApi, UpdateInfo, WindowState } from './api';
 
 const api: LionPocketApi = {
+  developmentSyncStatus: () => ipcRenderer.invoke('sync:development:status'),
+  developmentSyncRun: () => ipcRenderer.invoke('sync:development:run'),
+  developmentSyncResolve: (...args) => ipcRenderer.invoke('sync:development:resolve', ...args),
   getCatalogs: () => ipcRenderer.invoke('catalogs:get'),
   createCatalogItem: (input) => ipcRenderer.invoke('catalogs:create', input),
   deleteCatalogItem: (type, id) => ipcRenderer.invoke('catalogs:delete', type, id),

@@ -14,7 +14,7 @@ import {
 } from './backupRepository';
 import { runManualChecks } from '../../../../tools/sync-stage1/manual-checks.cjs';
 import { captureDatabaseManifest } from '../../../../tools/sync-stage0/database-manifest.cjs';
-import { validateSyncBackup } from '@lionpocket/sync-local';
+import { validateSyncBackup, foundationTables, foundationColumns } from '@lionpocket/sync-local';
 const banks: ReturnType<typeof sqliteTestConnection>[] = [];
 afterEach(() => banks.splice(0).forEach((b) => b.sqlite.close()));
 async function empty() {
@@ -63,7 +63,7 @@ describe('manualTransaction synthetic Android adapter', () => {
       original.schemaVersion,
     );
     expect(backup.data).toEqual(original.data);
-    await verifyDatabase(stage.db, 6);
+    await verifyDatabase(stage.db, 7);
     const target = await empty();
     await restoreBackup(target.db, backup, async () => {});
     const restored = await captureBackup(target.db);
@@ -91,7 +91,12 @@ describe('manualTransaction synthetic Android adapter', () => {
         dueDate: '2026-09-30',
         status: 'planned',
       });
-      const source = desktop.exportData(true);
+      const current = desktop.exportData(true);
+      const source = { ...current };
+      for (const table of Object.keys(source).filter(t => t.startsWith('sync_'))) {
+        if (!foundationTables.includes(table)) delete source[table];
+        else source[table] = source[table].map((row: Record<string,string|number|null>) => Object.fromEntries(foundationColumns[table].map(key => [key, row[key]])));
+      }
       const parsed = parseBackupJson(
         JSON.stringify({ version: 1, schemaVersion: 12, data: source }),
       );
@@ -105,7 +110,7 @@ describe('manualTransaction synthetic Android adapter', () => {
       );
       expect(converted.data.sync_identity).toEqual(source.sync_identity);
       expect(converted.data.sync_revisions).toEqual(source.sync_revisions);
-      expect(converted.data.sync_outbox).toEqual(source.sync_outbox);
+      expect(converted.data.sync_outbox.map(({receipt_json,...row})=>{void receipt_json;return row;})).toEqual(source.sync_outbox);
       const target = await empty(),
         before = await captureBackup(target.db);
       await expect(mergedDesktopBackup(target.db, converted)).rejects.toThrow(

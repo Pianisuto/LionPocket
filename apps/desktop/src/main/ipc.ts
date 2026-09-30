@@ -103,7 +103,7 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
     if (selection.canceled || !selection.filePath) return null;
     await fs.writeFile(
       selection.filePath,
-      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), schemaVersion: 12, data: database.exportData(true) }, null, 2),
+      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), schemaVersion: 13, data: database.exportData(true) }, null, 2),
       'utf8',
     );
     return selection.filePath;
