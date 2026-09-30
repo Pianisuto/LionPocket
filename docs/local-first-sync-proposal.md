@@ -405,3 +405,10 @@ As direções já definidas na visão (local-first, backend opcional, monorepo, 
 | Modelo comercial Cloud | Cobrar infraestrutura/conveniência; pausa de serviço conserva app e outbox locais | Etapa operacional/comercial própria |
 
 Todas as etapas dependentes devem respeitar o resultado dessas decisões. A proposta já permite iniciar o spike e o fluxo vertical em ambiente de teste; não autoriza expor dados reais ou declarar sync pronto sem fechar criptografia, autenticação, recuperação e migração.
+
+
+## 12. Resultado da Etapa 0 e decisões do piloto
+
+Em 30/09/2026, a [Etapa 0](local-first-sync-stage0.md) foi implementada e enviada no commit `4fb76f2`, mantendo sync desativado. O [complemento técnico](local-first-sync-stage1-readiness.md) resolve a interoperabilidade Electron↔Android/Hermes debug/release, seleciona bindings pinados, fecha bytes de controle/recovery e escolhe Keycloak para o ambiente de desenvolvimento. As migrations históricas foram ensaiadas também nos drivers nativos com fixtures sintéticas.
+
+A tabela da seção 11 registra as decisões originalmente pendentes; seu estado atualizado, escolhas específicas do piloto e gates restantes estão no complemento. API, login, sync de dados, migrations de identidade e o fluxo vertical da Etapa 1 continuam por implementar. Aprovação do recorte técnico de desenvolvimento não autoriza dados reais ou publicação sem os critérios das etapas seguintes.

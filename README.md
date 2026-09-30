@@ -83,7 +83,7 @@ As migrations são aditivas e transacionais: a versão 2 acrescenta cadastros e 
 
 Consulte [o roteiro de uso diário](docs/mobile-daily-finance.md) e [as regras e a validação do planejamento](docs/mobile-planning.md). O botão **Hoje** retorna ao mês atual; deslizar a lista para baixo atualiza os dados locais. Datas são preenchidas no formato `AAAA-MM-DD` e valores aceitam vírgula ou ponto decimal (ex.: `125,50`).
 
-A [proposta de sincronização local-first](docs/local-first-sync-proposal.md) registra o desenho para desktop/mobile, self-hosted e Lion Pocket Cloud, o impacto nos bancos existentes, o fluxo vertical inicial e as decisões pendentes. A sincronização ainda não está implementada.
+A [proposta de sincronização local-first](docs/local-first-sync-proposal.md) registra o desenho para desktop/mobile, self-hosted e Lion Pocket Cloud, o impacto nos bancos existentes, o fluxo vertical inicial e as decisões pendentes. A [Etapa 0](docs/local-first-sync-stage0.md) foi concluída, com [vetores nativos e decisões para iniciar a Etapa 1](docs/local-first-sync-stage1-readiness.md). A sincronização continua desativada e ainda não está implementada.
 
 Requisitos:
 

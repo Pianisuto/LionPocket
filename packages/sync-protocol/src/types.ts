@@ -130,3 +130,16 @@ export interface VaultKeyDelivery {
   recipientDeviceId: GlobalId; registryVersion: Decimal64; keyVersion: number;
   sealedBox: Base64Url; authorDeviceId: GlobalId; signature: Base64Url;
 }
+/** LP1. + unpadded base64url of 32 random bytes; never a login password. */
+export interface RecoveryEnvelope {
+  formatVersion: 1; cryptoSuite: 'lp-sodium-v1';
+  serverId: GlobalId; serverEpoch: GlobalId; vaultId: GlobalId;
+  recoveryVersion: Decimal64; kdf: 'sodium-kdf-blake2b-LPRECOV1-1';
+  nonce: Base64Url; ciphertext: Base64Url;
+}
+export interface RecoveryBundle {
+  formatVersion: 1; serverId: GlobalId; serverEpoch: GlobalId; vaultId: GlobalId;
+  recoveryVersion: Decimal64; registryVersion: Decimal64;
+  authoritySignSeed: Base64Url; authorityPublicKey: Base64Url;
+  activeKeyVersion: number; dataKeys: Array<{ keyVersion: number; vaultKey: Base64Url }>;
+}

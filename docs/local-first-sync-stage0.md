@@ -1,6 +1,6 @@
 # Sincronização local-first — resultado da Etapa 0
 
-Data: 30/09/2026. Base auditada: `276b304`, desktop 0.3.9, Android schema 5. Referência: [proposta](local-first-sync-proposal.md). Este documento registra decisões de implementação da Etapa 0; não transforma as decisões de produto ainda abertas em funcionalidades aprovadas.
+Data: 30/09/2026. Base auditada: `276b304`, desktop 0.3.9, Android schema 5. Referência: [proposta](local-first-sync-proposal.md). Complemento pós-commit `4fb76f2`: [entrada técnica na Etapa 1](local-first-sync-stage1-readiness.md) e [spike nativo concluído](local-first-sync-crypto-spike.md). Este documento registra decisões de implementação da Etapa 0; não transforma as decisões de produto ainda abertas em funcionalidades aprovadas.
 
 A entrega contém inventário dos writers, contratos portáveis, vetores fixos, fixtures SQLite com dados fictícios, ensaios de preservação e proteção das atualizações existentes. Não há API, conta, login, motor de sync, filas, chaves de usuário ou transporte. Nenhum app depende de `@lionpocket/sync-protocol`. As capacidades da Etapa 0 são `syncEnabled: false` e `entityScopes: []`; não existe botão ou configuração que habilite sync.
 
@@ -19,7 +19,7 @@ A entrega contém inventário dos writers, contratos portáveis, vetores fixos, 
 | Restauração desktop | **Não existe comando de restore desktop no código atual.** `ipc.ts` oferece backup SQLite, export JSON/CSV e import XLSX. JSON desktop é lido/restaurado em staging pelo **Android**. Implementar restore desktop não pertence a esta etapa. |
 | Proteção Android | A conexão ativa já passa callback de cópia `VACUUM INTO`. A condição foi generalizada de `< 5` para `< migrations.length`. Cada migration agora confere FKs, não apenas a 5. Chamadas sem callback são usadas em cópias descartáveis/testes; não devem ser usadas para uma nova atualização da base ativa. |
 | Proteção desktop | Adicionada antes de atualização pendente: cópia SQLite consistente, migration + seed na mesma transação, integridade/FKs antes de COMMIT e fechamento em erro. Banco atual completo não repete correções históricas em toda abertura. Versão futura é rejeitada. |
-| Criptografia | Nenhum binding, gerenciador de chaves ou SQLCipher integrado aos apps. Resultado do spike: compatibilidade de bytes entre libsodium Linux e Node, **não** Android↔Electron. |
+| Criptografia | Nenhum binding, gerenciador de chaves ou SQLCipher integrado aos apps. Spike inicial C/Node foi ampliado: bytes e troca bidirecional aprovados entre Electron main e Android/Hermes/JSI debug/release; sem integração no produto. |
 
 `packages/core` continua responsável por regras financeiras (`daily-finance`, `planning`, `transactions`, `credit-cards`), conversões de centavos e intercâmbio (`local-files`, `spreadsheet-import`, `xlsx`). Não persiste registros nem fornece CSPRNG/cofre/criptografia. Os contratos reaproveitam seus enums e validador de datas; não mudam os DTOs da UI nem implementam primitivas no core.
 
@@ -86,7 +86,7 @@ SQLite/backup de recuperação usam `VACUUM INTO`; JSON v1 mobile contém plataf
 2. Sidecar de identidade, UUIDv4 seguro e UUIDv5 por slot comprovado, sem substituir PK/FK locais. Não houve backfill ou geração de IDs globais em bases nesta etapa.
 3. Revisões imutáveis, snapshots completos, pais/heads e tombstones; sem LWW por horário, soma de saldos ou descarte de ramo. Unidade de lote é commit, prioridades são listas inteiras. Formalização em [contratos](local-first-sync-contracts.md).
 4. Perfil canônico inteiro compatível com RFC 8785; UTF-8, base64url sem padding, conjuntos ordenados e int64 decimal textual. Novas propriedades/versões não entram silenciosamente em envelopes v1.
-5. Suite `lp-sodium-v1` candidata: XChaCha20-Poly1305 combinado, Ed25519 detached direto, sealed boxes de libsodium. É candidato técnico, **não aprovação dos bindings nem da segurança do produto**. [Spike e limites](local-first-sync-crypto-spike.md).
+5. Suite `lp-sodium-v1` selecionada para o piloto de desenvolvimento: XChaCha20-Poly1305 combinado, Ed25519 detached direto, sealed boxes de libsodium. Bindings 0.8.4 desktop/1.7.0 Android aprovados no recorte nativo de desenvolvimento; não é aprovação da segurança do produto. [Spike e limites](local-first-sync-crypto-spike.md).
 6. Apenas proteção local agora: Android usa a versão final real no guard e verifica FKs por versão; desktop protege upgrade e atomicidade. Construtor desktop síncrono exige `VACUUM INTO`, alternativa ao backup assíncrono recomendado na proposta. Backups manuais existentes continuam com suas APIs.
 7. Migrations 1–5 mobile e SQL histórico desktop não ganharam colunas de sync nem foram reescritos. Não reservar 6/12. Rebuild de constraints e sidecars são **ensaios descartáveis**, não migrations de produção.
 8. Formatos v1 de backup continuam intactos. Não guardar credenciais, sessão, segredo, cursor/dispositivo ativo em futuros backups financeiros portáveis. Cópia física exige invalidação operacional antes de reconectar no futuro.
@@ -108,7 +108,7 @@ Roteiro para a próxima migration (ainda não aplicada):
 7. Atualizar conjuntamente `backupTables`, colunas por versão, `tablesForVersion`, `verifyDatabase`, `captureBackup`, `replaceRows`, `desktopBackupData`, parser de formatos, merge e versões do JSON. Não usar `migrations.length` indiscriminadamente para rotular um **desktop futuro** desconhecido como mobile atual. Formato novo deve carregar plataforma/schema/proveniência explícitos e manter leitura legado v1.
 8. Staging deve migrar/validar sem executar SQL recebido; preservar arquivo e banco anterior até comparar conteúdo/integridade. Restore mantém IDs comprovados, protege dados posteriores/outbox, pausa/desvincula transporte e gera cadastro operacional novo. Não emitir exclusões por ausência no backup. O desktop precisa de um caminho de staging/restore próprio antes de oferecer essa função.
 
-Ainda faltam fixtures adicionais de schemas antigos desktop, bancos maiores e ensaio nas versões SQLite nativas de Android/Electron. Uma reconstrução ampla custa espaço/tempo: medir com armazenamento limitado e interrupção de processo antes de release. Testes atuais usam SQLite real do Node, não o driver Android.
+Complemento: as fixtures foram ensaiadas no SQLite Android 3.49.0 e os 58 testes desktop no runtime Electron. Ainda faltam fixtures adicionais de schemas antigos desktop e bancos maiores. Uma reconstrução ampla custa espaço/tempo: medir com armazenamento limitado e interrupção de processo antes de release. A suíte padrão continua usando SQLite do Node; o harness descartável exercita também o driver Android, sem alterar as bases pessoais.
 
 ## 6. Verificação executada e limites
 
@@ -116,22 +116,22 @@ Comandos de validação: `npm test`, `npm run typecheck`, `npm run lint`, `npm r
 
 Cobertura nova: preservação por coluna de Android 1/2/3/4 e desktop pre-11; reabertura e uso sem conta; SQLite/JSON restore atual; WAL na recuperação; falha de cópia; falha tardia e rollback de DDL/dados/versionamento; proteção de futura migration sobre Android 5; INSERT tolerante a coluna aditiva; rebuild de cadastros com FKs ativas/índices parciais; bytes canônicos, zero/null/int64, assinatura/hash e rejeição de adulterações no spike. Testes existentes continuam verificando recusas de arquivos inválidos/futuros e rollback de restore/importação.
 
-Sem mudança nativa ou schema publicado nesta etapa; não foi feito build/ensaio Android ou release Electron. O spike no executável instalado não foi executado: `RunAsNode=false` abriu a interface, que foi encerrada sem ações financeiras; só o Node/Linux forneceu resultados criptográficos. Não alegar compatibilidade de driver Android, cofre, Electron empacotado, crash por energia ou uso em aparelho real a partir dos testes Node.
+Sem mudança nativa ou schema publicado nos apps financeiros. O complemento executou APKs de harness debug/release, Hermes/JSI, Keystore software e fixtures no driver Android; Electron main real para crypto e runtime Electron para os 58 testes desktop. A tentativa histórica no executável instalado abriu a interface (`RunAsNode=false`) e não contou como evidência. Limites: aparelho físico, Electron empacotado/Windows, cofre persistente integrado e crash por energia ainda não testados. [Evidências nativas](fixtures/local-first/native-results.json).
 
 ## 7. Pendências e entrada na Etapa 1
 
 | Pendência | Condição de entrada / momento |
 | --- | --- |
-| Binding Android e Electron definitivo | Executar os mesmos vetores em Hermes/JSI e Electron main real, AEAD/assinatura nos dois sentidos, sealed box, CSPRNG e falhas. Selecionar/pinar versões; tratar bytes/ABI/rotação e realizar revisão independente. **Antes de dados reais; o spike não aprovou o transporte.** |
-| IdP / provisionamento | Escolher IdP auto-hospedável, onboarding de conta/PKCE, bootstrap da autoridade do vault, assinatura HTTP e registro de dispositivos. Sem implementação nesta etapa. |
-| Recovery/trust | Contratos gerais estão documentados; parâmetros de bundle, código/KDF aleatório, UI de confirmação/fingerprint, perda do último aparelho e política de rotação precisam de decisão/revisão. |
+| Binding Android e Electron | **Resolvido para começar o piloto:** 1.7.0/0.8.4, vetores nativos aprovados debug/release e troca bidirecional. Repetir em arm64 físico/Windows e fazer revisão independente antes de dados reais. |
+| IdP / provisionamento | **Decidido para o piloto:** Keycloak 26.7.4, OIDC/PKCE S256 e bootstrap pelo fundador. API/login, prova HTTP e registro permanecem implementação da Etapa 1. |
+| Recovery/trust | **Contrato técnico fechado e vetorizado:** código 256 bits, KDF BLAKE2b e AEAD, autoridade distinta e cadeia assinada. UI/lifecycle/rotação e revisão independente antes de publicação. Detalhes no complemento. |
 | Modelo de conflito visível | Contrato de branches/expectedHeads definido; confirmar UI/contabilização de base comum, rascunhos e recuperação como novo objeto antes do piloto. |
-| Quotas / retenção | Candidatos 1 MiB/commit e 100 commits/página; negociar limites e documentar testes de atomicidade. Sem GC/tombstone TTL v1. |
+| Quotas / retenção | Limites de desenvolvimento definidos no complemento; aplicação no decoder/API e testes de atomicidade na Etapa 1. Sem GC/tombstone TTL v1. |
 | Bancos existentes | Fixtures adicionais desktop e validação nativa; formato de backup com identidade e origem e revisão de dois bancos preenchidos (Etapa 2). Não onboarding automático. |
 | Planejamento/importação | Prova de slots/epoch, promoção de cache, aliases e ambiguidades; core/geradores dos dois clientes; chave de importação global versionada. Fora do piloto da Etapa 1. |
 | Banco/exports cifrados | Decisão separada de E2EE; SQLCipher e cifragem de arquivo/WAL/backups não foram avaliados nem prometidos. |
 
-Para começar a Etapa 1, usar **bases de teste vazias e separadas** e somente `manualTransaction` sem cadastro/cartão/pagamento. Preparar a migration mínima de sidecars/revisões/heads/tombstones/outbox/inbox em ambos os drivers, com outbox e mudança financeira na mesma transação. Conectar o binding escolhido depois de executar os vetores nativos; depois implementar ambiente de API/PostgreSQL/IdP, aprovação de aparelhos e fluxo manual opt-in. Conservar o funcionamento local e seguir os critérios de perda de resposta, retry, crash, concorrência, exclusão offline e isolamento da proposta. Nenhum desses serviços foi iniciado por esta entrega.
+Para começar a Etapa 1, usar **bases de teste vazias e separadas** e somente `manualTransaction` sem cadastro/cartão/pagamento. Preparar a migration mínima de sidecars/revisões/heads/tombstones/outbox/inbox em ambos os drivers, com outbox e mudança financeira na mesma transação. Conectar os bindings pinados e repetir os vetores já aprovados; depois implementar ambiente de API/PostgreSQL/IdP, aprovação de aparelhos e fluxo manual opt-in. Conservar o funcionamento local e seguir os critérios de perda de resposta, retry, crash, concorrência, exclusão offline e isolamento da proposta. Nenhum desses serviços foi iniciado por esta entrega.
 
 ## 8. Arquivos da entrega
 
@@ -154,4 +154,6 @@ Criados:
 
 `README.md` já estava modificado e `docs/local-first-sync-proposal.md` já estava sem tracking ao início; ambos foram lidos/preservados, **não editados por esta entrega**. `packages/core` foi auditado e suas 61 verificações passaram, sem alteração de arquivos.
 
-Resultado final: 225 testes (core 61, desktop 58, mobile 76, protocolo 30), typecheck, lint e build de contratos aprovados; runners do spike aprovados no recorte Node/Linux. Não há prova nativa Android/Electron nem release/build nativo nesta etapa.
+Resultado inicial (`4fb76f2`): 225 testes, typecheck/lint/build e spike C/Node aprovados. Complemento: 230 testes (core 61, desktop 58, mobile 76, protocolo 35), 58 desktop também no runtime Electron; 104 checks crypto/controle + 136 SQLite + 6 Keystore por build Android debug/release, com troca Electron↔Android aprovada. Sem transporte/API/login, migration de identidade ou dependência crypto nos apps.
+
+Arquivos do complemento: `README.md`; estes relatórios e `docs/local-first-sync-stage1-readiness.md`; apêndice da proposta; `docs/fixtures/local-first/README.md`/`native-results.json`; `packages/sync-protocol/src/control.ts`, `control.test.ts`, exports/types e fixture `control.json`; `tools/sync-stage0/crypto-checks.cjs`, `crypto-electron.cjs`, `create-control-vectors.py`, `prepare-native-harness.cjs`, `collect-native-report.py`, README e `native-harness/{index.js,storage-checks.js,CryptoSpikeReportModule.kt}`. Nenhum arquivo de implementação financeira/core foi alterado no complemento.

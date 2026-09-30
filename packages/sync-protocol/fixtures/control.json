@@ -1,0 +1,71 @@
+{
+  "warning": "PUBLIC TEST SECRETS / FIXED NONCES: NEVER USE IN AN APPLICATION",
+  "referenceLibsodium": "1.0.18",
+  "authoritySeedHex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+  "authorityPublicKeyHex": "cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa",
+  "approved": {
+    "signingCanonical": "{\"context\":\"LionPocket/device-grant/v1\",\"grant\":{\"boxPublicKey\":\"4kDxQrgh76EoyKGx7pjFwtDWGGQp7e7dPMzeife_dUo\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"formatVersion\":1,\"previousRegistrySha256\":null,\"registryVersion\":\"1\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"signingPublicKey\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"status\":\"approved\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
+    "grant": {
+      "formatVersion": 1,
+      "serverId": "00000000-0000-4000-8000-000000000001",
+      "serverEpoch": "00000000-0000-4000-8000-000000000002",
+      "vaultId": "00000000-0000-4000-8000-000000000003",
+      "registryVersion": "1",
+      "previousRegistrySha256": null,
+      "deviceId": "00000000-0000-4000-8000-000000000004",
+      "signingPublicKey": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+      "boxPublicKey": "4kDxQrgh76EoyKGx7pjFwtDWGGQp7e7dPMzeife_dUo",
+      "status": "approved",
+      "signature": "UZOUp_VQWvhUfr5dgeKS3zX3ed5IpTjbVKp9cQ1S0qr7jzSJbAirQY4FfSf0e5ExiNL9O01GgnjtlYhRuyYaCg"
+    }
+  },
+  "revoked": {
+    "signingCanonical": "{\"context\":\"LionPocket/device-grant/v1\",\"grant\":{\"boxPublicKey\":\"4kDxQrgh76EoyKGx7pjFwtDWGGQp7e7dPMzeife_dUo\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"formatVersion\":1,\"previousRegistrySha256\":\"4eLs_Zvzm5jwURfuMhEceLA6kzr09N6oqhQ27z3VxZk\",\"registryVersion\":\"2\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"signingPublicKey\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"status\":\"revoked\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
+    "grant": {
+      "formatVersion": 1,
+      "serverId": "00000000-0000-4000-8000-000000000001",
+      "serverEpoch": "00000000-0000-4000-8000-000000000002",
+      "vaultId": "00000000-0000-4000-8000-000000000003",
+      "registryVersion": "2",
+      "previousRegistrySha256": "4eLs_Zvzm5jwURfuMhEceLA6kzr09N6oqhQ27z3VxZk",
+      "deviceId": "00000000-0000-4000-8000-000000000004",
+      "signingPublicKey": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+      "boxPublicKey": "4kDxQrgh76EoyKGx7pjFwtDWGGQp7e7dPMzeife_dUo",
+      "status": "revoked",
+      "signature": "qcJOwxrsG8hSAXyVCWovl_01Gz-PpkYdk4mfiPtl8zckpNo-gT3b277gH3sxWz_9vZs692KudgxeVjOpwtgzAQ"
+    }
+  },
+  "delivery": {
+    "signingCanonical": "{\"context\":\"LionPocket/key-delivery/v1\",\"delivery\":{\"authorDeviceId\":\"00000000-0000-4000-8000-000000000004\",\"formatVersion\":1,\"keyVersion\":1,\"recipientDeviceId\":\"00000000-0000-4000-8000-000000000004\",\"registryVersion\":\"1\",\"sealedBox\":\"KQKB2x9bxjzXIcFjQ0F3hHZfMFBFi-Ez29-M2Ig5a0TnLA_cWO6eoQ2l260ZLuBMNawml22rD_CpdPr3ORkIxbOkeB984TgJeMkz9clAMz-w3VKF8fKVldVq3SNr44RltXLJRiRjuVqouV9VQ8wssxd3ut9bluHlI3toEbhFgto0ljYO4PPw5Ar3PXOca6HQRqEqhpuI8f7bk9ATQcSGa-hoRC7f3gSMgyrvDdOOfFv-Qj61d2po88bNeZMz024bSE8hdbaMJKAjTrKhyU3ZqYUCQeiuA6UV3dNzt9mEgwj4QYcUFYdzCt_L4xxDPOU4AkqS86zxQAT8XCZP6gEowa6VYcOBcwRXmwRyKnJhniN8y8YLA_-DDyuvQV7Y8YZnIFrU2OBO1mDEkr2ywBEDSTNS0i8XdMrFHmOC6pclGDyadxXKb7FNetCY9hPsb6lR88Y0jWo0dWjURtZE316MIwbu_wLYQKGXM-e0B3YpHSQpjiDG\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
+    "delivery": {
+      "formatVersion": 1,
+      "serverId": "00000000-0000-4000-8000-000000000001",
+      "serverEpoch": "00000000-0000-4000-8000-000000000002",
+      "vaultId": "00000000-0000-4000-8000-000000000003",
+      "recipientDeviceId": "00000000-0000-4000-8000-000000000004",
+      "registryVersion": "1",
+      "keyVersion": 1,
+      "sealedBox": "KQKB2x9bxjzXIcFjQ0F3hHZfMFBFi-Ez29-M2Ig5a0TnLA_cWO6eoQ2l260ZLuBMNawml22rD_CpdPr3ORkIxbOkeB984TgJeMkz9clAMz-w3VKF8fKVldVq3SNr44RltXLJRiRjuVqouV9VQ8wssxd3ut9bluHlI3toEbhFgto0ljYO4PPw5Ar3PXOca6HQRqEqhpuI8f7bk9ATQcSGa-hoRC7f3gSMgyrvDdOOfFv-Qj61d2po88bNeZMz024bSE8hdbaMJKAjTrKhyU3ZqYUCQeiuA6UV3dNzt9mEgwj4QYcUFYdzCt_L4xxDPOU4AkqS86zxQAT8XCZP6gEowa6VYcOBcwRXmwRyKnJhniN8y8YLA_-DDyuvQV7Y8YZnIFrU2OBO1mDEkr2ywBEDSTNS0i8XdMrFHmOC6pclGDyadxXKb7FNetCY9hPsb6lR88Y0jWo0dWjURtZE316MIwbu_wLYQKGXM-e0B3YpHSQpjiDG",
+      "authorDeviceId": "00000000-0000-4000-8000-000000000004",
+      "signature": "txtyVXVJGX1TGSRQWuV5rsHdiF51HCkteCEZwjSLBI-JbQU5TwzvezYPVlqfh49fEgp7BzNjngfH1w5sySTOBA"
+    }
+  },
+  "recovery": {
+    "code": "LP1.wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8",
+    "masterHex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+    "derivedKeyHex": "4db61bff290ea6b9b47c4cf5ed7722129c4be2a619bf74801780f70b82aa497c",
+    "aadCanonical": "{\"context\":\"LionPocket/recovery/v1\",\"header\":{\"cryptoSuite\":\"lp-sodium-v1\",\"formatVersion\":1,\"kdf\":\"sodium-kdf-blake2b-LPRECOV1-1\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3\",\"recoveryVersion\":\"1\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
+    "bundleCanonical": "{\"activeKeyVersion\":1,\"authorityPublicKey\":\"zRSzf5VulTGU_3-3Oz2B3MVh1hp1OAlLfD4aZD7l86o\",\"authoritySignSeed\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\",\"dataKeys\":[{\"keyVersion\":1,\"vaultKey\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"}],\"formatVersion\":1,\"recoveryVersion\":\"1\",\"registryVersion\":\"1\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}",
+    "envelope": {
+      "formatVersion": 1,
+      "cryptoSuite": "lp-sodium-v1",
+      "serverId": "00000000-0000-4000-8000-000000000001",
+      "serverEpoch": "00000000-0000-4000-8000-000000000002",
+      "vaultId": "00000000-0000-4000-8000-000000000003",
+      "recoveryVersion": "1",
+      "kdf": "sodium-kdf-blake2b-LPRECOV1-1",
+      "nonce": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3",
+      "ciphertext": "i4gBK_ao5-gbDiLlIj7xuROFjNK33nk_X2t54JY-uF2w_wPN1G8MKjIkxJ26mQf-tc0ZmbXeFX8dmoMSnCjfwCTaFV_7PiWjZJQj2146AZdkGZ8poUUTLhXviwqO6HxhrdQEaXc5retuzANN1XwhdIfVd0TKoE777Ap_9Ep4jjHPleU6D8Q3AZ1_QYLJPfiXv4xnBfMjFkBEcOd0nWkZ5kMmhT3szcgQ1CcI2rZmzevP_EXOQ8W01l5iBqZ7yBwuk96qjL1YsMyjy7JoMWTUzkecEjod03DGimb4NGSyuzhN4iAUNGw-kFHJSg-imEfMKzy2pabtE0C5neb9e9iqwc693I-acPzY5s0ukJbUjVH5eUOjrwRgDSbLzBaXAE3Bf3zB1dpRx5KccjC6Q5RqbojN02Ih7QPAwLrJmIy0WrrmYrrdna_omTfrhn71fSjgSrmaIlsrr508CTTXKOPMQRlA4bm-lef5cs2wfl88En_f8zTJhccgojd_32c5gFrXlP9gZJ0p1gmSV0BX2vHAYOVO2qxe7WfGKL_PLwFjo5ZwJQahDFg6JUV-1CWuFwMNK95mzUyTGrcaCo-sWAk19Zlc3sYHAFtIQRyasN_dAXGFifzzcHVU9g"
+    }
+  }
+}
