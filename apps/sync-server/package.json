@@ -1,0 +1,26 @@
+{
+  "name": "@lionpocket/sync-server",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint --ext .ts src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lionpocket/sync-protocol": "0.1.0",
+    "@lionpocket/sync-local": "0.1.0",
+    "jose": "6.2.3",
+    "pg": "8.20.0",
+    "libsodium-wrappers-sumo": "0.8.4"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

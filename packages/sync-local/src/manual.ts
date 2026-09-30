@@ -97,6 +97,8 @@ export function* recordManualMutation(
   row: SqlRow,
   uuid: () => string,
   authoredAt: string,
+  expectedHeads?: string[],
+  restoredFrom: string | null = null,
 ): SqlWorkflow {
   const [state] = yield query('SELECT * FROM sync_local_state WHERE id = 1');
   if (!state) throw new Error('Missing local sync state.');
@@ -116,8 +118,30 @@ export function* recordManualMutation(
     'SELECT revision_id FROM sync_heads WHERE object_id = ? ORDER BY revision_id',
     [objectId],
   );
-  if (heads.length > 1)
+  if (
+    expectedHeads &&
+    (!expectedHeads.length ||
+      canonicalStringify(expectedHeads) !==
+        canonicalStringify(heads.map((head) => String(head.revision_id))))
+  )
+    throw new Error('heads_changed');
+  if (heads.length > 1 && !expectedHeads)
     throw new Error('Manual conflict requires explicit resolution.');
+  for (const head of heads) {
+    const [pendingResolution] = yield query(
+      "SELECT payload_json FROM sync_outbox WHERE commit_id=(SELECT commit_id FROM sync_revisions WHERE revision_id=?) AND state!='acknowledged'",
+      [head.revision_id],
+    );
+    if (
+      pendingResolution &&
+      (
+        JSON.parse(String(pendingResolution.payload_json)) as {
+          operations: { expectedHeads?: string[] }[];
+        }
+      ).operations.some((op) => op.expectedHeads)
+    )
+      throw new Error('resolution_pending_receipt');
+  }
   const parents = heads.map((head) => String(head.revision_id));
   const revisionId = uuid(),
     commitId = uuid();
@@ -136,7 +160,7 @@ export function* recordManualMutation(
       legacyDeletedAt: row.deleted_at as string | null,
     },
     dependencies: [],
-    restoredFrom: null,
+    restoredFrom,
   };
   const revision: RevisionPlaintext =
     row.deleted_at !== null
@@ -156,7 +180,15 @@ export function* recordManualMutation(
     formatVersion: 1,
     commitId,
     localSeq: sequence,
-    operations: [{ opId: revisionId, objectId, parents, revision }],
+    operations: [
+      {
+        opId: revisionId,
+        objectId,
+        parents,
+        ...(expectedHeads ? { expectedHeads } : {}),
+        revision,
+      },
+    ],
   });
   // No wire envelope until a future explicit binding supplies trust/keys/header.
   if (!identity)
@@ -183,7 +215,7 @@ export function* recordManualMutation(
       authoredAt,
     ]);
   yield query(
-    "INSERT INTO sync_outbox VALUES(?,?,'pending',?,NULL,NULL,NULL)",
+    "INSERT INTO sync_outbox(commit_id,local_seq,state,payload_json,envelope_json,envelope_sha256,last_error) VALUES(?,?,'pending',?,NULL,NULL,NULL)",
     [commitId, sequence, pending],
   );
   yield query('UPDATE sync_local_state SET local_seq = ? WHERE id = 1', [

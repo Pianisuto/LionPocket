@@ -1,0 +1,43 @@
+name: lionpocket-sync-dev
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_USER: liondev
+      POSTGRES_PASSWORD: liondev
+      POSTGRES_DB: lion_sync
+    ports: ["127.0.0.1:55432:5432"]
+    volumes:
+      - synthetic-postgres:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/01-keycloak.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U liondev -d lion_sync"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak_dev
+      KC_DB_USERNAME: liondev
+      KC_DB_PASSWORD: liondev
+      KC_HOSTNAME: http://127.0.0.1:18080
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin-dev
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin-dev-only
+    ports: ["127.0.0.1:18080:8080"]
+    volumes: ["./realm.json:/opt/keycloak/data/import/lionpocket-dev.json:ro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080; printf \"GET /realms/lionpocket-dev/.well-known/openid-configuration HTTP/1.0\\r\\n\\r\\n\" >&3; head -1 <&3 | grep -q 200'",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+volumes:
+  synthetic-postgres:

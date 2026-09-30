@@ -1,5 +1,6 @@
 import { open, type NitroSQLiteConnection } from 'react-native-nitro-sqlite';
 import { migrate } from './migrations';
+import { syntheticBankOptIn } from '../sync/syntheticOptIn';
 import { localFiles } from '../files/native';
 
 // Fast Refresh can reload this module while the native connection stays open.
@@ -11,7 +12,7 @@ export function database(): Promise<NitroSQLiteConnection> {
   if (!state.lionPocketDatabase) {
     state.lionPocketDatabase = (async () => {
       // A full JS reload may outlive the native default connection.
-      const db = open({ name: 'lionpocket.sqlite', connection: 'independent' });
+      const db = open({ name: syntheticBankOptIn() ? 'lion-sync-dev-manual.sqlite' : 'lionpocket.sqlite', connection: 'independent' });
       try {
         await db.executeAsync('PRAGMA foreign_keys = ON');
         await migrate(db, async () => {

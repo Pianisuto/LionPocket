@@ -32,6 +32,9 @@ export interface UpdateInfo {
 }
 
 export interface LionPocketApi {
+  developmentSyncStatus?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus | null>;
+  developmentSyncRun?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus>;
+  developmentSyncResolve?(objectId: string, heads: string[], revisionId: string, recover: boolean): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus>;
   getCatalogs(): Promise<Catalogs>;
   createCatalogItem(input: CatalogInput): Promise<void>;
   deleteCatalogItem(type: 'category' | 'card', id: string): Promise<void>;

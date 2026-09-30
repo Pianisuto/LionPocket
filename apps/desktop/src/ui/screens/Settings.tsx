@@ -1,9 +1,11 @@
+import { DevelopmentSync } from '../DevelopmentSync';
 import { useState } from 'react';
 import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
 import type { CatalogInput, Catalogs, MoneyKind } from '@lionpocket/core/types';
 import { ConfirmDialog, NumberField, SelectField } from '../components';
 
-export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChange, refreshCatalogs, notify }: {
+export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChange, refreshCatalogs, onSyncChanged, notify }: {
+  onSyncChanged: () => Promise<void>;
   catalogs: Catalogs;
   month: string;
   showPriorities: boolean;
@@ -84,6 +86,7 @@ export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChan
   const categoryList = (categoryKind: MoneyKind) => catalogs.categories.filter((item) => item.kind === categoryKind);
   return (
     <section className="page-section settings-grid">
+      <DevelopmentSync onChanged={onSyncChanged} />
       <div className="panel settings-panel">
         <header className="panel__header"><div className="settings-icon"><HardDrive size={20} /></div><div><h3>Seus dados</h3><p>Importe a planilha, faça cópias e leve seus lançamentos com você.</p></div></header>
         <div className="settings-actions">

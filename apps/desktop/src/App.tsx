@@ -292,6 +292,7 @@ export default function App() {
               showPriorities={showPriorities}
               onShowPrioritiesChange={changePriorityVisibility}
               refreshCatalogs={refreshCatalogs}
+              onSyncChanged={async () => { changed(); await refreshCatalogs(); }}
               notify={(message) => {
                 notify(message);
                 changed();

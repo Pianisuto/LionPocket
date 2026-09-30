@@ -5,6 +5,9 @@ import started from 'electron-squirrel-startup';
 import type { UpdateInfo } from './api';
 import { LionPocketDatabase } from './main/database';
 import { registerIpcHandlers } from './main/ipc';
+import { desktopSyntheticDirectory, registerDevelopmentSync } from './main/sync/development';
+const syntheticDirectory = desktopSyntheticDirectory();
+if (syntheticDirectory) app.setPath('userData', path.join(syntheticDirectory, 'electron-app'));
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -180,14 +183,15 @@ const createWindow = () => {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.squirrel.lionpocket.lionpocket');
   }
 
-  const databasePath = path.join(app.getPath('userData'), 'lionpocket.sqlite');
+  const databasePath = syntheticDirectory ? path.join(syntheticDirectory, 'manual.sqlite') : path.join(app.getPath('userData'), 'lionpocket.sqlite');
   database = new LionPocketDatabase(databasePath);
   registerIpcHandlers(database);
+  await registerDevelopmentSync(database, syntheticDirectory);
   createWindow();
   configureAutoUpdates();
 });

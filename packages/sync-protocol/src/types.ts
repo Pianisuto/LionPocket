@@ -108,12 +108,13 @@ export interface CommitEnvelope extends UnsignedCommit { signature: Base64Url }
 export interface CursorScope { serverId: GlobalId; serverEpoch: GlobalId; vaultId: GlobalId }
 export interface CommitReceipt extends CursorScope {
   commitId: GlobalId; deviceId: GlobalId; deviceSeq: Decimal64;
-  result: 'accepted' | 'alreadyAccepted'; logPosition: Decimal64;
+  result: 'accepted' | 'alreadyAccepted'; logPosition: Decimal64; acceptedRegistryVersion: Decimal64;
   envelopeSha256: Base64Url; heads: { objectId: GlobalId; revisionIds: GlobalId[] }[];
 }
 export interface ChangesPage extends CursorScope {
+  bindingId: GlobalId;
   upperBound: Decimal64; nextCursor: Decimal64; hasMore: boolean;
-  commits: { logPosition: Decimal64; envelope: CommitEnvelope }[];
+  commits: { logPosition: Decimal64; acceptedRegistryVersion: Decimal64; envelope: CommitEnvelope }[];
 }
 export type SyncErrorCode = 'unauthenticated' | 'forbidden' | 'device_revoked' | 'epoch_changed'
   | 'idempotency_mismatch' | 'heads_changed' | 'missing_parents' | 'unsupported_version'

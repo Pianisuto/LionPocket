@@ -16,12 +16,18 @@
     "make:linux": "npm run build:core && npm run make:linux --workspace apps/desktop",
     "publish": "npm run build:core && npm run publish --workspace apps/desktop",
     "icons": "npm run icons --workspace apps/desktop",
-    "lint": "npm run lint --workspace @lionpocket/core && npm run lint --workspace apps/desktop && npm run lint --workspace @lionpocket/mobile && npm run lint --workspace @lionpocket/sync-protocol && npm run lint --workspace @lionpocket/sync-local",
-    "typecheck": "npm run build:core && npm run typecheck --workspace apps/desktop && npm run typecheck --workspace @lionpocket/mobile && npm run typecheck --workspace @lionpocket/sync-protocol && npm run typecheck --workspace @lionpocket/sync-local",
-    "test": "npm run build:core && npm run test --workspace @lionpocket/core && npm run test --workspace apps/desktop && npm run test --workspace @lionpocket/mobile && npm run test --workspace @lionpocket/sync-protocol && npm run test --workspace @lionpocket/sync-local",
+    "lint": "npm run lint --workspace @lionpocket/core && npm run lint --workspace apps/desktop && npm run lint --workspace @lionpocket/mobile && npm run lint --workspace @lionpocket/sync-protocol && npm run lint --workspace @lionpocket/sync-local && npm run lint --workspace @lionpocket/sync-server",
+    "typecheck": "npm run build:core && npm run typecheck --workspace apps/desktop && npm run typecheck --workspace @lionpocket/mobile && npm run typecheck --workspace @lionpocket/sync-protocol && npm run typecheck --workspace @lionpocket/sync-local && npm run typecheck --workspace @lionpocket/sync-server && npm run sync:dev:client:typecheck",
+    "test": "npm run build:core && npm run test --workspace @lionpocket/core && npm run test --workspace apps/desktop && npm run test --workspace @lionpocket/mobile && npm run test --workspace @lionpocket/sync-protocol && npm run test --workspace @lionpocket/sync-local && npm run test --workspace @lionpocket/sync-server",
     "mobile:build:android:release": "npm run build:core && npm run build:android:release --workspace @lionpocket/mobile",
     "build:contracts": "npm run build:core",
     "build:local-sync": "npm run build --workspace @lionpocket/sync-protocol && npm run build --workspace @lionpocket/sync-local",
-    "sync:stage1:electron:build": "npm run build:core && node tools/sync-stage1/build-electron.cjs"
+    "sync:stage1:electron:build": "npm run build:core && node tools/sync-stage1/build-electron.cjs",
+    "sync:dev:up": "docker compose -f tools/sync-dev/compose.yml up -d --wait",
+    "sync:dev:down": "docker compose -f tools/sync-dev/compose.yml down",
+    "sync:dev:server": "npm run build:local-sync && npm run start --workspace @lionpocket/sync-server",
+    "sync:dev:client:build": "npm run build:local-sync && node tools/sync-dev/build-client.cjs",
+    "sync:dev:test": "npm run build:local-sync && LIONPOCKET_SYNC_INTEGRATION=1 npm run test --workspace @lionpocket/sync-server",
+    "sync:dev:client:typecheck": "tsc -p tools/sync-dev/tsconfig.json"
   }
 }

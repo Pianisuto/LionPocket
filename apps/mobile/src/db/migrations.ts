@@ -1,4 +1,4 @@
-import { syncMigration } from '@lionpocket/sync-local';
+import { syncMigration, transportMigration } from '@lionpocket/sync-local';
 import type { NitroSQLiteConnection } from 'react-native-nitro-sqlite';
 import { seedNewCatalogs } from './catalogDefaults';
 
@@ -146,6 +146,7 @@ export const migrations: ReadonlyArray<ReadonlyArray<string>> = [
   ...previousMigrations,
   parityMigration,
   syncMigration,
+  transportMigration,
 ];
 
 export async function migrate(

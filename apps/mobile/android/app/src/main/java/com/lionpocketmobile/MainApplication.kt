@@ -18,6 +18,7 @@ class MainApplication : Application(), ReactApplication {
           add(LocalFilesPackage())
           add(LocalUiPackage())
           add(SyncSecretsPackage())
+          add(SyncIdentityPackage())
         },
     )
   }

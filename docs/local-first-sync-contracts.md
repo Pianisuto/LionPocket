@@ -1,6 +1,6 @@
 # Contratos mínimos v1 — Etapa 0
 
-Estado: contrato de desenvolvimento offline, 30/09/2026. Tipos e validação em [`packages/sync-protocol/src`](../packages/sync-protocol/src). Apps não importam o pacote e não iniciam transporte. Contratos amplos de planejamento/cadastros são preparatórios; o único validador executável de domínio é o futuro piloto manual. A criptografia continua candidata até [validação nativa](local-first-sync-crypto-spike.md).
+Estado: contratos v1 de desenvolvimento, 30/09/2026. O plano de controle está em [provisioning/trust/pareamento](local-first-sync-stage1-provisioning.md), e o transporte executável de `manualTransaction` em [fluxo vertical desktop ↔ Android](local-first-sync-stage1-transport.md). Tipos e validação em [`packages/sync-protocol/src`](../packages/sync-protocol/src). O transporte permanece desativado por padrão e exige opt-in sintético; contratos amplos de planejamento/cadastros não habilitam essas entidades. Os bindings foram validados nos runtimes nativos descritos nos guias, sem autorização para dados reais/publicação.
 
 ## 1. Versões, escopo e limites de responsabilidade
 
@@ -74,7 +74,7 @@ Formato exemplificado integralmente em [`fixtures/crypto.json`](../packages/sync
 
 Perfil `canonicalStringify`: subconjunto inteiro de [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html). Objetos JSON simples, chaves em ordem UTF-16 (`sort` sem locale), arrays em ordem explícita, sem whitespace/BOM, strings escapadas por JSON, Unicode escalar válido e **sem normalização**. `undefined`, bigint, float, NaN/Infinity, -0, Date/protótipos especiais, sparse arrays, símbolos, getters, propriedades ocultas e ciclos são erros. Inteiros seguros serializam em decimal. UTF-8 dos caracteres dessa string são os bytes do protocolo; binding deve usar encoder conforme Unicode e passar o vetor hexadecimal. Native não deve usar um serializador que ordene chaves por locale/codepoints ou escape todo Unicode.
 
-Objetos devem ser validados antes de assinar. O pacote recebe valores JS e **não detecta chaves duplicadas já descartadas por JSON.parse**: o futuro decoder de transporte deve recusar nomes duplicados, UTF-8 inválido e bytes não canônicos antes de aceitar envelope. Quotas de bytes/profundidade/contagem ainda pertencem ao decoder/motor da Etapa 1; não expor esses helpers diretamente a rede sem limites.
+Objetos devem ser validados antes de assinar. Helpers que recebem valores JS **não detectam chaves duplicadas já descartadas por JSON.parse**. O decoder de transporte em `decoder.ts` recusa nomes duplicados, UTF-8 inválido e bytes não canônicos antes de materializar o objeto. As quotas executáveis são 64 KiB para controle, 1 MiB para commit e 4 MiB para página, profundidade 32, 100 operações/commit e 32 pais/operação. Pending e plaintext financeiro usam explicitamente o limite de commit; o envelope cifrado completo também deve caber em 1 MiB. Exceder esse limite conserva o lançamento/payload local, sem truncamento, e interrompe o envio para revisão.
 
 AAD de operação (UTF-8) é exatamente:
 
@@ -106,12 +106,23 @@ Recovery v1 de desenvolvimento: master independente por vault de 32 bytes CSPRNG
 
 Helpers `deviceGrantSigningInput`, `keyDeliverySigningInput` e `recoveryAssociatedData` definem exclusivamente serialização/context; recusam assinatura/ciphertext na entrada que deveria excluí-los. Não fazem parsing limitado, validação de DTO/trust/chain ou criptografia. Os adapters da Etapa 1 precisam validar antes de usar esses bytes. Reset de conta não recupera E2EE. Revogação bloqueia transporte e exige rotação futura; não apaga conhecimento já entregue. Prova HTTP e pedido de pareamento terão contexts/vetores distintos antes de sua implementação.
 
-Android: Keystore envolve segredos de software; não presumir Ed/X25519 em hardware. Desktop: main + cofre do SO; recusar persistência em `safeStorage basic_text`. Credenciais nunca SQLite/JSON/AsyncStorage/renderer. Banco e export em claro continuam independentes de E2EE. Nenhum mecanismo de cofre/recovery foi implementado nesta etapa.
+Android: Keystore envolve segredos de software; não presumir Ed/X25519 em hardware. Desktop: main + cofre do SO; recusar persistência em `safeStorage basic_text`. Credenciais nunca SQLite/JSON/AsyncStorage/renderer. Banco e export em claro continuam independentes de E2EE. Os adapters de cofre foram implementados na fundação local; lifecycle de recovery permanece pendente.
 
-## 7. Recibos, paginação e erros — sem endpoints implementados
+## 7. Recibos, paginação e erros — contrato executado no piloto
 
 Tipos `CommitReceipt`, `ChangesPage`, `CursorScope` formalizam mínimos. ACK válido identifica server/epoch/vault, commit, device/seq, digest **igual ao enviado**, logPosition e heads. `2xx` isolado não confirma envio. Repetição idêntica retorna recibo original/alreadyAccepted; `(vault,commitId)`, `(vault,opId)`, `(vault,deviceId,deviceSeq)` com bytes divergentes dá idempotency_mismatch sem sobrescrever. Pais ausentes recusam commit inteiro com IDs necessários; falha de expectedHeads também não aceita metade.
 
 Log remoto precisa de contador serializado por vault até commit visível, não só BIGSERIAL reservado antes de commit. Página não divide commits; upperBound fixa horizonte do ciclo, nextCursor avança após armazenamento durável. Cursor é scoped também por endpoint/binding local; nunca transplantar cursor entre servidores/vault/epochs. Separar received de applied, e applied só avança se projeção/conflito recuperável estiver durável. Desconhecidos ficam em quarentena, não sumidos silenciosamente. Baixar o próprio commit via pull é válido; ACK nunca avança o cursor de recepção.
 
-Códigos: unauthenticated, forbidden/device_revoked, epoch_changed, idempotency_mismatch, heads_changed, missing_parents, unsupported_version, payload_too_large, rate_limited, invalid_envelope, temporary_failure. Erros mantêm outbox e uso local. Quotas candidatas 100 commits/página e 1 MiB/commit serão negociadas; não fracionar uma ação financeira indivisível para caber no limite. V1: um binding ativo, proprietário único, sync manual, sem GC, sem modo plaintext.
+Códigos: unauthenticated, forbidden/device_revoked, epoch_changed, idempotency_mismatch, heads_changed, missing_parents, unsupported_version, payload_too_large, rate_limited, invalid_envelope, temporary_failure. Erros mantêm outbox e uso local. O piloto aplica 100 commits/página, 4 MiB/página e 1 MiB/commit; não fracionar uma ação financeira indivisível para caber no limite. V1: um binding ativo, proprietário único, sync manual, sem GC, sem modo plaintext.
+
+
+## 8. Controle de desenvolvimento implementado
+
+`PairingRequest`, `TrustPin`, `KeyBundle` e `HttpProof`, contexts e validação em `provisioning.ts`; decoder estrito/UTF-8/quotas em `decoder.ts`. Vetores públicos `provisioning.json` fixam fingerprint, pedido assinado e assinatura HTTP.
+
+Pedido: fingerprint = SHA-256 de UTF-8 de `canonical({context:"LionPocket/pairing-fingerprint/v1",request: fieldsSemFingerprintOuSignature})`; assinatura = Ed25519 de UTF-8 de `canonical({context:"LionPocket/pairing-request/v1",request: unsignedRequestComFingerprint})`. Campos: formatVersion/serverId/serverEpoch/vaultId/deviceId/signingPublicKey/boxPublicKey/nonce.
+
+HTTP: Ed25519 de UTF-8 de `canonical({context:"LionPocket/http-proof/v1",proof: unsignedProof})`. Inclui formatVersion/serverId/serverEpoch/vaultId/deviceId/method/target/origin/issuedAt/nonce/bodySha256/accessTokenSha256. `issuedAt` é inteiro seguro de milissegundos UTC; nonce = 32 bytes CSPRNG/base64url; hash do corpo usa bytes canônicos exatos, e GET usa corpo vazio. Token digest impede transplantar a prova entre sessões. Transporte usa `X-LionPocket-Proof: base64url(UTF8(canonical(proofCompleta)))` e Bearer JWT, sem incluir prova no body. Janela ±60 segundos, rejeição durável de nonce consumido. Rotas v1 não aceitam query nem aliases.
+
+A invitation/pin é confirmada por comparação de SHA-256 de UTF-8 de `canonical({context:"LionPocket/trust-pin/v1",pin})`, separada do fingerprint do pedido. Isso fixa a autoridade fora da resposta do servidor. Plano financeiro continua sem endpoints; consulte o [guia de desenvolvimento](local-first-sync-stage1-provisioning.md) para limites, cenários e fronteiras de validação.

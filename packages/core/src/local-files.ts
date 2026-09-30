@@ -172,8 +172,8 @@ export function parseBackupJson(content: string): {
   const desktop = object.platform === undefined;
   if (!desktop && object.platform !== 'mobile')
     throw new Error('Plataforma de backup desconhecida.');
-  const schemaVersion = desktop ? (object.schemaVersion === 12 ? 6 : 4) : object.schemaVersion;
-  if (desktop && object.schemaVersion !== undefined && object.schemaVersion !== 12) throw new Error('Versão desktop desconhecida.');
+  const schemaVersion = desktop ? (object.schemaVersion === 13 ? 7 : object.schemaVersion === 12 ? 6 : 4) : object.schemaVersion;
+  if (desktop && object.schemaVersion !== undefined && object.schemaVersion !== 12 && object.schemaVersion !== 13) throw new Error('Versão desktop desconhecida.');
   if (typeof schemaVersion !== 'number' || !Number.isInteger(schemaVersion) || schemaVersion < 1)
     throw new Error('Versão do banco inválida.');
   const data = object.data as Record<string, unknown>;

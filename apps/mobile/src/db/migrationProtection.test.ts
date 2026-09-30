@@ -60,7 +60,7 @@ describe('fixtures históricas e preparação aditiva mobile', () => {
     await migrate(db,protect);
     expect(protect).toHaveBeenCalledTimes(1);
     expect(projectLegacyColumns(sqlite,before)).toEqual(before.tables.map(({name,columns,rows})=>({name,columns,rows})));
-    await verifyDatabase(db,6);
+    await verifyDatabase(db,7);
     expect(sqlite.prepare('SELECT mode,local_scope_id FROM sync_local_state').get()).toMatchObject({mode:'disabled',local_scope_id:null});
   });
   it('protege também uma futura atualização da versão atual e inclui a última escrita em WAL', async () => {
