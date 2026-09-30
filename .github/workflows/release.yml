@@ -199,7 +199,7 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android build packages
-        run: sdkmanager "platforms;android-37" "build-tools;37.0.0" "ndk;27.1.12297006"
+        run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.1.12297006"
 
       - name: Install dependencies
         run: npm ci
