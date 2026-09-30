@@ -8,6 +8,7 @@ on:
       - 'v*'
     paths:
       - apps/desktop/package.json
+      - apps/mobile/android/**
       - package-lock.json
       - .github/workflows/release.yml
 
@@ -168,12 +169,62 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
+  android:
+    name: Build Android APK
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android build packages
+        run: sdkmanager "platforms;android-37" "build-tools;37.0.0" "ndk;27.1.12297006"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android release APK
+        run: npm run mobile:build:android:release
+
+      - name: Upload Android APK
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          asset="LionPocket-Android-${version}-debug-signed.apk"
+          cp "$apk" "$asset"
+          gh release upload "$RELEASE_TAG" "$asset" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
   publish-release:
     name: Publish GitHub Release
     needs:
       - validate
       - windows
       - linux
+      - android
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -201,9 +252,19 @@ jobs:
       - name: Upload checksums and publish release
         shell: bash
         run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > release-notes.md
+          if ! grep -q "## Android" release-notes.md; then
+            cat >> release-notes.md <<'EOF'
+
+          ## Android
+
+          O APK Android está incluído para testes. Ele usa a chave de desenvolvimento do projeto e não é assinado para distribuição pela Google Play.
+          EOF
+          fi
           gh release upload "$RELEASE_TAG" release-files/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
           gh release edit "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
+            --notes-file release-notes.md \
             --draft=false
