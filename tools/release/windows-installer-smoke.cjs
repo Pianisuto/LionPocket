@@ -1,5 +1,5 @@
 // Runs only on the disposable native Windows CI runner. No network update/download.
-const { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } = require('node:fs');
+const { existsSync, mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, rmSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 const { tmpdir } = require('node:os');
 const { execFileSync, spawnSync } = require('node:child_process');
@@ -12,7 +12,7 @@ const id = beta ? 'lionpocket_beta' : 'lionpocket';
 const exe = beta ? 'lionpocket-beta.exe' : 'lionpocket.exe';
 const install = join(process.env.LOCALAPPDATA, id);
 const installer = join(root, 'apps/desktop/out/make/squirrel.windows/x64', beta ? 'LionPocket-Beta-Instalador.exe' : 'LionPocket-Instalador.exe');
-const directory = mkdtempSync(join(tmpdir(), 'lion-release-smoke-'));
+const directory = mkdtempSync(join(realpathSync(tmpdir()), 'lion-release-smoke-'));
 try {
   execFileSync('powershell.exe', ['-NoProfile', '-Command', '$p=Start-Process -FilePath $env:LION_INSTALLER -ArgumentList "--silent" -PassThru -Wait; exit $p.ExitCode'], { env: { ...process.env, LION_INSTALLER: installer }, stdio: 'inherit', timeout: 120000 });
   const binary = join(install, `app-${validate().version}`, exe);

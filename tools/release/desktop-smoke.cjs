@@ -1,4 +1,4 @@
-const { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } = require('node:fs');
+const { mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, rmSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 const { tmpdir } = require('node:os');
 const { spawnSync } = require('node:child_process');
@@ -10,7 +10,7 @@ const name = beta ? 'LionPocket-Beta' : 'LionPocket';
 const executable = process.platform === 'win32' ? `${beta ? 'lionpocket-beta' : 'lionpocket'}.exe` : beta ? 'lionpocket-beta' : 'lionpocket';
 const binary = join(root, 'apps/desktop/out', `${name}-${process.platform}-x64`, executable);
 for (const mode of beta ? [true] : [false, true]) {
-  const directory = mkdtempSync(join(tmpdir(), 'lion-release-smoke-'));
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), 'lion-release-smoke-'));
   try {
     const profile = join(directory, mode ? 'LionPocket Beta' : 'LionPocket');
     mkdirSync(profile);

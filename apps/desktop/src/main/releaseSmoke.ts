@@ -12,7 +12,7 @@ export function releaseSmokeDirectory(): string | null {
   const argument = process.argv.find(arg => arg.startsWith('--release-smoke='));
   if (!argument) return null;
   const directory = argument.slice('--release-smoke='.length);
-  const child = relative(tmpdir(), directory);
+  const child = relative(realpathSync(tmpdir()), directory);
   if (!isAbsolute(directory) || child.includes(sep) || !/^lion-release-smoke-[a-zA-Z0-9_-]+$/.test(child) || resolve(directory) !== directory || realpathSync(directory) !== directory)
     throw new Error('Disposable release smoke directory required.');
   return directory;
