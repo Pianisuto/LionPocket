@@ -39,6 +39,26 @@ describe('fixtures históricas e preparação aditiva mobile', () => {
     await migrate(db, protect);
     expect(protect).toHaveBeenCalledTimes(1);
   });
+  it('rejects a future mobile schema before backup, DDL or any write', async () => {
+    const { db, sqlite } = fixture(4);
+    sqlite.exec('PRAGMA user_version=99');
+    const before = captureDatabaseManifest(sqlite), protect = vi.fn(async () => {});
+    await expect(migrate(db, protect)).rejects.toThrow('mais nova');
+    expect(protect).not.toHaveBeenCalled();
+    expect(captureDatabaseManifest(sqlite)).toEqual(before);
+    expect(sqlite.prepare('PRAGMA integrity_check').get()).toMatchObject({ integrity_check: 'ok' });
+    expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+  it('reopens an already migrated v8 with preferences, sidecars and queues byte-for-byte', async () => {
+    const { db, sqlite } = fixture(4);
+    await migrate(db);
+    sqlite.exec("INSERT INTO local_preferences VALUES('release-fixture','zero/null preserved')");
+    const before = captureDatabaseManifest(sqlite), protect = vi.fn(async () => {});
+    await migrate(db, protect);
+    expect(protect).not.toHaveBeenCalled();
+    expect(captureDatabaseManifest(sqlite)).toEqual(before);
+    await verifyDatabase(db, migrations.length);
+  });
   it('v5 → v6 acrescenta somente sidecars, preservando domínio e backup anterior', async () => {
     const {db,sqlite} = fixture(4);
     await db.transaction(async(tx)=>{for(const sql of migrations[4]) await tx.executeAsync(sql);await tx.executeAsync('PRAGMA user_version=5');});

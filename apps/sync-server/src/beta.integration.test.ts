@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
@@ -75,7 +76,10 @@ describe.skipIf(!enabled)(
         await admin.end();
       }
     });
-    function client(session = 0) {
+    function client(session = 0, previous = false) {
+      const Controller: typeof BetaSync = previous
+        ? createRequire(import.meta.url)(process.env.LIONPOCKET_PREVIOUS_CLIENT!).BetaSync
+        : BetaSync;
       const bank = new LionPocketDatabase(":memory:");
       banks.push(bank);
       bank.db.exec(
@@ -83,7 +87,7 @@ describe.skipIf(!enabled)(
       );
       let saved: BetaSaved | null = null;
       const secrets = new TestSecrets();
-      const sync = new BetaSync({
+      const sync = new Controller({
         db: bank.syncDatabase(),
         secrets,
         sodium,
@@ -102,6 +106,26 @@ describe.skipIf(!enabled)(
       sync.setForeground(true);
       return { bank, sync, secrets, profile: () => saved };
     }
+    it.skipIf(!process.env.LIONPOCKET_PREVIOUS_CLIENT)("previous client v1 exchanges zero/null in both directions with current client/server", async () => {
+      const old = client(0, true), current = client(1);
+      await old.sync.configure(endpoint);
+      const first = await old.sync.create();
+      const invite = await current.sync.inspectInvitation(first.invitation);
+      await current.sync.pair(first.invitation, invite.fingerprint);
+      const request = (await old.sync.requests()).requests[0];
+      await old.sync.approve(request.deviceId, request.fingerprint);
+      await current.sync.receive();
+      await current.sync.sync();
+      await current.sync.confirmCombination();
+      old.bank.saveTransaction({ kind: "expense", description: "Previous client zero", plannedAmount: 0, actualAmount: 0, dueDate: "2026-10-02", settledDate: "2026-10-02", status: "paid" });
+      await old.sync.sync(); await current.sync.sync();
+      expect(current.bank.listTransactions({ month: "2026-10" })).toMatchObject([{ description: "Previous client zero", plannedAmount: 0, actualAmount: 0 }]);
+      current.bank.saveTransaction({ kind: "income", description: "Current client null", plannedAmount: 12.34, actualAmount: null, dueDate: "2026-10-03", status: "planned" });
+      await current.sync.sync(); await old.sync.sync();
+      expect(old.bank.listTransactions({ month: "2026-10" }).find(t => t.description === "Current client null")).toMatchObject({ plannedAmount: 12.34, actualAmount: null });
+      expect((await old.sync.status()).sync?.pending).toBe(0);
+      expect((await current.sync.status()).sync?.pending).toBe(0);
+    }, 30000);
     it("creates, pairs, reviews, synchronizes, rotates/reemits and recovers through the app commands", async () => {
       const a = client(),
         b = client(1);

@@ -1,6 +1,7 @@
+import { savePublicProfile } from './publicProfile';
 import { desktopForeground } from './foreground';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
-import { mkdir, readFile, open, rename } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
@@ -12,7 +13,7 @@ import { LionPocketDatabase } from '../database';
 import { DesktopSecretStore } from './secretStore';
 import { desktopCrypto } from './crypto';
 import { loginDevelopmentOidc } from './oidc';
-export const privateBeta = process.argv.includes('--private-beta');
+export const privateBeta = (typeof LIONPOCKET_BUILD_CHANNEL !== 'undefined' && LIONPOCKET_BUILD_CHANNEL === 'private-beta') || process.argv.includes('--private-beta');
 export async function registerBetaSync(bank: LionPocketDatabase) {
   let controller: Promise<BetaSync> | undefined;
   const get = async () => {
@@ -27,6 +28,7 @@ export async function registerBetaSync(bank: LionPocketDatabase) {
         secrets: new DesktopSecretStore(join(directory, 'secret-wrappers')),
         sodium: await desktopCrypto(),
         dialect: 'desktop',
+        defaultEndpoint: typeof LIONPOCKET_BETA_ENDPOINT !== 'undefined' ? LIONPOCKET_BETA_ENDPOINT : '',
         storage: {
           load: async () => {
             try {
@@ -38,23 +40,7 @@ export async function registerBetaSync(bank: LionPocketDatabase) {
               throw e;
             }
           },
-          save: async (value) => {
-            const temporary = profilePath + '.' + randomUUID();
-            const handle = await open(temporary, 'wx', 0o600);
-            try {
-              await handle.writeFile(JSON.stringify(value));
-              await handle.sync();
-            } finally {
-              await handle.close();
-            }
-            await rename(temporary, profilePath);
-            const parent = await open(directory, 'r');
-            try {
-              await parent.sync();
-            } finally {
-              await parent.close();
-            }
-          },
+          save: (value) => savePublicProfile(profilePath, value),
         },
         backup: async () => {
           const target = join(directory, `pre-binding-${randomUUID()}.sqlite`);

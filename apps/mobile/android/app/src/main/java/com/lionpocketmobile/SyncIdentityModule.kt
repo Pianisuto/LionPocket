@@ -14,7 +14,7 @@ import org.json.JSONObject
 /** Public RS256 verification only. Sessions, tokens and private keys are never persisted. */
 class SyncIdentityModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
   private val executor = Executors.newSingleThreadExecutor()
-  override fun getConstants(): MutableMap<String, Any> = mutableMapOf("privateBeta" to BuildConfig.PRIVATE_BETA)
+  override fun getConstants(): MutableMap<String, Any> = mutableMapOf("privateBeta" to BuildConfig.PRIVATE_BETA, "betaEndpoint" to BuildConfig.BETA_ENDPOINT)
 
   override fun getName() = "LionPocketIdentity"
   private fun bytes(text: String) = Base64.decode(text, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)

@@ -24,6 +24,7 @@ import {
   canonicalStringify,
   type CommitEnvelope,
 } from '@lionpocket/sync-protocol';
+import { captureDatabaseManifest } from '../../../../../tools/sync-stage0/database-manifest.cjs';
 import { LionPocketDatabase } from '../database';
 import { founder, TestSecrets } from '../../../../sync-server/src/testSupport';
 const cleanup: (() => void)[] = [];
@@ -98,7 +99,7 @@ async function setup(path = ':memory:') {
   });
   const log: CommitEnvelope[] = [];
   const posts: string[] = [];
-  const environment = {
+  const environment: Record<string, unknown> = {
     ...client.profile.pin,
     financialSyncEnabled: true,
     entityScopes: ['transaction'],
@@ -185,6 +186,38 @@ async function manual(beta: BetaSync) {
   return p;
 }
 describe('financial foreground sync boundaries', () => {
+  it.each([
+    { protocolVersion: 2 },
+    { controlVersion: 2 },
+    { domainSchema: 2 },
+    { entityScopes: ['transaction', 'futureObject'] },
+    { serverEpoch: 'ffffffff-ffff-4fff-bfff-ffffffffffff' },
+  ])('blocks incompatible discovery before login/POST and preserves all local bytes %#', async fields => {
+    const s = await setup();
+    s.bank.saveTransaction(input);
+    const before = captureDatabaseManifest(s.bank.db);
+    Object.assign(s.environment, fields);
+    await foreground(s.beta);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(s.login).not.toHaveBeenCalled();
+    expect(s.posts).toEqual([]);
+    expect(s.fetch.mock.calls.every(([, init]) => !init?.body)).toBe(true);
+    expect(captureDatabaseManifest(s.bank.db)).toEqual(before);
+    const status = await s.beta.status();
+    expect(status.activity).toBe('action-required');
+    expect(status.compatibilityMessage).toMatch(/preservad/);
+  });
+  it('accepts explicit v1 discovery without changing wire or domain versions', async () => {
+    const s = await setup();
+    Object.assign(s.environment, { controlVersion: 1, protocolVersion: 1, domainSchema: 1 });
+    await foreground(s.beta);
+    await manual(s.beta);
+    s.bank.saveTransaction(input);
+    await manual(s.beta);
+    expect(s.posts).toHaveLength(1);
+    expect(JSON.parse(s.posts[0]).protocolVersion).toBe(1);
+  });
+
   it('never opens login automatically; manual authenticates and automatic reuses only a valid volatile session', async () => {
     const s = await setup();
     await foreground(s.beta);

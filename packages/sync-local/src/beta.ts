@@ -1,3 +1,4 @@
+import { assertCompatibleEnvironment } from './compatibility';
 import { bankSyncCoordinator, type SyncCoordinator } from './coordinator';
 import { syncFetchText } from './network';
 import {
@@ -40,6 +41,9 @@ import type { LocalSyncDatabase, ProjectionDialect } from './transport-state';
 import type { SecretStore } from './secrets';
 import type { SqlWorkflow } from './manual';
 export interface BetaEnvironment {
+  controlVersion?: number;
+  protocolVersion?: number;
+  domainSchema?: number;
   serverId: string;
   serverEpoch: string;
   financialSyncEnabled: boolean;
@@ -81,6 +85,7 @@ export interface BetaOptions {
   dialect: ProjectionDialect;
   storage: BetaStorage;
   backup(): Promise<string>;
+  defaultEndpoint?: string;
   login(environment: BetaEnvironment): Promise<BetaSession>;
 }
 export function normalizeEndpoint(input: string): string {
@@ -153,7 +158,7 @@ export class BetaSync {
     const origin = normalizeEndpoint(
       endpoint ??
         (await this.options.storage.load())?.endpoint ??
-        'https://sync-beta.lionslab.dev',
+        (this.options.defaultEndpoint ?? ''),
     );
     const response = await syncFetchText(
       origin + '/v1/environment',
@@ -165,6 +170,7 @@ export class BetaSync {
     const text = response.text;
     if (text.length > 65536) throw new Error('Invalid environment.');
     const e = decodeCanonical(encodeUtf8(text), 65536) as BetaEnvironment;
+    assertCompatibleEnvironment(e);
     assertUuid(e.serverId, '4');
     assertUuid(e.serverEpoch, '4');
     if (!e.financialSyncEnabled || !e.oidc || !Array.isArray(e.entityScopes))
@@ -177,7 +183,8 @@ export class BetaSync {
   private async saved() {
     const s = await this.options.storage.load();
     if (!s) {
-      await this.configure('https://sync-beta.lionslab.dev');
+      if (!this.options.defaultEndpoint) throw new Error('Configure um servidor HTTPS antes de conectar.');
+      await this.configure(this.options.defaultEndpoint);
       return (await this.options.storage.load())!;
     }
     return s;
@@ -1145,6 +1152,8 @@ export class BetaSync {
         'secret_unavailable',
         'signing_secret_unavailable',
         'epoch_changed',
+        'unsupported_version',
+        'unsupported_capability',
         'key_mismatch',
         'key_version_mismatch',
       ].includes(error ?? '') ||
@@ -1178,11 +1187,16 @@ export class BetaSync {
                     : 'ready';
     return {
       activity: activity as BetaActivity,
+      compatibilityMessage: ['unsupported_version', 'unsupported_capability'].includes(error ?? '')
+        ? 'Atualização necessária: cliente e servidor incompatíveis. Banco local e pendências preservados; nenhum envio realizado.'
+        : error === 'epoch_changed'
+          ? 'O histórico do servidor mudou. Transporte interrompido; banco local e pendências preservados. Reconexão exige revisão.'
+          : null,
       lastCompletedAt: this.coordinator.lastCompletedAt ?? null,
       restoreReview: state.mode === 'disabled' && !!state.binding_id,
       activeKeyVersion: saved?.profile?.activeKeyVersion ?? 1,
       recoveryVersion: saved?.recoveryVersion ?? '0',
-      endpoint: saved?.endpoint ?? 'https://sync-beta.lionslab.dev',
+      endpoint: saved?.endpoint ?? (this.options.defaultEndpoint ?? ''),
       phase: saved?.phase ?? 'local',
       owner: saved?.owner ?? false,
       invitation: saved?.owner ? this.invitation(saved) : '',

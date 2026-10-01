@@ -106,6 +106,16 @@ describe('proteção de migrations desktop', () => {
     expect(captureDatabaseManifest(db)).toEqual(before);
     expect(readdirSync(directory).some((name) => name.includes('.pre-migration-'))).toBe(false);
   });
+  it('refuses a future database before switching DELETE journal to WAL', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'lion-future-release-')); directories.push(directory);
+    const path = join(directory, 'future.sqlite'), db = new DatabaseSync(path); connections.push(db);
+    db.exec("CREATE TABLE migrations(version INTEGER PRIMARY KEY, applied_at TEXT); INSERT INTO migrations VALUES(99,'future'); PRAGMA journal_mode=DELETE");
+    const before = captureDatabaseManifest(db);
+    expect(() => new LionPocketDatabase(path)).toThrow('mais nova');
+    expect(db.prepare('PRAGMA journal_mode').get()).toMatchObject({ journal_mode: 'delete' });
+    expect(captureDatabaseManifest(db)).toEqual(before);
+    expect(readdirSync(directory)).toEqual(['future.sqlite']);
+  });
   it('ensaia rebuild de cadastros com unicidade parcial, FKs ligadas e rollback tardio', () => {
     const { db: sqlite } = legacy();
     const before = captureDatabaseManifest(sqlite);

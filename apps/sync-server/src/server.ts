@@ -132,6 +132,8 @@ export function controlServer(options: {
           entityScopes: options.financialEnabled ? (options.privateBeta ? ['category','paymentMethod','card','recurring','installmentPurchase','transaction','goal','recurringPriorityList','monthlyPriorityList'] : ['manualTransaction']) : [],
           ...(options.oidc ? {oidc:options.oidc} : {}),
           controlVersion: 1,
+          protocolVersion: 1,
+          domainSchema: 1,
         });
         return;
       }

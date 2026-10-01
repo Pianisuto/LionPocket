@@ -27,6 +27,13 @@ function columnsPresent(db: DatabaseSync, required: Record<string, string[]>): b
   });
 }
 
+/** Read-only schema gate, before WAL, backup, DDL or financial writers. */
+export function assertSupportedDesktopSchema(db: DatabaseSync): void {
+  const has = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='migrations'").get();
+  if (has && db.prepare('SELECT version FROM migrations').all().some(row => Number(row.version) > desktopSchemaVersion))
+    throw new Error('O banco foi criado por uma versão mais nova do LionPocket. Atualize o aplicativo.');
+}
+
 /** Additive financial and sync metadata. Protect the pre-upgrade SQLite state, including committed WAL. */
 export function initializeLocalSchema(db: DatabaseSync, path: string, upgrade: () => void): void {
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();

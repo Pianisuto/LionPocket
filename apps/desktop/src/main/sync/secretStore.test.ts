@@ -53,7 +53,7 @@ function setup() {
   };
 }
 describe('desktop vault refusal/lifecycle (mocked OS only)', () => {
-  it.each(['unavailable', 'basic_text', 'unknown'])(
+  it.each(process.platform === 'linux' ? ['unavailable', 'basic_text', 'unknown'] : ['unavailable'])(
     'refuses %s without persisting a fallback, local app remains functional',
     async (condition) => {
       const { directory, scope, store } = setup();

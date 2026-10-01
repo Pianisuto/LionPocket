@@ -1,0 +1,22 @@
+const { readFileSync, mkdirSync, copyFileSync } = require('node:fs');
+const { resolve, join } = require('node:path');
+const { execFileSync } = require('node:child_process');
+const { validate } = require('./validate.cjs');
+const channel = process.argv[2];
+if (!['normal', 'private-beta'].includes(channel)) throw new Error('Unknown Android candidate channel.');
+const root = resolve(__dirname, '../..');
+const output = join(root, 'apps/mobile/android/app/build/outputs/apk/release');
+const metadata = JSON.parse(readFileSync(join(output, 'output-metadata.json'), 'utf8'));
+const version = validate(), beta = channel === 'private-beta';
+if (metadata.applicationId !== (beta ? 'com.lionpocketmobile.beta' : 'com.lionpocketmobile') || metadata.elements.length !== 1 || metadata.elements[0].versionName !== version.version || metadata.elements[0].versionCode !== version.androidVersionCode)
+  throw new Error('Android candidate identity/version mismatch.');
+const apk = join(output, metadata.elements[0].outputFile);
+const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+if (!sdk) throw new Error('ANDROID_HOME required to verify test certificate.');
+const signer = join(sdk, 'build-tools/37.0.0/apksigner');
+const certificate = execFileSync(signer, ['verify', '--print-certs', apk], { encoding: 'utf8' });
+if (!certificate.includes('certificate SHA-256 digest: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c')) throw new Error('Development candidate must have the known test identity.');
+const directory = join(root, 'release-candidates', channel); mkdirSync(directory, { recursive: true });
+const target = join(directory, `LionPocket${beta ? '-Beta' : ''}-Android-${version.version}-DEVELOPMENT-ONLY.apk`);
+copyFileSync(apk, target);
+console.log(JSON.stringify({ channel, package: metadata.applicationId, ...version, candidate: target, signing: 'public development fixture; not production' }));
