@@ -1,3 +1,4 @@
+import { windowsUpdateFeed } from './main/updatePolicy';
 import { releaseSmokeDirectory, verifyReleaseSmoke } from './main/releaseSmoke';
 import { privateBeta, registerBetaSync } from './main/sync/beta';
 import { setInterval, setTimeout } from 'node:timers';
@@ -78,9 +79,8 @@ const isSquirrelInstall = () => {
 };
 
 const configureAutoUpdates = () => {
-  if (privateBeta || !isSquirrelInstall() || process.argv.includes('--squirrel-firstrun')) return;
-
-  const feedUrl = `https://update.electronjs.org/Pianisuto/LionPocket/${process.platform}-${process.arch}/${app.getVersion()}`;
+  const feedUrl = windowsUpdateFeed({ platform: process.platform, arch: process.arch, version: app.getVersion(), installed: isSquirrelInstall(), beta: privateBeta, firstRun: process.argv.includes('--squirrel-firstrun') });
+  if (!feedUrl) return;
   autoUpdater.setFeedURL({ url: feedUrl });
 
   autoUpdater.on('error', (error) => {
@@ -203,7 +203,7 @@ app.whenReady().then(async () => {
   createWindow();
   if (smokeDirectory) {
     mainWindow!.webContents.once('did-finish-load', () => {
-      void verifyReleaseSmoke(database, smokeDirectory, privateBeta).catch(error => {
+      void verifyReleaseSmoke(database, smokeDirectory, privateBeta, windowsUpdateFeed({ platform: process.platform, arch: process.arch, version: app.getVersion(), installed: isSquirrelInstall(), beta: privateBeta, firstRun: false })).catch(error => {
         console.error('Release smoke failed:', error.message);
         app.exit(1);
       });

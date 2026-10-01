@@ -28,5 +28,6 @@ try {
   if (result.status !== 0) throw new Error(`Installed application failed: ${result.stderr}`);
   const report = JSON.parse(readFileSync(join(directory, 'result.json'), 'utf8'));
   if (report.beta !== beta || report.version !== validate().version) throw new Error('Installed channel/version mismatch.');
+  if (beta ? report.updateFeed !== null : report.updateFeed !== `https://update.electronjs.org/Pianisuto/LionPocket/win32-x64/${validate().version}`) throw new Error('Squirrel update policy mismatch.');
   console.log(JSON.stringify({ ...report, squirrelInstalled: true, installerIdentity: id, updateFeedPolicy: beta ? 'disabled' : 'existing normal feed; smoke skips network checks' }));
 } finally { rmSync(directory, { recursive: true, force: true }); }

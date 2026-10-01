@@ -17,7 +17,7 @@ export function releaseSmokeDirectory(): string | null {
     throw new Error('Disposable release smoke directory required.');
   return directory;
 }
-export async function verifyReleaseSmoke(bank: LionPocketDatabase, directory: string, beta: boolean): Promise<void> {
+export async function verifyReleaseSmoke(bank: LionPocketDatabase, directory: string, beta: boolean, updateFeed: string | null): Promise<void> {
   const before = JSON.parse(readFileSync(join(directory, 'before.json'), 'utf8')) as { tables: {name: string; columns: string[]; rows: unknown[]}[] };
   for (const table of before.tables.filter(t => t.name !== 'migrations')) {
     if (!/^[a-z_]+$/.test(table.name) || table.columns.some(c => !/^[a-z_]+$/.test(c))) throw new Error('Invalid fixture identifiers.');
@@ -48,7 +48,7 @@ export async function verifyReleaseSmoke(bank: LionPocketDatabase, directory: st
     loaded.fill(0); await store.remove(scope); vault = 'OS vault roundtrip passed';
   }
   secret.fill(0);
-  writeFileSync(join(directory, 'result.json'), JSON.stringify({ platform: process.platform, beta, profile: beta ? 'LionPocket Beta' : 'LionPocket', version: app.getVersion(), legacyTables: before.tables.length - 1, integrity: 'ok', foreignKeys: 0, vault, publicProfilePersistence: true, windowLoaded: true }, null, 2));
+  writeFileSync(join(directory, 'result.json'), JSON.stringify({ platform: process.platform, beta, profile: beta ? 'LionPocket Beta' : 'LionPocket', version: app.getVersion(), legacyTables: before.tables.length - 1, integrity: 'ok', foreignKeys: 0, vault, publicProfilePersistence: true, updateFeed, windowLoaded: true }, null, 2));
   bank.db.close();
   app.quit();
 }
