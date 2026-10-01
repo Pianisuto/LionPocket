@@ -32,9 +32,34 @@ certificateSha256=${fingerprint}
   if (result.status === 0 || !(result.stdout + result.stderr).includes('could not be verified')) throw new Error('Wrong certificate pin was accepted.');
   console.log('PASS: mismatched signing certificate refused.');
   writeFileSync(file, original);
+  const savedFile = env.LIONPOCKET_ANDROID_SIGNING_FILE;
+  env.LIONPOCKET_ANDROID_SIGNING_FILE = join(directory, 'missing.properties');
+  result = run([':app:validateReleaseIdentity', '-PprivateBeta=true']);
+  if (result.status !== 0) throw new Error('Beta unexpectedly consumed public signing configuration.');
+  result = run([':app:validateReleaseIdentity', '-PdevelopmentSigning=true']);
+  if (result.status !== 0) throw new Error('Development unexpectedly consumed public signing configuration.');
+  env.LIONPOCKET_ANDROID_SIGNING_FILE = savedFile;
+  console.log('PASS: beta/development ignore public signing credentials.');
+  const debugStore = join(directory, 'public-debug-fixture.keystore');
+  require('node:fs').copyFileSync(join(cwd, 'app/debug.keystore'), debugStore);
+  writeFileSync(file, `storeFile=${debugStore.replaceAll('\\', '/')}
+storePassword=android
+keyAlias=androiddebugkey
+keyPassword=android
+certificateSha256=fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+`);
+  result = run([':app:validateReleaseIdentity']);
+  if (result.status === 0 || !(result.stdout + result.stderr).includes('could not be verified')) throw new Error('Development identity was accepted for public release.');
+  console.log('PASS: known development certificate refused for public signing.');
+  writeFileSync(file, original);
   if (process.argv.includes('--build')) {
     result = run([':app:assembleRelease', '-PreactNativeArchitectures=x86_64']);
     if (result.status !== 0) throw new Error('Ephemeral signed release packaging failed.');
+    if (process.env.LIONPOCKET_TEST_SIGNED_APK) {
+      const output = resolve(process.env.LIONPOCKET_TEST_SIGNED_APK);
+      if (!output.startsWith(tmpdir() + require('node:path').sep) || !output.includes('EPHEMERAL')) throw new Error('Ephemeral APK output must be clearly identified under tmp.');
+      require('node:fs').copyFileSync(join(cwd, 'app/build/outputs/apk/release/app-release.apk'), output);
+    }
     console.log(`PASS: release build with EPHEMERAL TEST ONLY certificate ${fingerprint}. APK must remain outside public artifacts.`);
   }
 } finally { rmSync(directory, { recursive: true, force: true }); }

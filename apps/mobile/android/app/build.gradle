@@ -100,6 +100,7 @@ def signingFile = System.getenv("LIONPOCKET_ANDROID_SIGNING_FILE")
 if (!privateBeta && !developmentSigning && signingFile) {
     def externalFile = new File(signingFile)
     if (!externalFile.isAbsolute() || !externalFile.isFile()) throw new GradleException("LIONPOCKET_ANDROID_SIGNING_FILE must point to an existing external absolute path.")
+    if (externalFile.canonicalFile.toPath().startsWith(file("../../../..").canonicalFile.toPath())) throw new GradleException("Signing properties must be outside the checkout.")
     externalFile.withInputStream { signingProperties.load(it) }
 }
 def signingValue = { name -> signingProperties.getProperty(name) ?: System.getenv("LIONPOCKET_ANDROID_" + name.replaceAll(/([a-z])([A-Z])/, '$1_$2').toUpperCase()) }

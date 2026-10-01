@@ -63,7 +63,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:core
-      - run: npm run test --workspace apps/desktop
+      - run: npm run test --workspace apps/desktop -- --testTimeout=30000 --hookTimeout=30000
       - if: runner.os == 'Windows'
         run: npm run make -- --platform=win32 --arch=x64
       - if: runner.os == 'Linux'
@@ -75,6 +75,20 @@ jobs:
       - name: Test real packaged Electron, SQLite, profiles and OS secret store
         if: runner.os == 'Windows'
         run: node tools/release/desktop-smoke.cjs
+      - name: Install Squirrel and test the installed application without downloading updates
+        if: runner.os == 'Windows'
+        run: node tools/release/windows-installer-smoke.cjs
+      - name: Prepare the packaged SUID helper in the disposable Linux runner
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [[ "$LIONPOCKET_BUILD_CHANNEL" == private-beta ]]; then
+            sandbox="apps/desktop/out/LionPocket Beta-linux-x64/chrome-sandbox"
+          else
+            sandbox="apps/desktop/out/LionPocket-linux-x64/chrome-sandbox"
+          fi
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
       - name: Test packaged Electron with deliberately unavailable Linux vault
         if: runner.os == 'Linux'
         run: xvfb-run -a node tools/release/desktop-smoke.cjs
@@ -121,6 +135,8 @@ jobs:
           cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk release-candidates/private-beta/LionPocket-Beta-Android-0.3.10-DEVELOPMENT-ONLY.apk
           node tools/release/checksums.cjs release-candidates .apk
       - name: Validate external signing with an ephemeral fixture (never production)
+        env:
+          LIONPOCKET_TEST_SIGNED_APK: /tmp/LionPocket-Android-0.3.10-EPHEMERAL-ONLY.apk
         run: node tools/release/android-signing-fixture.cjs --build
       - name: Build previous normal/beta from the audited base in a disposable checkout
         run: node tools/release/prepare-old-android.cjs
@@ -139,5 +155,7 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect -no-boot-anim -camera-back none
-          script: python3 tools/release/android-upgrade.py --serial emulator-5554 --fixtures /tmp/lion-release-fixtures-ci --old-normal release-candidates/base-normal.apk --new-normal release-candidates/normal/LionPocket-Android-0.3.10-DEVELOPMENT-ONLY.apk --old-beta release-candidates/base-beta.apk --new-beta release-candidates/private-beta/LionPocket-Beta-Android-0.3.10-DEVELOPMENT-ONLY.apk --report /tmp/android-upgrades.json
+          script: |
+            python3 tools/release/android-upgrade.py --serial emulator-5554 --fixtures /tmp/lion-release-fixtures-ci --old-normal release-candidates/base-normal.apk --new-normal release-candidates/normal/LionPocket-Android-0.3.10-DEVELOPMENT-ONLY.apk --old-beta release-candidates/base-beta.apk --new-beta release-candidates/private-beta/LionPocket-Beta-Android-0.3.10-DEVELOPMENT-ONLY.apk --report /tmp/android-upgrades.json
+            python3 tools/release/android-compatibility.py --serial emulator-5554 --mismatch-apk /tmp/LionPocket-Android-0.3.10-EPHEMERAL-ONLY.apk --report /tmp/android-compatibility.json
       # APKs are test candidates; never uploaded or called production signed.
