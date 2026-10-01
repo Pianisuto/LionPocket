@@ -32,6 +32,7 @@ export interface UpdateInfo {
 }
 
 export interface LionPocketApi {
+  onBetaSyncChanged?(listener: () => void): () => void;
   betaSyncStatus?(): Promise<import('@lionpocket/sync-local').BetaStatus|null>;
   betaSyncCommand?(action:string,args:unknown[]):Promise<unknown>;
   developmentSyncStatus?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus | null>;

@@ -25,3 +25,7 @@ As nove tabelas financeiras do desktop original foram comparadas linha por linha
 SQLite, exports e backups locais permanecem em claro. O servidor aprende metadados de tempo/volume/causalidade. Strings JavaScript de alguns segredos não permitem limpeza garantida; buffers temporários são limpos nos caminhos de sucesso e erro. A assinatura do APK é de desenvolvimento. Não há política final de retenção/purge, distribuição pública, sync em background ou auditoria criptográfica independente.
 
 A revisão de cadastros conserva ambas as identidades com nomes distintos. A fusão arbitrária de identidades globais já publicadas está fora da beta. Lotes acima de 100 operações ficam conservados e bloqueados. Recovery não apaga cópias já recebidas por aparelho posteriormente revogado. Prefira fixtures e cópias separadas durante a avaliação; os limites não justificam anunciar proteção criptográfica do banco local.
+
+## Incremento posterior: foreground
+
+A [evolução de foreground](local-first-sync-foreground.md) reutiliza o mesmo motor/E2EE, com um coordenador por banco. Notificações pós-COMMIT não aguardam rede; aplicação de inbox não solicita transporte local. Sessões validadas são reutilizadas somente em memória e o automático nunca inicia login interativo. Cancelamento ao deixar o estado ativo e deadline de rede limitam cada tentativa; outbox/quarentena/bloqueios continuam duráveis. A revisão e os ensaios físicos acima pertencem ao PR #5, sem alegação de repetição neste incremento.

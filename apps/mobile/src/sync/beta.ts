@@ -1,5 +1,6 @@
 import { NativeModules } from "react-native";
 import { BetaSync, type BetaSaved } from "@lionpocket/sync-local";
+import { onLocalSyncWrite } from "../db/syncWriters";
 import { database } from "../db/connection";
 import { localFiles } from "../files/native";
 import { mobileSyncDatabase } from "./database";
@@ -14,7 +15,7 @@ export function betaSync(): Promise<BetaSync> {
   if (!controller)
     controller = (async () => {
       const db = await database();
-      return new BetaSync({
+      const beta = new BetaSync({
         db: mobileSyncDatabase(db),
         secrets: new AndroidSecretStore(),
         sodium: await androidCrypto(),
@@ -42,6 +43,8 @@ export function betaSync(): Promise<BetaSync> {
         },
         login: async (e) => androidDevelopmentOidc(e.oidc),
       });
+      onLocalSyncWrite(db, () => beta.localWriteCommitted());
+      return beta;
     })().catch((e) => {
       controller = undefined;
       throw e;

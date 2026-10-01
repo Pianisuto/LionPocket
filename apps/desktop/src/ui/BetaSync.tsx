@@ -1,3 +1,4 @@
+import { betaActivityLabel } from '@lionpocket/sync-local';
 import { useEffect, useState } from 'react';
 import type {
   BetaStatus,
@@ -49,6 +50,7 @@ export function BetaSyncPanel({
   };
   useEffect(() => {
     void refresh().catch((e) => setError(String(e)));
+    return window.lionPocket.onBetaSyncChanged?.(() => { void refresh().catch(() => { /* Status remains best effort; local use continues. */ }); });
   }, []);
   const run = async (action: string, args: unknown[] = []) => {
     setBusy(true);
@@ -89,10 +91,10 @@ export function BetaSyncPanel({
         backups locais permanecem em claro.
       </p>
       <p>
-        Estado: {status.phase} · {status.paused ? 'Pausado' : 'Disponível'} ·
-        Pendentes: {status.sync?.pending ?? 0} · Em revisão:{' '}
-        {status.reviews.length} · Quarentena: {status.quarantine.length}
+        {betaActivityLabel[status.activity]} · Pendentes: {status.sync?.pending ?? 0}
       </p>
+      {status.lastCompletedAt && <p>Último sync concluído: {new Date(status.lastCompletedAt).toLocaleString('pt-BR')}</p>}
+      <p>Salvo neste aparelho primeiro. Sync automático ao abrir/retomar e após salvar, com o app ativo. “Sincronizar agora” continua disponível.</p>
       {status.phase === 'local' && (
         <>
           <label>
@@ -280,7 +282,7 @@ export function BetaSyncPanel({
             disabled={busy || status.paused || status.restoreReview}
             onClick={() => void run('sync')}
           >
-            {busy ? 'Aguarde…' : 'Entrar e sincronizar agora'}
+            {busy ? 'Aguarde…' : 'Sincronizar agora'}
           </button>
           <button
             disabled={busy}

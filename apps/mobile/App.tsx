@@ -1,3 +1,4 @@
+import { startBetaForeground } from './src/sync/foreground';
 import { AppearanceProvider, useAppearance } from './src/ui/Appearance';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -170,6 +171,11 @@ function AppContent(): React.JSX.Element {
       subscription.remove();
     };
   }, [refresh]);
+  const syncRefresh = useRef(refresh);
+  syncRefresh.current = refresh;
+  useEffect(() => startBetaForeground(() => {
+    if (!mutation.current && !dataScreenOpen.current) void syncRefresh.current();
+  }), []);
   const changeMonth = (next: string) => {
     if (!busy) {
       if (next === month) {

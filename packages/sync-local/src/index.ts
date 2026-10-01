@@ -12,3 +12,4 @@ export * from './beta';
 export * from './beta-security';
 export * from './reemission';
 export * from './merge';
+export * from './coordinator';
