@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""Local operations for the official stack. No shell evaluation of .env or secrets."""
+import datetime
+import getpass
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import subprocess
+import sys
+import uuid
+import urllib.request
+
+BASE = Path(__file__).resolve().parent
+ENV = Path(os.environ.get('LP_ENV_FILE', BASE / '.env')).resolve()
+SECRET_KEYS = ['POSTGRES_PASSWORD_FILE', 'SYNC_DB_PASSWORD_FILE', 'AUTH_DB_PASSWORD_FILE', 'KEYCLOAK_ADMIN_PASSWORD_FILE']
+
+
+def config(require_secrets=True):
+    if not ENV.is_file():
+        raise ValueError('Copie .env.example para .env e configure seus hosts.')
+    cfg = {}
+    for line in ENV.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        key, sep, value = line.partition('=')
+        if not sep or key in cfg or not re.fullmatch('[A-Z][A-Z0-9_]*', key):
+            raise ValueError('Configuração .env inválida.')
+        cfg[key] = value
+    for key in ['SYNC_HOST', 'AUTH_HOST']:
+        host = cfg.get(key, '')
+        if not re.fullmatch(r'(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}', host) or host.endswith('.example.com'):
+            raise ValueError('Configure hosts DNS válidos em SYNC_HOST e AUTH_HOST.')
+    if cfg['SYNC_HOST'] == cfg['AUTH_HOST']:
+        raise ValueError('SYNC_HOST e AUTH_HOST devem ser distintos.')
+    if not re.fullmatch('[a-z0-9][a-z0-9_-]{0,62}', cfg.get('COMPOSE_PROJECT_NAME', 'lionpocket-sync')):
+        raise ValueError('COMPOSE_PROJECT_NAME inválido.')
+    if cfg.get('REVERSE_PROXY', 'caddy') not in ['caddy', 'existing']:
+        raise ValueError('REVERSE_PROXY deve ser caddy ou existing.')
+    for key in SECRET_KEYS:
+        if not cfg.get(key):
+            raise ValueError('Configure os caminhos externos dos segredos.')
+        path = Path(cfg[key])
+        path = path if path.is_absolute() else BASE / path
+        if require_secrets:
+            if not path.is_file() or len(path.read_bytes().strip()) < 32:
+                raise ValueError('Segredo ausente ou curto. Execute lpctl init.')
+            if path.stat().st_mode & 0o077:
+                raise ValueError('Proteja os arquivos de segredo com chmod 600.')
+    if cfg.get('HOMELAB_CA_FILE'):
+        ca = Path(cfg['HOMELAB_CA_FILE'])
+        ca = ca if ca.is_absolute() else BASE / ca
+        if not ca.is_file() or b'BEGIN CERTIFICATE' not in ca.read_bytes() or b'PRIVATE KEY' in ca.read_bytes():
+            raise ValueError('HOMELAB_CA_FILE exige apenas a raiz pública PEM confiável, nunca chave privada.')
+    return cfg
+
+
+def compose(cfg, *args, data=None, capture=False, check=True, output=None):
+    cmd = ['docker', 'compose', '--env-file', str(ENV), '-f', str(BASE / 'compose.yml')]
+    if cfg.get('REVERSE_PROXY', 'caddy') == 'existing':
+        cmd += ['-f', str(BASE / 'compose.proxy.yml')]
+    else:
+        cmd += ['--profile', 'https']
+    if cfg.get("HOMELAB_CA_FILE"):
+        cmd += ["-f", str(BASE / "compose.ca.yml")]
+    # Fixture overrides are used only by the disposable integration runner, never client TLS bypasses.
+    if os.environ.get('LP_COMPOSE_OVERRIDE'):
+        cmd += ['-f', os.environ['LP_COMPOSE_OVERRIDE']]
+    runtime_env = dict(os.environ, LP_UID=cfg.get("LP_UID", str(os.getuid())))
+    result = subprocess.run(cmd + list(args), env=runtime_env, cwd=BASE, input=data, stdout=output or (subprocess.PIPE if capture else None), stderr=subprocess.PIPE)
+    if check and result.returncode:
+        # Docker errors can contain expanded environment/config. Do not echo them.
+        raise ValueError('Operação Docker falhou. Confira serviços com lpctl status; nenhum segredo foi exibido.')
+    return result
+
+
+def sql(cfg, query, database='lion_sync'):
+    return compose(cfg, 'exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', database, '-v', 'ON_ERROR_STOP=1', '-At', data=query.encode(), capture=True).stdout.decode().strip()
+
+
+def operator(cfg, action, username, password=None):
+    payload = json.dumps({'action': action, 'username': username, 'password': password}).encode()
+    out = compose(cfg, 'run', '--rm', '-T', '--no-deps', 'operator', data=payload, capture=True).stdout
+    return json.loads(out)
+
+
+def checksum(path):
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def verify(directory):
+    manifest = json.loads((directory / 'manifest.json').read_text())
+    if manifest.get('formatVersion') != 1 or set(manifest['files']) not in [{'sync.dump', 'auth.dump', 'config.env', 'secrets.json'}, {'sync.dump', 'auth.dump', 'config.env', 'secrets.json', 'trust-ca.pem'}]:
+        raise ValueError('Manifesto de backup inválido.')
+    for name, digest in manifest['files'].items():
+        if checksum(directory / name) != digest:
+            raise ValueError('Checksum de backup divergente.')
+    for key in ['serverId', 'serverEpoch']:
+        if str(uuid.UUID(manifest[key])) != manifest[key]:
+            raise ValueError('Identidade de backup inválida.')
+    return manifest
+
+
+def rehearsal(cfg, directory):
+    manifest = verify(directory)
+    suffix = uuid.uuid4().hex
+    sync, auth = 'lp_verify_sync_' + suffix, 'lp_verify_auth_' + suffix
+    try:
+        for name, dump in [(sync, 'sync.dump'), (auth, 'auth.dump')]:
+            compose(cfg, 'exec', '-T', 'postgres', 'createdb', '-U', 'postgres', name, capture=True)
+            compose(cfg, 'exec', '-T', 'postgres', 'pg_restore', '--exit-on-error', '-U', 'postgres', '-d', name, data=(directory / dump).read_bytes(), capture=True)
+        identity = sql(cfg, 'SELECT server_id::text,server_epoch::text FROM sync_environment;', sync).split('|')
+        if identity != [manifest['serverId'], manifest['serverEpoch']]:
+            raise ValueError('Identidade restaurada não corresponde ao manifesto.')
+        counts = json.loads(sql(cfg, "SELECT json_build_object('vaults',(SELECT count(*) FROM sync_vaults),'commits',(SELECT count(*) FROM sync_commits),'grants',(SELECT count(*) FROM sync_grants));", sync))
+        if counts != manifest['counts'] or sql(cfg, "SELECT count(*) FROM realm WHERE name='lionpocket';", auth) != '1':
+            raise ValueError('Backup incompleto.')
+        before = identity[1]
+        # The restored master realm has the backed-up administrative password.
+        # Database role passwords remain those of the current installation.
+        admin_key = 'KEYCLOAK_ADMIN_PASSWORD_FILE'
+        admin_path = Path(cfg[admin_key])
+        admin_path = admin_path if admin_path.is_absolute() else BASE / admin_path
+        backup_admin = json.loads((directory / 'secrets.json').read_text())[admin_key]
+        if not isinstance(backup_admin, str) or len(backup_admin.strip()) < 32:
+            raise ValueError('Segredo administrativo do backup inválido.')
+        with admin_path.open('w') as stream:
+            stream.write(backup_admin)
+        admin_path.chmod(0o600)
+        epoch = str(uuid.uuid4())
+        sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';", sync)
+        if sql(cfg, 'SELECT server_epoch::text FROM sync_environment;', sync) == before:
+            raise ValueError('Ensaio de epoch falhou.')
+        print('Backup verificado; restore ensaiado em bancos isolados. Novo epoch confirmado.')
+        return manifest
+    finally:
+        for name in [sync, auth]:
+            compose(cfg, 'exec', '-T', 'postgres', 'dropdb', '-U', 'postgres', '--if-exists', name, capture=True, check=False)
+
+
+def main():
+    os.umask(0o077)
+    args = sys.argv[1:]
+    if not args:
+        print('lpctl init | up | status | user create/disable | backup DIR | verify-backup DIR | restore DIR --confirm-new-epoch | restart | logs')
+        return
+    cfg = config(require_secrets=args[0] != 'init')
+    command = args[0]
+    if command == 'init':
+        for key in SECRET_KEYS:
+            path = Path(cfg[key])
+            path = path if path.is_absolute() else BASE / path
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if not path.exists():
+                with path.open('x') as stream:
+                    stream.write(secrets.token_urlsafe(48) + '\n')
+        config()
+        print('Segredos externos preparados. Nenhum arquivo existente foi substituído.')
+    elif command == 'up':
+        compose(cfg, 'up', '-d', '--build', '--wait', '--wait-timeout', '300')
+    elif command == 'status':
+        compose(cfg, 'ps')
+        operator(cfg, 'status', '')
+        print('API e autenticação acessíveis por HTTPS confiável.')
+    elif command == 'user' and len(args) >= 2:
+        username = args[2] if len(args) > 2 else input('Usuário: ').strip()
+        if not re.fullmatch('[a-zA-Z0-9._@-]{1,128}', username):
+            raise ValueError('Usuário inválido.')
+        if args[1] == 'create':
+            # Noninteractive CI supplies only a fixture via stdin, never argv/environment.
+            password = getpass.getpass('Senha (mínimo 12 caracteres): ') if sys.stdin.isatty() else sys.stdin.readline().rstrip('\n')
+            if len(password) < 12:
+                raise ValueError('Senha deve ter pelo menos 12 caracteres.')
+            if sys.stdin.isatty() and password != getpass.getpass('Repita a senha: '):
+                raise ValueError('Senhas divergentes.')
+            operator(cfg, 'create', username, password)
+            print('Usuário criado. Entre pelo LionPocket.')
+        elif args[1] == 'disable':
+            subject = str(uuid.UUID(operator(cfg, 'lookup', username)['subject']))
+            issuer = 'https://' + cfg['AUTH_HOST'] + '/realms/lionpocket'
+            sql(cfg, "INSERT INTO sync_disabled_accounts VALUES('" + issuer + "','" + subject + "') ON CONFLICT DO NOTHING;")
+            operator(cfg, 'disable', username)
+            print('Usuário desabilitado; sessões e acesso à API bloqueados.')
+        else:
+            raise ValueError('Use user create ou user disable.')
+    elif command == 'backup':
+        directory = Path(args[1]).resolve()
+        directory.mkdir(mode=0o700, parents=True, exist_ok=False)
+        running = compose(cfg, 'ps', '--status', 'running', '--services', capture=True).stdout.decode().splitlines()
+        writers = [s for s in ['api', 'keycloak'] if s in running]
+        try:
+            if writers:
+                compose(cfg, 'stop', *writers, capture=True)
+            for database, name in [('lion_sync', 'sync.dump'), ('lion_auth', 'auth.dump')]:
+                with (directory / name).open('xb') as stream:
+                    compose(cfg, 'exec', '-T', 'postgres', 'pg_dump', '-U', 'postgres', '-Fc', database, output=stream)
+            (directory / 'config.env').write_bytes(ENV.read_bytes())
+            (directory / 'secrets.json').write_text(json.dumps({key: (Path(cfg[key]) if Path(cfg[key]).is_absolute() else BASE / cfg[key]).read_text() for key in SECRET_KEYS}))
+            files = ['sync.dump', 'auth.dump', 'config.env', 'secrets.json']
+            if cfg.get('HOMELAB_CA_FILE'):
+                ca = Path(cfg['HOMELAB_CA_FILE'])
+                (directory / 'trust-ca.pem').write_bytes((ca if ca.is_absolute() else BASE / ca).read_bytes())
+                files.append('trust-ca.pem')
+            identity = sql(cfg, 'SELECT server_id::text,server_epoch::text FROM sync_environment;').split('|')
+            counts = json.loads(sql(cfg, "SELECT json_build_object('vaults',(SELECT count(*) FROM sync_vaults),'commits',(SELECT count(*) FROM sync_commits),'grants',(SELECT count(*) FROM sync_grants));"))
+            manifest = {'formatVersion': 1, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'serverId': identity[0], 'serverEpoch': identity[1], 'counts': counts, 'files': {name: checksum(directory / name) for name in files}}
+            (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+            print('Backup completo criado. Proteja o diretório fora do Git.')
+        finally:
+            if writers:
+                compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', *writers, capture=True)
+    elif command == 'verify-backup':
+        rehearsal(cfg, Path(args[1]).resolve())
+    elif command == 'restore':
+        if len(args) != 3 or args[2] != '--confirm-new-epoch':
+            raise ValueError('Restore substitui ambos os bancos. Faça backup atual e use restore DIR --confirm-new-epoch. Clientes precisarão de reconciliação.')
+        directory = Path(args[1]).resolve()
+        rehearsal(cfg, directory)
+        # Account subjects and signing keys in auth.dump must match issuer/domain of this deployment.
+        backup_cfg = dict(line.split('=', 1) for line in (directory / 'config.env').read_text().splitlines() if line and not line.startswith('#') and '=' in line)
+        if any(cfg[k] != backup_cfg[k] for k in ['SYNC_HOST', 'AUTH_HOST']):
+            raise ValueError('Restore exige os mesmos hosts. Migração de domínio deve ser revisada separadamente.')
+        if (directory / 'trust-ca.pem').is_file() and not cfg.get('HOMELAB_CA_FILE'):
+            raise ValueError('Configure HOMELAB_CA_FILE com a raiz pública do backup antes de restaurar.')
+        compose(cfg, 'stop', 'api', 'keycloak', capture=True)
+        if (directory / 'trust-ca.pem').is_file():
+            ca = Path(cfg['HOMELAB_CA_FILE'])
+            ca = ca if ca.is_absolute() else BASE / ca
+            ca.write_bytes((directory / 'trust-ca.pem').read_bytes())
+        for database, owner, name in [('lion_sync', 'sync_api', 'sync.dump'), ('lion_auth', 'keycloak', 'auth.dump')]:
+            compose(cfg, 'exec', '-T', 'postgres', 'dropdb', '-U', 'postgres', '--force', database, capture=True)
+            compose(cfg, 'exec', '-T', 'postgres', 'createdb', '-U', 'postgres', '-O', owner, database, capture=True)
+            compose(cfg, 'exec', '-T', 'postgres', 'pg_restore', '--exit-on-error', '-U', 'postgres', '-d', database, data=(directory / name).read_bytes(), capture=True)
+        # The restored master realm has the backed-up administrative password.
+        # Database role passwords remain those of the current installation.
+        admin_key = 'KEYCLOAK_ADMIN_PASSWORD_FILE'
+        admin_path = Path(cfg[admin_key])
+        admin_path = admin_path if admin_path.is_absolute() else BASE / admin_path
+        backup_admin = json.loads((directory / 'secrets.json').read_text())[admin_key]
+        if not isinstance(backup_admin, str) or len(backup_admin.strip()) < 32:
+            raise ValueError('Segredo administrativo do backup inválido.')
+        with admin_path.open('w') as stream:
+            stream.write(backup_admin)
+        admin_path.chmod(0o600)
+        epoch = str(uuid.uuid4())
+        sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';")
+        compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', 'api', 'keycloak', capture=True)
+        print('Restore concluído com novo serverEpoch. Clientes conservam banco/outbox e exigem revisão; não altere envelopes assinados.')
+    elif command == 'restart':
+        compose(cfg, 'restart', 'api', 'keycloak')
+        compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', 'api', 'keycloak')
+    elif command == 'logs':
+        compose(cfg, 'logs', '--tail', '100', 'api', 'keycloak')
+    else:
+        raise ValueError('Comando inválido. Execute lpctl sem argumentos para ver os comandos.')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, OSError, IndexError, urllib.error.URLError):
+        # Exceptions from TLS/Docker/files may include URLs or expanded secrets; only safe own errors are shown.
+        cause = sys.exc_info()[1]
+        print(str(cause) if type(cause) is ValueError else 'Operação não concluída. Verifique configuração, HTTPS e serviços; dados locais permanecem disponíveis.', file=sys.stderr)
+        sys.exit(1)

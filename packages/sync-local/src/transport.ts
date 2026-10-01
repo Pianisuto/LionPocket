@@ -1,5 +1,5 @@
 import { syncFetchText } from './network';
-import { acceptKeyCheckpoints } from './beta-security';
+import { acceptKeyCheckpoints } from './security';
 import { reissueForKeyVersion } from './reemission';
 import {
   activeDevice,

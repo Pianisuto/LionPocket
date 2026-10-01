@@ -1,3 +1,4 @@
+# Compatibility recipe: same application as deploy/self-hosted/Dockerfile.
 FROM node:24-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./

@@ -1,0 +1,12 @@
+{$SYNC_HOST} {
+    reverse_proxy api:8787
+}
+{$AUTH_HOST} {
+    @public path /realms/lionpocket/* /resources/* /robots.txt
+    handle @public {
+        reverse_proxy keycloak:8080
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

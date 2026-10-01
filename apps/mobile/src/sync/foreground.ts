@@ -1,16 +1,15 @@
 import { AppState } from 'react-native';
-import { betaSync, privateBeta } from './beta';
+import { syncController } from './sync';
 /** Mounted at the app root, never a background service. Cleanup also handles async initialization. */
-export function startBetaForeground(onCompleted: () => void): () => void {
-  if (!privateBeta) return () => {};
+export function startSyncForeground(onCompleted: () => void): () => void {
   let disposed = false;
-  let beta: Awaited<ReturnType<typeof betaSync>> | undefined;
+  let beta: Awaited<ReturnType<typeof syncController>> | undefined;
   let unsubscribe: (() => void) | undefined;
   let lastCompleted: string | undefined;
   const subscription = AppState.addEventListener('change', (state) =>
     beta?.setForeground(state === 'active'),
   );
-  void betaSync()
+  void syncController()
     .then((controller) => {
       if (disposed) return;
       beta = controller;
@@ -32,3 +31,6 @@ export function startBetaForeground(onCompleted: () => void): () => void {
     beta?.setForeground(false);
   };
 }
+
+/** Transitional code alias; the normal app uses the generic foreground adapter. */
+export const startBetaForeground = startSyncForeground;

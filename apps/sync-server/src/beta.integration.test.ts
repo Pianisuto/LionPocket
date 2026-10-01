@@ -88,6 +88,8 @@ describe.skipIf(!enabled)(
       let saved: BetaSaved | null = null;
       const secrets = new TestSecrets();
       const sync = new Controller({
+        allowLocalDevelopment: true,
+        requireRecoveryConfirmation: false,
         db: bank.syncDatabase(),
         secrets,
         sodium,

@@ -99,6 +99,7 @@ describe.skipIf(!enabled)(
         origin: endpoint,
         identity: keycloakIdentity(issuer),
         financialEnabled: true,
+        financialScope: 'manual',
       });
       await new Promise<void>((r) => server.listen(18772, '127.0.0.1', r));
     }

@@ -146,3 +146,7 @@ Distribuído sob a [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-
 
 
 O ambiente com Keycloak/PostgreSQL e pareamento está no [guia de provisioning](docs/local-first-sync-stage1-provisioning.md). O [guia de transporte manual](docs/local-first-sync-stage1-transport.md) descreve envio cifrado idempotente, inbox/outbox duráveis, conflitos, backups e reprodução nativa. Somente `manualTransaction` pode ser anunciado no opt-in sintético; dados pessoais e demais entidades permanecem fora do piloto.
+
+### Sincronização opcional em servidor próprio
+
+O LionPocket normal continua local-first e oferece sincronização E2EE por uma única URL HTTPS em Configurações → Sincronização. Veja o [guia de instalação e operação self-hosted](docs/self-hosting.md).

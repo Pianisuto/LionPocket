@@ -19,8 +19,8 @@ vi.mock('react-native', () => ({
     },
   },
 }));
-vi.mock('./beta', () => ({ privateBeta: true, betaSync: state.init }));
-import { startBetaForeground } from './foreground';
+vi.mock('./sync', () => ({ privateBeta: false, syncController: state.init }));
+import { startSyncForeground } from './foreground';
 afterEach(() => {
   vi.clearAllMocks();
   state.currentState = 'active';
@@ -35,12 +35,12 @@ function controller() {
     },
   };
 }
-describe('real React Native AppState subscription adapter', () => {
+describe('normal React Native AppState subscription adapter (privateBeta=false)', () => {
   it('requests startup/resume only while active and removes listeners on unmount', async () => {
     const c = controller();
     state.init.mockResolvedValue(c);
     const refresh = vi.fn(),
-      stop = startBetaForeground(refresh);
+      stop = startSyncForeground(refresh);
     await Promise.resolve();
     expect(state.setForeground).toHaveBeenCalledWith(true);
     state.currentState = 'background';
@@ -67,7 +67,7 @@ describe('real React Native AppState subscription adapter', () => {
         resolve = r;
       }),
     );
-    const stop = startBetaForeground(vi.fn());
+    const stop = startSyncForeground(vi.fn());
     state.currentState = 'background';
     resolve(controller());
     await Promise.resolve();
@@ -79,7 +79,7 @@ describe('real React Native AppState subscription adapter', () => {
         resolve = r;
       }),
     );
-    const stopEarly = startBetaForeground(vi.fn());
+    const stopEarly = startSyncForeground(vi.fn());
     stopEarly();
     resolve(controller());
     await Promise.resolve();

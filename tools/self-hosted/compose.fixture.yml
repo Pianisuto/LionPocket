@@ -1,0 +1,33 @@
+services:
+  caddy:
+    user: "${LP_UID:-1000}:0"
+    ports: !reset []
+    volumes:
+      - ../../tools/self-hosted/Caddyfile.fixture:/etc/caddy/Caddyfile:ro
+      - ${LP_FIXTURE_DIR:?fixture directory}/certificates:/data
+      - ${LP_FIXTURE_DIR}/caddy-config:/config
+    networks:
+      default:
+        aliases: [sync.fixture.test, auth.fixture.test, unexpected.fixture.test]
+  api:
+    environment:
+      NODE_EXTRA_CA_CERTS: /fixtures/certificates/caddy/pki/authorities/local/root.crt
+    volumes:
+      - ${LP_FIXTURE_DIR}:/fixtures:ro
+  fixture:
+    user: "${LP_UID:-1000}:0"
+    image: lionpocket-sync:${LP_IMAGE_TAG:-local}
+    profiles: [operations]
+    entrypoint: [/app/node_modules/.bin/tsx, /app/tools/self-hosted/contract.mts]
+    environment:
+      NODE_EXTRA_CA_CERTS: /fixtures/certificates/caddy/pki/authorities/local/root.crt
+    volumes:
+      - ../../apps/desktop/src:/app/apps/desktop/src:ro
+      - ../../apps/mobile/src:/app/apps/mobile/src:ro
+      - ../../tools/self-hosted:/app/tools/self-hosted:ro
+      - ${LP_FIXTURE_DIR}:/fixtures
+  operator:
+    environment:
+      NODE_EXTRA_CA_CERTS: /fixtures/certificates/caddy/pki/authorities/local/root.crt
+    volumes:
+      - ${LP_FIXTURE_DIR}:/fixtures:ro

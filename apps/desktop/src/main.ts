@@ -1,6 +1,6 @@
 import { windowsUpdateFeed } from './main/updatePolicy';
 import { releaseSmokeDirectory, verifyReleaseSmoke } from './main/releaseSmoke';
-import { privateBeta, registerBetaSync } from './main/sync/beta';
+import { privateBeta, registerSyncController } from './main/sync/sync';
 import { setInterval, setTimeout } from 'node:timers';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -199,7 +199,7 @@ app.whenReady().then(async () => {
   database = new LionPocketDatabase(databasePath);
   registerIpcHandlers(database);
   await registerDevelopmentSync(database, syntheticDirectory);
-  await registerBetaSync(database);
+  await registerSyncController(database);
   createWindow();
   if (smokeDirectory) {
     mainWindow!.webContents.once('did-finish-load', () => {

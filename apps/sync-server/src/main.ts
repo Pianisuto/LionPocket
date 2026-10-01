@@ -1,45 +1,47 @@
+import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import sodium from 'libsodium-wrappers-sumo';
-import { ProvisioningCrypto } from '@lionpocket/sync-local';
+import { ProvisioningCrypto, normalizeEndpoint } from '@lionpocket/sync-local';
 import { controlSchema, commitSchema, bindingSchema } from './schema';
 import { controlServer, initialize } from './server';
 import { keycloakIdentity } from './identity';
 import { manualTransactionAcceptancePassed } from './acceptance';
 
-const privateBeta = process.env.LIONPOCKET_PRIVATE_BETA === 'isolated';
-if (!privateBeta && process.env.LIONPOCKET_SYNC_DEV !== 'synthetic-only')
-  throw new Error('Explicit synthetic-only development opt-in required.');
-const pool = new pg.Pool({
-  connectionString:
-    process.env.SYNC_DATABASE_URL ??
-    'postgresql://liondev:liondev@127.0.0.1:55432/lion_sync',
+const development = process.env.LIONPOCKET_SYNC_DEV === 'synthetic-only';
+const betaChannel = process.env.LIONPOCKET_PRIVATE_BETA === 'isolated'; // Legacy deployment alias only.
+const required = (name: string) => {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing ${name}. See docs/self-hosting.md.`);
+  return value;
+};
+const origin = normalizeEndpoint(development ? 'http://127.0.0.1:8787' : required('SYNC_PUBLIC_ORIGIN'), development);
+const issuer = development ? 'http://127.0.0.1:18080/realms/lionpocket-dev' : required('SYNC_OIDC_ISSUER');
+const issuerUrl = new URL(issuer);
+if ((!development && issuerUrl.protocol !== 'https:') || issuerUrl.username || issuerUrl.password || issuerUrl.search || issuerUrl.hash)
+  throw new Error('Invalid HTTPS issuer.');
+const pool = new pg.Pool(process.env.SYNC_DATABASE_URL || development ? {
+  connectionString: process.env.SYNC_DATABASE_URL ?? 'postgresql://liondev:liondev@127.0.0.1:55432/lion_sync',
+} : {
+  host: required('SYNC_DB_HOST'), database: required('SYNC_DB_NAME'), user: required('SYNC_DB_USER'),
+  password: readFileSync(required('SYNC_DB_PASSWORD_FILE'), 'utf8').trim(),
 });
+// Idle connection failures must never dump Pool/client credential objects.
+pool.on('error', () => console.error('Sync database unavailable.'));
 await sodium.ready;
 await pool.query(controlSchema + commitSchema + bindingSchema);
 const environment = await initialize(pool);
-const origin = privateBeta ? process.env.SYNC_PUBLIC_ORIGIN : 'http://127.0.0.1:8787';
-const issuer = privateBeta ? process.env.SYNC_OIDC_ISSUER : 'http://127.0.0.1:18080/realms/lionpocket-dev';
-if (!origin || !issuer || (privateBeta && (!origin.startsWith('https://') || !issuer.startsWith('https://')))) throw new Error('HTTPS origin and issuer required.');
 const server = controlServer({
-  privateBeta,
-  ...(privateBeta ? {oidc:{issuer,desktopClientId:'lionpocket-desktop-dev',androidClientId:'lionpocket-android-dev',desktopRedirect:'http://127.0.0.1:18761/callback',androidRedirect:'com.lionpocketmobile.beta:/callback'}} : {}),
-  financialEnabled:
-    privateBeta || (manualTransactionAcceptancePassed &&
-    process.env.LIONPOCKET_SYNC_MANUAL === 'synthetic-only'),
-  pool,
-  crypto: new ProvisioningCrypto(sodium),
-  environment,
-  origin,
-  identity: keycloakIdentity(issuer),
+  financialScope: development ? 'manual' : 'full',
+  financialEnabled: !development || (manualTransactionAcceptancePassed && process.env.LIONPOCKET_SYNC_MANUAL === 'synthetic-only'),
+  ...(!development ? { oidc: {
+    issuer,
+    desktopClientId: betaChannel ? 'lionpocket-desktop-dev' : 'lionpocket-desktop',
+    androidClientId: betaChannel ? 'lionpocket-android-dev' : 'lionpocket-android',
+    desktopRedirect: 'http://127.0.0.1:18761/callback',
+    androidRedirect: betaChannel ? 'com.lionpocketmobile.beta:/callback' : 'com.lionpocketmobile:/callback',
+  }} : {}),
+  pool, crypto: new ProvisioningCrypto(sodium), environment, origin, identity: keycloakIdentity(issuer, development || betaChannel ? ["lionpocket-desktop-dev", "lionpocket-android-dev"] : ["lionpocket-desktop", "lionpocket-android"]),
 });
-server.listen(8787, privateBeta ? '0.0.0.0' : '127.0.0.1', () =>
-  console.log(
-    'Synthetic control API listening on http://127.0.0.1:8787; manualTransaction requires explicit synthetic-only opt-in.',
-  ),
-);
+server.listen(8787, development ? '127.0.0.1' : '0.0.0.0', () => console.log('LionPocket Sync API ready. Financial payloads are ciphertext.'));
 for (const signal of ['SIGINT', 'SIGTERM'])
-  process.on(signal, () =>
-    server.close(() => {
-      void pool.end();
-    }),
-  );
+  process.on(signal, () => server.close(() => { void pool.end(); }));

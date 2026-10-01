@@ -115,3 +115,11 @@ packages/sync-local/dist/
 !apps/mobile/android/app/debug.keystore
 *signing*.properties
 release-candidates/
+
+# Self-host operational files never belong to source artifacts
+deploy/lionpocket-secrets/
+deploy/self-hosted/backups/
+*.dump
+
+__pycache__/
+*.pyc

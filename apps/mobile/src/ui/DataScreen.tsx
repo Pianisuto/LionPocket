@@ -1,4 +1,3 @@
-import { BetaSyncPanel } from './BetaSync';
 import { DevelopmentSync } from './DevelopmentSync';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -145,7 +144,6 @@ export function DataScreen({
               {notice}
             </Text>
           ) : null}
-          <BetaSyncPanel onChanged={onChanged} />
           <DevelopmentSync onChanged={onChanged} />
           <View style={styles.card}>
             <Text style={styles.heading}>Exportar</Text>

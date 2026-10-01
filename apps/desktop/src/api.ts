@@ -32,9 +32,9 @@ export interface UpdateInfo {
 }
 
 export interface LionPocketApi {
-  onBetaSyncChanged?(listener: () => void): () => void;
-  betaSyncStatus?(): Promise<import('@lionpocket/sync-local').BetaStatus|null>;
-  betaSyncCommand?(action:string,args:unknown[]):Promise<unknown>;
+  onSyncChanged?(listener: () => void): () => void;
+  syncStatus?(): Promise<import('@lionpocket/sync-local').SyncStatus|null>;
+  syncCommand?(action:string,args:unknown[]):Promise<unknown>;
   developmentSyncStatus?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus | null>;
   developmentSyncRun?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus>;
   developmentSyncResolve?(objectId: string, heads: string[], revisionId: string, recover: boolean): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus>;

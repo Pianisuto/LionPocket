@@ -33,7 +33,7 @@ for (const name of ['core','sync-protocol','sync-local']) {
 }
 for (const name of ['babel.config.js', 'metro.config.js']) cpSync(join(repo, 'apps/mobile', name), join(app, name));
 const gradle = join(app, 'android/app/build.gradle');
-writeFileSync(gradle, readFileSync(gradle, 'utf8').replace('react {', 'react {\n    debuggableVariants = [] // Offline spike: bundle JS even in debug.').replace(/applicationId (?:privateBeta \? "com.lionpocketmobile.beta" : )?"com.lionpocketmobile"/, 'applicationId "com.lionpocketmobile.cryptospike"'));
+writeFileSync(gradle, readFileSync(gradle, 'utf8').replace('react {', 'react {\n    debuggableVariants = [] // Offline spike: bundle JS even in debug.').replace("appAuthRedirectScheme: privateBeta ? 'com.lionpocketmobile.beta' : 'com.lionpocketmobile'", "appAuthRedirectScheme: 'com.lionpocketmobile.syncdev'").replace(/applicationId (?:privateBeta \? "com.lionpocketmobile.beta" : )?"com.lionpocketmobile"/, 'applicationId "com.lionpocketmobile.cryptospike"'));
 mkdirSync(join(target, 'tools/release'), { recursive: true });
 cpSync(join(repo, 'tools/release/version.json'), join(target, 'tools/release/version.json'));
 require('node:fs').appendFileSync(join(app, 'android/gradle.properties'), '\n# Disposable test harness only; never a production identity.\ndevelopmentSigning=true\n');

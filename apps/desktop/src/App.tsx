@@ -149,8 +149,8 @@ export default function App() {
   const changed = useCallback(() => setRefreshKey((value) => value + 1), []);
   useEffect(() => {
     let lastCompleted: string | null = null;
-    return window.lionPocket.onBetaSyncChanged?.(() => {
-      void window.lionPocket.betaSyncStatus?.().then(status => {
+    return window.lionPocket.onSyncChanged?.(() => {
+      void window.lionPocket.syncStatus?.().then(status => {
         if (status?.lastCompletedAt && status.lastCompletedAt !== lastCompleted && status.activity !== 'syncing') {
           lastCompleted = status.lastCompletedAt;
           changed();
