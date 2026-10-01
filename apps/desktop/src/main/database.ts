@@ -1,4 +1,4 @@
-import { syncMigration, transportMigration, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type LocalSyncDatabase, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
+import { syncMigration, transportMigration, captureFinancial, financialMigration, financialTriggers, financialTableTypes, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type LocalSyncDatabase, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { initializeLocalSchema, hasCurrentFinancialSchema } from './migrationProtection';
@@ -132,10 +132,68 @@ export class LionPocketDatabase {
         this.migrate();
         this.seed();
       });
+      this.installFinancialCapture();
     } catch (cause) {
       this.db.close();
       throw cause;
     }
+  }
+
+  private installFinancialCapture(): void {
+    const exec = this.db.exec.bind(this.db),
+      prepare = this.db.prepare.bind(this.db);
+    let transaction = false,
+      capturing = false;
+    const flush = () => {
+      if (
+        capturing ||
+        prepare('SELECT mode FROM sync_local_state WHERE id=1').get()?.mode !==
+          'financial' ||
+        prepare('SELECT applying FROM sync_control WHERE id=1').get()?.applying
+      )
+        return;
+      capturing = true;
+      try {
+        this.runSyncWorkflow(captureFinancial(randomUUID));
+      } finally {
+        capturing = false;
+      }
+    };
+    this.db.exec = (statement: string) => {
+      if (/^COMMIT\b/i.test(statement.trim())) {
+        flush();
+        exec(statement);
+        transaction = false;
+        return;
+      }
+      exec(statement);
+      if (/^BEGIN\b/i.test(statement.trim())) transaction = true;
+      if (/^ROLLBACK\b/i.test(statement.trim())) transaction = false;
+    };
+    this.db.prepare = (statement: string) => {
+      const prepared = prepare(statement),
+        run = prepared.run.bind(prepared);
+      prepared.run = (...args) => {
+        if (
+          transaction ||
+          capturing ||
+          !/^\s*(INSERT|UPDATE|DELETE)\b/i.test(statement) ||
+          prepare('SELECT mode FROM sync_local_state WHERE id=1').get()
+            ?.mode !== 'financial'
+        )
+          return Reflect.apply(run, prepared, args);
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+          const result = Reflect.apply(run, prepared, args);
+          this.db.exec('COMMIT');
+          return result;
+        } catch (e) {
+          this.db.exec('ROLLBACK');
+          throw e;
+        }
+      };
+      return prepared;
+    };
   }
 
   private atomic<T>(action: () => T): T {
@@ -422,6 +480,23 @@ export class LionPocketDatabase {
     if (!this.db.prepare('SELECT 1 FROM migrations WHERE version = 13').get()) {
       for (const sql of transportMigration) this.db.exec(sql);
       this.db.exec("INSERT INTO migrations(version, applied_at) VALUES (13, datetime('now'))");
+    }
+    if (!this.db.prepare('SELECT 1 FROM migrations WHERE version = 14').get()) {
+      for (const sql of financialMigration) this.db.exec(sql);
+      const columns = Object.fromEntries(
+        Object.keys(financialTableTypes).map((t) => [
+          t,
+          this.db
+            .prepare(`PRAGMA table_info(${t})`)
+            .all()
+            .map((r) => String(r.name)),
+        ]),
+      );
+      for (const sql of financialTriggers('desktop', columns))
+        this.db.exec(sql);
+      this.db.exec(
+        "INSERT INTO migrations(version, applied_at) VALUES (14, datetime('now'))",
+      );
     }
   }
 
@@ -1103,33 +1178,53 @@ export class LionPocketDatabase {
     installmentNumber: number | null = null,
     installmentTotal: number | null = null,
   ) {
-    const timestamp = now();
-    this.db.prepare(`
+    const timestamp = now(),
+      id = randomUUID(),
+      ownsTransaction = !this.db.isTransaction;
+    if (ownsTransaction) this.db.exec('BEGIN');
+    try {
+      this.db
+        .prepare(
+          `
       INSERT OR IGNORE INTO transactions(
         id, kind, description, category_id, planned_cents, actual_cents, purchase_date, due_date,
         settled_date, status, payment_method_id, card_id, notes, source_type, source_id,
         installment_number, installment_total, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?)
-    `).run(
-      randomUUID(),
-      input.kind,
-      input.description.trim(),
-      input.categoryId ?? null,
-      toCents(input.plannedAmount) ?? 0,
-      toCents(input.actualAmount),
-      input.purchaseDate ?? null,
-      input.dueDate,
-      input.settledDate ?? null,
-      input.status,
-      input.paymentMethodId ?? null,
-      input.cardId ?? null,
-      input.notes?.trim() ?? '',
-      sourceId,
-      installmentNumber,
-      installmentTotal,
-      timestamp,
-      timestamp,
-    );
+    `,
+        )
+        .run(
+          id,
+          input.kind,
+          input.description.trim(),
+          input.categoryId ?? null,
+          toCents(input.plannedAmount) ?? 0,
+          toCents(input.actualAmount),
+          input.purchaseDate ?? null,
+          input.dueDate,
+          input.settledDate ?? null,
+          input.status,
+          input.paymentMethodId ?? null,
+          input.cardId ?? null,
+          input.notes?.trim() ?? '',
+          sourceId,
+          installmentNumber,
+          installmentTotal,
+          timestamp,
+          timestamp,
+        );
+      if (
+        /^lp1:[a-f0-9]{64}$/.test(sourceId) &&
+        this.db.prepare('SELECT id FROM transactions WHERE id=?').get(id)
+      )
+        this.db
+          .prepare('INSERT INTO sync_import_provenance VALUES(?,?,NULL)')
+          .run(id, sourceId.slice(4));
+      if (ownsTransaction) this.db.exec('COMMIT');
+    } catch (e) {
+      if (ownsTransaction) this.db.exec('ROLLBACK');
+      throw e;
+    }
   }
 
   private getTransaction(id: string): Transaction {

@@ -93,7 +93,7 @@ function fromRow(row: Row): Transaction {
 }
 
 export class MobileRepository extends PlanningRepository {
-  constructor(db: Connection, private readonly syncUuid?: () => string) { super(db); }
+  constructor(db: Connection, private readonly syncUuid?: () => string) { super(db,syncUuid); }
 
   private async runSyncWorkflow(tx: Query, workflow: SqlWorkflow): Promise<void> {
     let step = workflow.next();

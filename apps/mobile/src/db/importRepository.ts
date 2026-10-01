@@ -1,3 +1,5 @@
+import { captureConnection } from './syncWriters';
+import { canonicalStringify } from '@lionpocket/sync-protocol';
 import { syncTables } from '@lionpocket/sync-local';
 import {
   toCents,
@@ -31,8 +33,11 @@ export function csvImportPlan(rows: ImportedTransaction[]): ImportPlan {
   return { catalogs: [], recurring: [], goals: [], transactions: rows };
 }
 /** All catalog creation and rows share the outer SQLite transaction. No queued self-waits. */
-export async function applyImportPlan(db: Connection, plan: ImportPlan): Promise<ImportCounts> {
-  return db.transaction(async (tx) => {
+export async function applyImportPlan(
+  db: Connection,
+  plan: ImportPlan,
+): Promise<ImportCounts> {
+  return captureConnection(db).transaction(async (tx) => {
     const bound: Connection = {
       executeAsync: tx.executeAsync.bind(tx),
       transaction: async (action) => action(tx),
@@ -55,7 +60,9 @@ export async function applyImportPlan(db: Connection, plan: ImportPlan): Promise
             ? catalogs.cards
             : catalogs.paymentMethods;
       let existing = collection.find(
-        (c) => normalizeSearchText(c.name.trim()) === normalizeSearchText(input.name.trim()),
+        (c) =>
+          normalizeSearchText(c.name.trim()) ===
+          normalizeSearchText(input.name.trim()),
       );
       if (!existing) {
         await repo.createCatalog({ ...input, id: undefined });
@@ -72,7 +79,8 @@ export async function applyImportPlan(db: Connection, plan: ImportPlan): Promise
       if (!existing) throw new Error('Não foi possível criar o cadastro.');
       return existing.id;
     };
-    for (const input of plan.catalogs) ids.set(input.id ?? '', await catalog(input));
+    for (const input of plan.catalogs)
+      ids.set(input.id ?? '', await catalog(input));
     const refs = <
       T extends {
         categoryId?: string | null;
@@ -83,36 +91,87 @@ export async function applyImportPlan(db: Connection, plan: ImportPlan): Promise
       input: T,
     ): T => ({
       ...input,
-      categoryId: input.categoryId ? (ids.get(input.categoryId) ?? input.categoryId) : null,
+      categoryId: input.categoryId
+        ? (ids.get(input.categoryId) ?? input.categoryId)
+        : null,
       paymentMethodId: input.paymentMethodId
         ? (ids.get(input.paymentMethodId) ?? input.paymentMethodId)
         : null,
       cardId: input.cardId ? (ids.get(input.cardId) ?? input.cardId) : null,
     });
-    const seenRecurring = new Set(
-      (await repo.listRecurring()).map(
-        (r) => `${r.kind}:${normalizeSearchText(r.description.trim())}`,
-      ),
-    );
-    for (const input of plan.recurring) {
-      const key = `${input.kind}:${normalizeSearchText(input.description.trim())}`;
-      if (seenRecurring.has(key)) {
-        result.skipped++;
-        continue;
+    for (const [type, inputs] of [
+      ['recurring', plan.recurring],
+      ['goal', plan.goals],
+    ] as const) {
+      for (const input of inputs) {
+        const key = input.importSourceKey;
+        if (!key)
+          throw new Error(
+            'A importação de séries e objetivos exige proveniência do arquivo.',
+          );
+        const reason = 'import_receipt:' + key;
+        if (
+          (
+            await tx.executeAsync(
+              'SELECT review_id FROM sync_review WHERE reason=?',
+              [reason],
+            )
+          ).rows._array.length
+        ) {
+          result.skipped++;
+          continue;
+        }
+        if (type === 'recurring') {
+          const item = input as ImportPlan['recurring'][number];
+          const same = (await repo.listRecurring()).some(
+            (r) =>
+              r.kind === item.kind &&
+              normalizeSearchText(r.description) ===
+                normalizeSearchText(item.description),
+          );
+          await repo.saveRecurring(
+            refs({
+              ...item,
+              description: same
+                ? `${item.description} (importado ${key.slice(4, 12)})`
+                : item.description,
+            }),
+          );
+          const localId = (
+            await tx.executeAsync<{ id: string }>(
+              'SELECT id FROM recurring_expenses ORDER BY rowid DESC LIMIT 1',
+            )
+          ).rows._array[0].id;
+          await tx.executeAsync('INSERT INTO sync_review VALUES(?,NULL,?,?)', [
+            await newId(tx),
+            reason,
+            canonicalStringify({
+              entityType: type,
+              localId,
+              importKey: key.slice(4),
+            }),
+          ]);
+          result.recurring++;
+        } else {
+          const item = input as ImportPlan['goals'][number];
+          await repo.saveGoal(refs(item));
+          const localId = (
+            await tx.executeAsync<{ id: string }>(
+              'SELECT id FROM goals ORDER BY rowid DESC LIMIT 1',
+            )
+          ).rows._array[0].id;
+          await tx.executeAsync('INSERT INTO sync_review VALUES(?,NULL,?,?)', [
+            await newId(tx),
+            reason,
+            canonicalStringify({
+              entityType: type,
+              localId,
+              importKey: key.slice(4),
+            }),
+          ]);
+          result.goals++;
+        }
       }
-      await repo.saveRecurring(refs(input));
-      seenRecurring.add(key);
-      result.recurring++;
-    }
-    const seenGoals = new Set((await repo.listGoals()).map((g) => g.name));
-    for (const input of plan.goals) {
-      if (seenGoals.has(input.name)) {
-        result.skipped++;
-        continue;
-      }
-      await repo.saveGoal(refs(input));
-      seenGoals.add(input.name);
-      result.goals++;
     }
     for (const row of plan.transactions) {
       const existing = await tx.executeAsync(
@@ -137,13 +196,18 @@ export async function applyImportPlan(db: Connection, plan: ImportPlan): Promise
           name: row.paymentMethodName,
         });
       if (row.cardName)
-        input.cardId = await catalog({ type: 'card', name: row.cardName, dueDay: 10 });
+        input.cardId = await catalog({
+          type: 'card',
+          name: row.cardName,
+          dueDay: 10,
+        });
       validateTransaction(input, await repo.catalogs());
+      const localId = await newId(tx);
       await tx.executeAsync(
         `INSERT INTO transactions (id, kind, description, category_id, planned_amount_cents, actual_amount_cents, due_date, settled_date, status, payment_method_id, card_id, purchase_date, notes, source_type, source_id, installment_number, installment_total)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?)`,
         [
-          await newId(tx),
+          localId,
           input.kind,
           input.description.trim(),
           input.categoryId ?? null,
@@ -161,9 +225,15 @@ export async function applyImportPlan(db: Connection, plan: ImportPlan): Promise
           row.installmentTotal ?? null,
         ],
       );
-      await tx.executeAsync("INSERT INTO local_import_records VALUES (?, datetime('now'))", [
-        row.sourceKey,
-      ]);
+      if (/^lp1:[a-f0-9]{64}$/.test(row.sourceKey))
+        await tx.executeAsync(
+          'INSERT INTO sync_import_provenance VALUES(?,?,NULL)',
+          [localId, row.sourceKey.slice(4)],
+        );
+      await tx.executeAsync(
+        "INSERT INTO local_import_records VALUES (?, datetime('now'))",
+        [row.sourceKey],
+      );
       result.transactions++;
     }
     return result;
@@ -183,23 +253,41 @@ export function mergeBackupData(
   incoming: BackupData,
 ): { data: BackupData; added: number; skipped: number } {
   const data: BackupData = Object.fromEntries(
-    backupTables.map((table) => [table, current[table].map((row) => ({ ...row }))]),
+    backupTables.map((table) => [
+      table,
+      current[table].map((row) => ({ ...row })),
+    ]),
   );
   const categoryIds = new Map<string, string>(),
     paymentIds = new Map<string, string>(),
     cardIds = new Map<string, string>();
   let added = 0,
     skipped = 0;
-  if (incoming.sync_local_state?.some((state) => state.local_scope_id !== null)
-    || syncTables.some((table) => table !== 'sync_local_state' && (incoming[table]?.length ?? 0) > 0))
-    throw new Error('Importar uma linhagem de sync exige onboarding, fora do piloto atual. Use restauração do backup na mesma plataforma.');
-  for (const table of backupTables.filter((table) => !syncTables.includes(table)))
+  if (
+    incoming.sync_local_state?.some((state) => state.local_scope_id !== null) ||
+    syncTables.some(
+      (table) =>
+        !['sync_local_state', 'sync_control'].includes(table) &&
+        (incoming[table]?.length ?? 0) > 0,
+    )
+  )
+    throw new Error(
+      'Importar uma linhagem de sync exige onboarding, fora do piloto atual. Use restauração do backup na mesma plataforma.',
+    );
+  for (const table of backupTables.filter(
+    (table) => !syncTables.includes(table),
+  ))
     for (const original of incoming[table]) {
       const row = { ...original };
       if (row.category_id && categoryIds.has(String(row.category_id)))
         row.category_id = categoryIds.get(String(row.category_id)) as string;
-      if (row.payment_method_id && paymentIds.has(String(row.payment_method_id)))
-        row.payment_method_id = paymentIds.get(String(row.payment_method_id)) as string;
+      if (
+        row.payment_method_id &&
+        paymentIds.has(String(row.payment_method_id))
+      )
+        row.payment_method_id = paymentIds.get(
+          String(row.payment_method_id),
+        ) as string;
       if (row.card_id && cardIds.has(String(row.card_id)))
         row.card_id = cardIds.get(String(row.card_id)) as string;
       if (['categories', 'payment_methods', 'cards'].includes(table)) {
@@ -209,15 +297,19 @@ export function mergeBackupData(
             (table !== 'categories' || r.kind === row.kind),
         );
         if (same) {
-          (table === 'categories' ? categoryIds : table === 'cards' ? cardIds : paymentIds).set(
-            String(row.id),
-            String(same.id),
-          );
+          (table === 'categories'
+            ? categoryIds
+            : table === 'cards'
+              ? cardIds
+              : paymentIds
+          ).set(String(row.id), String(same.id));
           skipped++;
           continue;
         }
       }
-      const existing = data[table].find((r) => identity(table, r) === identity(table, row));
+      const existing = data[table].find(
+        (r) => identity(table, r) === identity(table, row),
+      );
       if (existing) {
         if (Object.keys(row).some((key) => existing[key] !== row[key]))
           throw new Error(
@@ -229,12 +321,15 @@ export function mergeBackupData(
       // Desktop priorities are global to that database. Keep existing mobile priorities;
       // imported priorities are assigned free positions without removing hidden items.
       if (table === 'recurring_transaction_priorities')
-        row.position = Math.max(-1, ...data[table].map((r) => Number(r.position))) + 1;
+        row.position =
+          Math.max(-1, ...data[table].map((r) => Number(r.position))) + 1;
       if (table === 'transaction_priority_order')
         row.position =
           Math.max(
             -1,
-            ...data[table].filter((r) => r.month === row.month).map((r) => Number(r.position)),
+            ...data[table]
+              .filter((r) => r.month === row.month)
+              .map((r) => Number(r.position)),
           ) + 1;
       data[table].push(row);
       added++;

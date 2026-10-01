@@ -15,11 +15,14 @@ export async function loginDevelopmentOidc(
   clientId: DevClientId,
   openExternal: (url: string) => Promise<void>,
   timeoutMs = 180000,
+  configured?: { issuer:string; clientId:string; redirectUri:string },
 ) {
   if (!Object.hasOwn(devOidc.clients, clientId))
     throw new Error('Unsupported development client.');
-  const issuer = devOidc.issuer,
-    redirectUri = devOidc.clients[clientId];
+  const issuer = configured?.issuer ?? devOidc.issuer,
+    redirectUri = configured?.redirectUri ?? devOidc.clients[clientId];
+  const loginClientId = configured?.clientId ?? clientId;
+  if (new URL(redirectUri).origin !== 'http://127.0.0.1:18761' && configured) throw new Error('Invalid desktop callback.');
   const verifier = randomBytes(32).toString('base64url'),
     state = randomBytes(32).toString('base64url'),
     nonce = randomBytes(32).toString('base64url');
@@ -28,7 +31,7 @@ export async function loginDevelopmentOidc(
   );
   const auth = new URL(`${issuer}/protocol/openid-connect/auth`);
   auth.search = new URLSearchParams({
-    client_id: clientId,
+    client_id: loginClientId,
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'openid',
@@ -62,11 +65,11 @@ export async function loginDevelopmentOidc(
           return;
         }
         res.writeHead(200, {
-          'content-type': 'text/plain',
+          'content-type': 'text/plain; charset=utf-8',
           'cache-control': 'no-store',
           'referrer-policy': 'no-referrer',
         });
-        res.end('Login concluído. Volte ao terminal LionPocket.');
+        res.end('Login concluído. Volte ao aplicativo LionPocket.');
         resolve(codes[0]);
       });
       callback.once('error', reject);
@@ -89,7 +92,7 @@ export async function loginDevelopmentOidc(
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: clientId,
+        client_id: loginClientId,
         redirect_uri: redirectUri,
         code,
         code_verifier: verifier,
@@ -111,7 +114,7 @@ export async function loginDevelopmentOidc(
       throw new Error('Invalid OIDC response.');
     const id = await jwtVerify(tokens.id_token, keys, {
       issuer,
-      audience: clientId,
+      audience: loginClientId,
       algorithms: ['RS256'],
       requiredClaims: ['sub', 'exp', 'iat', 'nonce'],
     });
@@ -124,9 +127,9 @@ export async function loginDevelopmentOidc(
     if (
       id.payload.nonce !== nonce ||
       id.payload.sub !== access.payload.sub ||
-      access.payload.azp !== clientId ||
+      access.payload.azp !== loginClientId ||
       access.payload.typ !== 'Bearer' ||
-      (id.payload.azp && id.payload.azp !== clientId)
+      (id.payload.azp && id.payload.azp !== loginClientId)
     )
       throw new Error('OIDC identity mismatch.');
     return {

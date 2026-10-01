@@ -1,3 +1,5 @@
+import { setSyncUuidProvider } from './syncWriters';
+import { androidSyncUuidGenerator } from '../sync/crypto';
 import { open, type NitroSQLiteConnection } from 'react-native-nitro-sqlite';
 import { migrate } from './migrations';
 import { syntheticBankOptIn } from '../sync/syntheticOptIn';
@@ -19,6 +21,7 @@ export function database(): Promise<NitroSQLiteConnection> {
           const file = await localFiles.prepareFile('backups', 'sqlite');
           await db.executeAsync('VACUUM INTO ?', [file.path]);
         });
+        setSyncUuidProvider(androidSyncUuidGenerator);
         return db;
       } catch (error) {
         db.close();

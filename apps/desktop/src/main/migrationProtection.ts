@@ -2,7 +2,7 @@ import { syncColumns } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-export const desktopSchemaVersion = 13;
+export const desktopSchemaVersion = 14;
 
 const financialColumns: Record<string, string[]> = {
     categories: ['id'],

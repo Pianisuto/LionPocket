@@ -3,13 +3,13 @@ import { authorize } from 'react-native-app-auth';
 import { androidCrypto } from './crypto';
 
 /** Isolated development harness only; system Custom Tab + AppAuth state/PKCE. No session persistence. */
-export async function androidDevelopmentOidc() {
-  if (Platform.OS !== 'android' || !NativeModules.CryptoSpikeReport)
+export async function androidDevelopmentOidc(configured?: {issuer:string;androidClientId:string;androidRedirect:string}) {
+  if (Platform.OS !== 'android' || (!NativeModules.CryptoSpikeReport && !NativeModules.LionPocketIdentity?.privateBeta))
     throw new Error(
       'OIDC development login requires the synthetic Android harness.',
     );
-  const issuer = 'http://127.0.0.1:18080/realms/lionpocket-dev';
-  const clientId = 'lionpocket-android-dev';
+  const issuer = configured?.issuer ?? 'http://127.0.0.1:18080/realms/lionpocket-dev';
+  const clientId = configured?.androidClientId ?? 'lionpocket-android-dev';
   const sodium = await androidCrypto();
   const nonce = sodium.to_base64(
     sodium.randombytes_buf(32),
@@ -18,13 +18,13 @@ export async function androidDevelopmentOidc() {
   const session = await authorize({
     issuer,
     clientId,
-    redirectUrl: 'com.lionpocketmobile.syncdev:/callback',
+    redirectUrl: configured?.androidRedirect ?? 'com.lionpocketmobile.syncdev:/callback',
     scopes: ['openid'],
     usePKCE: true,
     useNonce: true,
     skipCodeExchange: false,
     additionalParameters: { prompt: 'login', nonce },
-    dangerouslyAllowInsecureHttpRequests: true,
+    dangerouslyAllowInsecureHttpRequests: !configured,
     connectionTimeoutSeconds: 15,
   });
   const response = await fetch(issuer + '/protocol/openid-connect/certs');

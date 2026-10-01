@@ -61,6 +61,16 @@ react {
     autolinkLibrariesWithApp()
 }
 
+// Metro consumes compiled workspace packages outside the mobile root. Changes
+// there must invalidate Gradle's release bundle even when app sources are unchanged.
+tasks.configureEach { task ->
+    if (task.name.startsWith("createBundle") && task.name.endsWith("JsAndAssets")) {
+        ["core", "sync-protocol", "sync-local"].each { workspace ->
+            task.inputs.dir(file("../../../../packages/${workspace}/dist"))
+        }
+    }
+}
+
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
@@ -79,6 +89,8 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def privateBeta = project.hasProperty("privateBeta") && project.property("privateBeta") == "true"
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -86,10 +98,11 @@ android {
 
     namespace "com.lionpocketmobile"
     defaultConfig {
-        applicationId "com.lionpocketmobile"
+        applicationId privateBeta ? "com.lionpocketmobile.beta" : "com.lionpocketmobile"
+        buildConfigField "boolean", "PRIVATE_BETA", "${privateBeta}"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        manifestPlaceholders += [appAuthRedirectScheme: 'com.lionpocketmobile.syncdev']
+        manifestPlaceholders += [appAuthRedirectScheme: privateBeta ? 'com.lionpocketmobile.beta' : 'com.lionpocketmobile.syncdev', appDisplayName: privateBeta ? 'LionPocket Beta' : 'LionPocket']
         versionCode 2
         versionName "0.3.9"
     }

@@ -1,3 +1,4 @@
+import { BetaSyncPanel } from './BetaSync';
 import { DevelopmentSync } from './DevelopmentSync';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -81,7 +82,7 @@ export function DataScreen({
         : 'Confirmar importação?',
       prepared.mode === 'restore'
         ? `Todos os dados locais serão substituídos por “${prepared.fileName}”, incluindo lançamentos, cadastros, séries, objetivos, prioridades e preferências. Há ${existingCount} registro(s) de lançamentos no banco atual. Antes da troca, uma cópia de recuperação será salva neste aparelho. Se a cópia ou a gravação falhar, a restauração será interrompida.`
-        : `Adicionar dados de “${prepared.fileName}”? Registros existentes serão preservados. Itens já importados serão ignorados; conflitos de IDs interrompem a operação. Uma cópia de recuperação será salva antes da importação.`,
+        : `Adicionar dados de “${prepared.fileName}”? Registros existentes serão preservados. Somente linhas com proveniência já importada serão ignoradas. Categorias, cartões e formas de pagamento de mesmo nome serão associados aos cadastros locais: confira essa decisão antes de adicionar. Recorrências e objetivos de nomes iguais serão registros distintos; conflitos de IDs interrompem a operação. Uma cópia de recuperação será salva antes da importação.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -144,6 +145,7 @@ export function DataScreen({
               {notice}
             </Text>
           ) : null}
+          <BetaSyncPanel onChanged={onChanged} />
           <DevelopmentSync onChanged={onChanged} />
           <View style={styles.card}>
             <Text style={styles.heading}>Exportar</Text>

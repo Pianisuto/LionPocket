@@ -1,3 +1,4 @@
+import { importDigest } from '@lionpocket/sync-local';
 import { open } from 'react-native-nitro-sqlite';
 import type { NitroSQLiteConnection } from 'react-native-nitro-sqlite';
 import {
@@ -142,6 +143,8 @@ export async function prepareImport(file: PickedFile): Promise<PreparedImport> {
         sourceVersion: parsed.schemaVersion,
       };
     }
+    const fileBase64=await localFiles.readBase64(file.name);
+    const fileDigest=importDigest({context:'LionPocket/import-file/v1',encoding:'base64',content:fileBase64});
     const plan =
       extension === 'csv'
         ? csvImportPlan(
@@ -149,11 +152,13 @@ export async function prepareImport(file: PickedFile): Promise<PreparedImport> {
           )
         : extension === 'xlsx'
           ? planFinancialSpreadsheet(
-              await readXlsxBase64(await localFiles.readBase64(file.name)),
-              file.displayName,
+              await readXlsxBase64(fileBase64),
+              fileDigest,
             )
           : null;
     if (!plan) throw new Error('Formato não suportado.');
+    for(const input of [...plan.recurring,...plan.goals])if(input.importSourceKey){const match=/^xlsx:[a-f0-9]{64}:(.*):(\d+)$/.exec(input.importSourceKey);if(!match)throw new Error('invalid_import_provenance');input.importSourceKey='lp1:'+importDigest({context:'LionPocket/import-row/v1',fileDigest,sheet:match[1],rowIndex:Number(match[2])-1});}
+    for(const [index,row] of plan.transactions.entries()){const match=/^xlsx:[a-f0-9]{64}:(.*):(\d+)$/.exec(row.sourceKey);row.sourceKey='lp1:'+importDigest({context:'LionPocket/import-row/v1',fileDigest,sheet:match?match[1]:'$csv',rowIndex:match?Number(match[2])-1:index+1});}
     const current = await captureBackup(await database());
     const counts = await staging(async (db) => {
       await loadBackupData(db, current.data, current.schemaVersion);
