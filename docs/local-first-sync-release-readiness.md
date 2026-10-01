@@ -110,7 +110,7 @@ Identidade permanente Android/custódia e migração das instalações debug; as
 
 ## Matriz executada e evidências deste PR
 
-Resultados estruturados em [release-readiness-results.json](fixtures/local-first/release-readiness-results.json), com SHA da fonte, matriz de comparação, certificados públicos e checksums dos candidatos locais. Os binários não foram publicados. A evidência de código usa `8e79e39fb8862c72d5020e74c40f0306a9c31bfa`; commits posteriores desta entrega apenas fecham a documentação.
+Resultados estruturados em [release-readiness-results.json](fixtures/local-first/release-readiness-results.json), com SHA da fonte, matriz de comparação, certificados públicos e checksums dos candidatos locais. Os binários não foram publicados. A evidência de código usa `8e79e39fb8862c72d5020e74c40f0306a9c31bfa`; o código executável permanece o mesmo nos commits posteriores desta entrega, que fecham a documentação e ignoram formatos adicionais de keystore.
 
 | Plataforma/canal | Build/instalação | Abertura e preservação | Resultado |
 | --- | --- | --- | --- |
