@@ -18,5 +18,5 @@ const version = validate().version;
 if (artifacts.some(path => /\.(apk|aab|nupkg|zip|deb)$/.test(path) && !path.includes(version))) throw new Error('Artifact version mismatch; use a clean candidate directory.');
 const sums = artifacts.map(path => `${createHash('sha256').update(readFileSync(path)).digest('hex')}  ${relative(root, path).replaceAll('\\', '/')}`).join('\n') + '\n';
 writeFileSync(join(root, 'SHA256SUMS.txt'), sums);
-writeFileSync(join(root, 'build-manifest.json'), JSON.stringify({ ...validate(), channel: process.env.LIONPOCKET_BUILD_CHANNEL ?? 'normal', source: process.env.GITHUB_SHA ?? null, artifacts: artifacts.length }, null, 2) + '\n');
+writeFileSync(join(root, 'build-manifest.json'), JSON.stringify({ ...validate(), channel: process.env.LIONPOCKET_BUILD_CHANNEL ?? 'test-candidates', source: process.env.GITHUB_SHA ?? require('node:child_process').execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), publicRelease: false, artifacts: artifacts.map(path => ({ path: relative(root, path).replaceAll('\\', '/'), channel: relative(root, path).split(require('node:path').sep).includes('private-beta') ? 'private-beta' : (process.env.LIONPOCKET_BUILD_CHANNEL ?? 'normal') })) }, null, 2) + '\n');
 console.log(sums);

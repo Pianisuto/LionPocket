@@ -25,6 +25,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -40,6 +42,7 @@ jobs:
       - run: npm run lint
       - run: npm run sync:dev:up
       - run: npm run sync:dev:test
+      - run: node tools/release/version-skew.cjs
       - if: always()
         run: npm run sync:dev:down
       - run: git diff --check
@@ -123,20 +126,16 @@ jobs:
       - name: Disposable development-signed normal release
         working-directory: apps/mobile/android
         run: ./gradlew assembleRelease -PdevelopmentSigning=true -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
-      - name: Preserve normal candidate separately
-        run: |
-          mkdir -p release-candidates/normal
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk release-candidates/normal/LionPocket-Android-0.3.10-DEVELOPMENT-ONLY.apk
+      - name: Preserve and verify the development candidate separately
+        run: node tools/release/android-candidate.cjs normal
       - name: Isolated private beta release
         working-directory: apps/mobile/android
         run: ./gradlew assembleRelease -PprivateBeta=true -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
-      - run: |
-          mkdir -p release-candidates/private-beta
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk release-candidates/private-beta/LionPocket-Beta-Android-0.3.10-DEVELOPMENT-ONLY.apk
-          node tools/release/checksums.cjs release-candidates .apk
+      - run: node tools/release/android-candidate.cjs private-beta
+      - run: node tools/release/checksums.cjs release-candidates .apk
       - name: Validate external signing with an ephemeral fixture (never production)
         env:
-          LIONPOCKET_TEST_SIGNED_APK: /tmp/LionPocket-Android-0.3.10-EPHEMERAL-ONLY.apk
+          LIONPOCKET_TEST_SIGNED_APK: /tmp/LionPocket-EPHEMERAL-ONLY.apk
         run: node tools/release/android-signing-fixture.cjs --build
       - name: Build previous normal/beta from the audited base in a disposable checkout
         run: node tools/release/prepare-old-android.cjs
@@ -155,7 +154,5 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect -no-boot-anim -camera-back none
-          script: |
-            python3 tools/release/android-upgrade.py --serial emulator-5554 --fixtures /tmp/lion-release-fixtures-ci --old-normal release-candidates/base-normal.apk --new-normal release-candidates/normal/LionPocket-Android-0.3.10-DEVELOPMENT-ONLY.apk --old-beta release-candidates/base-beta.apk --new-beta release-candidates/private-beta/LionPocket-Beta-Android-0.3.10-DEVELOPMENT-ONLY.apk --report /tmp/android-upgrades.json
-            python3 tools/release/android-compatibility.py --serial emulator-5554 --mismatch-apk /tmp/LionPocket-Android-0.3.10-EPHEMERAL-ONLY.apk --report /tmp/android-compatibility.json
+          script: node tools/release/android-update-ci.cjs
       # APKs are test candidates; never uploaded or called production signed.
