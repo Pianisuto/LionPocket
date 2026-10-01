@@ -137,3 +137,55 @@ export const transportMigration = [
     WHEN OLD.envelope_json IS NOT NULL AND (NEW.envelope_json IS NOT OLD.envelope_json OR NEW.envelope_sha256 IS NOT OLD.envelope_sha256 OR NEW.payload_json IS NOT OLD.payload_json OR NEW.commit_id IS NOT OLD.commit_id)
     BEGIN SELECT RAISE(ABORT,'Prepared envelope is immutable'); END`,
 ];
+
+// Freeze the prior format before extending the public backup registry.
+export const transportColumns = Object.fromEntries(Object.entries(syncColumns).map(([t, c]) => [t, [...c]]));
+export const transportTables = [...syncTables];
+export const financialColumns: Record<string, string[]> = {
+  sync_control: ['id', 'applying', 'paused'],
+  sync_dirty: ['table_name', 'local_id', 'operation', 'row_json'],
+  sync_series: ['entity_type', 'local_id', 'schedule_epoch', 'structure_json', 'identity_status'],
+  sync_slots: ['local_id', 'series_id', 'slot_key', 'slot_id', 'object_id', 'original_date', 'original_index'],
+  sync_import_provenance: ['local_id', 'import_key', 'legacy_key'],
+  sync_bootstrap: ['id', 'state', 'manifest_json', 'backup_path'],
+  sync_review: ['review_id', 'object_id', 'reason', 'payload_json'],
+  sync_aliases: ['alias_id', 'object_id'],
+};
+Object.assign(syncColumns, financialColumns);
+syncTables.push(...Object.keys(financialColumns));
+export const financialSidecars = [
+  'CREATE TABLE sync_control(id INTEGER PRIMARY KEY CHECK(id=1),applying INTEGER NOT NULL DEFAULT 0 CHECK(applying IN (0,1)),paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1)))',
+  'INSERT INTO sync_control(id) VALUES(1)',
+  'CREATE TABLE sync_dirty(table_name TEXT NOT NULL,local_id TEXT NOT NULL,operation TEXT NOT NULL,row_json TEXT NOT NULL,PRIMARY KEY(table_name,local_id))',
+  "CREATE TABLE sync_series(entity_type TEXT NOT NULL,local_id TEXT NOT NULL,schedule_epoch TEXT NOT NULL,structure_json TEXT NOT NULL,identity_status TEXT NOT NULL CHECK(identity_status IN ('resolved','identity_unresolved')),PRIMARY KEY(entity_type,local_id))",
+  'CREATE TABLE sync_slots(local_id TEXT PRIMARY KEY,series_id TEXT NOT NULL,slot_key TEXT NOT NULL,slot_id TEXT,object_id TEXT NOT NULL,original_date TEXT,original_index INTEGER,UNIQUE(series_id,slot_key))',
+  'CREATE TABLE sync_import_provenance(local_id TEXT PRIMARY KEY,import_key TEXT NOT NULL,legacy_key TEXT)',
+  "CREATE TABLE sync_bootstrap(id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL,manifest_json TEXT NOT NULL,backup_path TEXT NOT NULL)",
+  'CREATE TABLE sync_review(review_id TEXT PRIMARY KEY,object_id TEXT,reason TEXT NOT NULL,payload_json TEXT NOT NULL)',
+  'CREATE TABLE sync_aliases(alias_id TEXT PRIMARY KEY,object_id TEXT NOT NULL)',
+];
+export const financialTableTypes = {
+  categories: 'category', payment_methods: 'paymentMethod', cards: 'card', recurring_expenses: 'recurring', installment_purchases: 'installmentPurchase', transactions: 'transaction', goals: 'goal', recurring_transaction_priorities: 'recurringPriorityList', transaction_priority_order: 'monthlyPriorityList',
+} as const;
+export function financialTriggers(dialect: 'desktop' | 'android', columns: Record<string, string[]>): string[] {
+  return Object.keys(financialTableTypes).flatMap(table => ['INSERT', 'UPDATE', 'DELETE'].map(action => {
+    const row = action === 'DELETE' ? 'OLD' : 'NEW';
+    const id = table === 'transaction_priority_order' ? `${row}.month` : table === 'recurring_transaction_priorities' ? "'recurring-priorities'" : `${row}.id`;
+    const json = columns[table].flatMap(c => [`'${c}'`, `${row}.${c}`]).join(',');
+    // INSERT generated projections are cache; UPDATE promotes, DELETE only tombstones an already promoted object.
+    return `CREATE TRIGGER sync_capture_${table}_${action.toLowerCase()} AFTER ${action} ON ${table}
+      WHEN (SELECT mode FROM sync_local_state WHERE id=1)='financial' AND (SELECT applying FROM sync_control WHERE id=1)=0
+      BEGIN INSERT INTO sync_dirty VALUES('${table}',${id},'${action.toLowerCase()}',json_object(${json})) ON CONFLICT(table_name,local_id) DO UPDATE SET operation=excluded.operation,row_json=excluded.row_json; END`;
+  }));
+}
+/** Rebuild sidecars only. Local financial PKs/FKs and all historical migrations stay intact. */
+export const financialMigration = [
+  ...transportTables.map(t => `CREATE TEMP TABLE financial_old_${t} AS SELECT * FROM ${t}`),
+  ...[...transportTables].reverse().map(t => `DROP TABLE ${t}`),
+  ...syncMigration.map(s => s.replace("'disabled','synthetic_manual'", "'disabled','synthetic_manual','financial'").replace("CHECK(entity_type = 'manualTransaction')", "CHECK(entity_type IN ('manualTransaction','transaction','category','paymentMethod','card','recurring','installmentPurchase','goal','recurringPriorityList','monthlyPriorityList'))")),
+  ...transportMigration,
+  ...transportTables.map(t => `INSERT INTO ${t} SELECT * FROM financial_old_${t} WHERE ${['sync_local_state'].includes(t) ? 'id!=1' : '1=1'}`),
+  "UPDATE sync_local_state SET local_scope_id=(SELECT local_scope_id FROM financial_old_sync_local_state),mode=(SELECT mode FROM financial_old_sync_local_state),server_id=(SELECT server_id FROM financial_old_sync_local_state),server_epoch=(SELECT server_epoch FROM financial_old_sync_local_state),vault_id=(SELECT vault_id FROM financial_old_sync_local_state),device_id=(SELECT device_id FROM financial_old_sync_local_state),local_seq=(SELECT local_seq FROM financial_old_sync_local_state),device_seq=(SELECT device_seq FROM financial_old_sync_local_state),received_cursor=(SELECT received_cursor FROM financial_old_sync_local_state),applied_cursor=(SELECT applied_cursor FROM financial_old_sync_local_state),binding_id=(SELECT binding_id FROM financial_old_sync_local_state),pull_upper_bound=(SELECT pull_upper_bound FROM financial_old_sync_local_state) WHERE id=1",
+  ...transportTables.map(t => `DROP TABLE financial_old_${t}`),
+  ...financialSidecars,
+];

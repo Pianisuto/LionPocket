@@ -244,7 +244,7 @@ export function validateGrantChain(
       )
     )
       throw new Error('duplicate_device_key');
-    if (grant.deviceId === pin.founderDeviceId && grant.status === 'revoked')
+    if (grant.deviceId === pin.founderDeviceId && grant.status === 'revoked' && ![...devices.values()].some(d=>d.deviceId!==grant.deviceId&&d.status==='approved'))
       throw new Error('founder_revocation_unavailable');
     devices.set(grant.deviceId, grant);
     if (

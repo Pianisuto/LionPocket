@@ -1,6 +1,8 @@
 import {
   assertDecimal64,
   assertManualTransactionRevision,
+  assertFinancialRevision,
+  assertSupportedRevision,
   canonicalStringify,
   type CommitEnvelope,
   type CommitReceipt,
@@ -13,6 +15,8 @@ import {
   type SqlRow,
   type SqlWorkflow,
 } from './manual';
+import { mergeFinancialGroups } from './merge';
+import { projectFinancial, resolveFinancial } from './financial-projection';
 import type { ProvisionedProfile } from './provisioning';
 export const sql = (
   sql: string,
@@ -43,7 +47,7 @@ export function* bindSynthetic(
 ): SqlWorkflow {
   const [state] = yield sql('SELECT * FROM sync_local_state WHERE id=1');
   if (
-    state.mode !== 'synthetic_manual' ||
+    !['synthetic_manual', 'financial'].includes(String(state.mode)) ||
     !state.local_scope_id ||
     state.binding_id
   )
@@ -105,7 +109,7 @@ export function* persistPrepared(
   if (row.envelope_json !== null) return; // Another preparer already won; caller rereads the persisted bytes.
   const [state] = yield sql('SELECT * FROM sync_local_state WHERE id=1');
   if (
-    state.mode !== 'synthetic_manual' ||
+    !['synthetic_manual', 'financial'].includes(String(state.mode)) ||
     state.device_seq !== previousSeq ||
     state.device_id !== envelope.deviceId ||
     state.vault_id !== envelope.vaultId ||
@@ -147,7 +151,7 @@ export function* receivePage(
 ): SqlWorkflow {
   const [state] = yield sql('SELECT * FROM sync_local_state WHERE id=1');
   if (
-    state.mode !== 'synthetic_manual' ||
+    !['synthetic_manual', 'financial'].includes(String(state.mode)) ||
     state.binding_id !== bindingId ||
     state.received_cursor !== priorCursor ||
     (state.pull_upper_bound !== null && state.pull_upper_bound !== upper)
@@ -194,11 +198,23 @@ export function* applyCommit(
   uuid: () => string,
 ): SqlWorkflow {
   const [state] = yield sql('SELECT * FROM sync_local_state WHERE id=1');
-  if (state.mode !== 'synthetic_manual') throw new Error('sync_disabled');
+  if (!['synthetic_manual', 'financial'].includes(String(state.mode)))
+    throw new Error('sync_disabled');
+  if (state.mode === 'financial')
+    yield sql('UPDATE sync_control SET applying=1 WHERE id=1');
   let sequence = String(state.local_seq);
   const touched = new Set<string>();
   for (const op of operations) {
-    assertManualTransactionRevision(op.revision);
+    assertSupportedRevision(op.revision, state.mode === 'financial');
+    for (const dependency of op.revision.dependencies) {
+      const [dep] = yield sql(
+        'SELECT object_id FROM sync_revisions WHERE revision_id=?',
+        [dependency.revisionId],
+      );
+      if (!dep) throw new Error('missing_dependencies');
+      if (dep.object_id !== dependency.objectId)
+        throw new Error('foreign_dependency');
+    }
     const [known] = yield sql(
       'SELECT * FROM sync_revisions WHERE revision_id=?',
       [op.opId],
@@ -226,14 +242,31 @@ export function* applyCommit(
       if (row.object_id !== op.objectId) throw new Error('foreign_parent');
     }
     const [identity] = yield sql(
-      'SELECT local_id FROM sync_identity WHERE object_id=?',
+      'SELECT local_id,entity_type FROM sync_identity WHERE object_id=?',
       [op.objectId],
     );
-    if (!identity)
-      yield sql("INSERT INTO sync_identity VALUES('manualTransaction',?,?)", [
-        uuid(),
+    if (!identity) {
+      const slots =
+        state.mode === 'financial'
+          ? yield sql('SELECT local_id FROM sync_slots WHERE object_id=?', [
+              op.objectId,
+            ])
+          : [];
+      yield sql('INSERT INTO sync_identity VALUES(?,?,?)', [
+        state.mode === 'financial'
+          ? op.revision.entityType
+          : 'manualTransaction',
+        op.revision.entityType === 'recurringPriorityList'
+          ? 'recurring-priorities'
+          : op.revision.entityType === 'monthlyPriorityList' &&
+              op.revision.action === 'put'
+            ? String((op.revision.snapshot as { month: string }).month)
+            : slots[0]
+              ? String(slots[0].local_id)
+              : uuid(),
         op.objectId,
       ]);
+    }
     const tombstones = yield sql(
       'SELECT revision_id FROM sync_tombstones WHERE object_id=?',
       [op.objectId],
@@ -278,6 +311,8 @@ export function* applyCommit(
   }
   yield sql('UPDATE sync_local_state SET local_seq=? WHERE id=1', [sequence]);
   for (const id of touched) yield* projectObject(id, dialect, uuid);
+  if (state.mode === 'financial')
+    yield sql('UPDATE sync_control SET applying=0 WHERE id=1');
   yield sql(
     "UPDATE sync_inbox SET state='applied',last_error=NULL WHERE commit_id=?",
     [envelope.commitId],
@@ -323,7 +358,7 @@ export function* projectObject(
   );
   const heads = headRows.map((r) => String(r.revision_id));
   const [identity] = yield sql(
-    'SELECT local_id FROM sync_identity WHERE object_id=?',
+    'SELECT local_id,entity_type FROM sync_identity WHERE object_id=?',
     [objectId],
   );
   const tombstones = yield sql(
@@ -358,6 +393,59 @@ export function* projectObject(
     ? (JSON.parse(String(row.payload_json)) as RevisionPlaintext)
     : null;
   const localId = String(identity.local_id);
+  if (identity.entity_type !== 'manualTransaction') {
+    if (heads.length > 1 && revision && !tombstones.length) {
+      const branches = heads.map(
+        (h) =>
+          JSON.parse(
+            String(rows.find((r) => r.revision_id === h)?.payload_json),
+          ) as RevisionPlaintext,
+      );
+      const merged = mergeFinancialGroups(
+        revision,
+        branches,
+        new Date().toISOString(),
+      );
+      if (merged) {
+        const [origin] = yield sql(
+          'SELECT device_id FROM sync_revision_origin WHERE revision_id=?',
+          [heads[0]],
+        );
+        const [state] = yield sql(
+          'SELECT device_id FROM sync_local_state WHERE id=1',
+        );
+        if (!origin || origin.device_id === state.device_id) {
+          yield* resolveFinancial(objectId, heads, merged, dialect, uuid);
+          yield* projectObject(objectId, dialect, uuid);
+          return;
+        }
+      }
+    }
+    const deletedRow = tombstones.length
+      ? rows.find((r) => r.action === 'delete')
+      : null;
+    const selected = deletedRow
+      ? (JSON.parse(String(deletedRow.payload_json)) as RevisionPlaintext)
+      : revision;
+    if (selected) yield* projectFinancial(localId, selected, dialect);
+    else if (
+      ['transaction', 'recurring', 'installmentPurchase', 'goal'].includes(
+        String(identity.entity_type),
+      )
+    ) {
+      const table = {
+        transaction: 'transactions',
+        recurring: 'recurring_expenses',
+        installmentPurchase: 'installment_purchases',
+        goal: 'goals',
+      }[String(identity.entity_type) as 'transaction'];
+      yield sql(`UPDATE ${table} SET deleted_at=? WHERE id=?`, [
+        new Date().toISOString(),
+        localId,
+      ]);
+    }
+    return;
+  }
   if (tombstones.length || !revision || revision.action === 'delete') {
     yield sql('DELETE FROM transaction_priority_order WHERE transaction_id=?', [
       localId,
@@ -406,9 +494,15 @@ export function* resolveConflict(
   dialect: ProjectionDialect,
   uuid: () => string,
 ): SqlWorkflow {
+  const [state] = yield sql('SELECT mode FROM sync_local_state WHERE id=1');
+  if (state.mode === 'financial') {
+    yield* resolveFinancial(objectId, expectedHeads, choice, dialect, uuid);
+    yield* projectObject(objectId, dialect, uuid);
+    return;
+  }
   assertManualTransactionRevision(choice);
   const [identity] = yield sql(
-    'SELECT local_id FROM sync_identity WHERE object_id=?',
+    'SELECT local_id,entity_type FROM sync_identity WHERE object_id=?',
     [objectId],
   );
   const heads = yield sql(
@@ -485,6 +579,18 @@ export function* recoverDeletedBranch(
   const revision = JSON.parse(String(row.payload_json)) as RevisionPlaintext;
   if (revision.action !== 'put') throw new Error('recovery_requires_put');
   revision.authoredAt = authoredAt;
+  const [state] = yield sql('SELECT mode FROM sync_local_state WHERE id=1');
+  if (state.mode === 'financial') {
+    yield* resolveFinancial(
+      objectId,
+      expectedHeads,
+      revision,
+      dialect,
+      uuid,
+      true,
+    );
+    return;
+  }
   const id = uuid();
   yield* projectSnapshot(id, revision, dialect);
   const [localRow] = yield sql(
