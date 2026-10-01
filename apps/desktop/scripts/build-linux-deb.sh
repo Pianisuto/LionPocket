@@ -3,10 +3,16 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-app_dir="$project_dir/out/LionPocket-linux-x64"
+channel="${LIONPOCKET_BUILD_CHANNEL:-normal}"
+case "$channel" in
+  normal) app_name="LionPocket"; executable="lionpocket" ;;
+  private-beta) app_name="LionPocket Beta"; executable="lionpocket-beta" ;;
+  *) echo "Unknown build channel" >&2; exit 1 ;;
+esac
+app_dir="$project_dir/out/$app_name-linux-x64"
 output_dir="$project_dir/out/make/deb/x64"
 version="$(node -p "require('$project_dir/package.json').version")"
-package_path="$output_dir/lionpocket_${version}_amd64.deb"
+package_path="$output_dir/${executable}_${version}_amd64.deb"
 stage_dir="$(mktemp -d)"
 
 cleanup() {
@@ -14,56 +20,57 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ ! -x "$app_dir/lionpocket" ]]; then
+if [[ ! -x "$app_dir/$executable" ]]; then
   echo "Aplicativo empacotado não encontrado em: $app_dir" >&2
   exit 1
 fi
 
 mkdir -p \
   "$stage_dir/DEBIAN" \
-  "$stage_dir/opt/LionPocket" \
+  "$stage_dir/opt/$app_name" \
   "$stage_dir/usr/bin" \
   "$stage_dir/usr/share/applications" \
   "$stage_dir/usr/share/icons/hicolor/512x512/apps" \
   "$output_dir"
 
-cp -a "$app_dir/." "$stage_dir/opt/LionPocket/"
-chmod 0755 "$stage_dir/opt/LionPocket"
-chmod 4755 "$stage_dir/opt/LionPocket/chrome-sandbox"
-ln -s /opt/LionPocket/lionpocket "$stage_dir/usr/bin/lionpocket"
+cp -a "$app_dir/." "$stage_dir/opt/$app_name/"
+chmod 0755 "$stage_dir/opt/$app_name"
+chmod 4755 "$stage_dir/opt/$app_name/chrome-sandbox"
+ln -s "/opt/$app_name/$executable" "$stage_dir/usr/bin/$executable"
 install -m 0644 "$project_dir/assets/icon.png" \
-  "$stage_dir/usr/share/icons/hicolor/512x512/apps/lionpocket.png"
+  "$stage_dir/usr/share/icons/hicolor/512x512/apps/$executable.png"
 
 cat > "$stage_dir/DEBIAN/control" <<EOF
-Package: lionpocket
+Package: $executable
 Version: $version
 Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: Pianisuto
-Installed-Size: $(du -sk "$stage_dir/opt/LionPocket" | cut -f1)
+Installed-Size: $(du -sk "$stage_dir/opt/$app_name" | cut -f1)
 Depends: libgtk-3-0, libnss3, libxss1, libasound2t64 | libasound2, libgbm1
 Description: Finanças pessoais simples, locais e bonitas
  LionPocket organiza entradas, despesas, parcelas e objetivos sem precisar de internet.
 EOF
 
-cat > "$stage_dir/usr/share/applications/lionpocket.desktop" <<'EOF'
+cat > "$stage_dir/usr/share/applications/$executable.desktop" <<EOF
 [Desktop Entry]
-Name=LionPocket
+Name=$app_name
 GenericName=Finanças pessoais
 Comment=Organize suas finanças pessoais
-Exec=lionpocket
-Icon=lionpocket
+Exec=$executable
+Icon=$executable
 Terminal=false
 Type=Application
 Categories=Office;Finance;
-StartupWMClass=lionpocket
+StartupWMClass=$executable
 EOF
 
 # Instalações anteriores feitas à mão ficavam em ~/.local e o atalho de lá tem
 # precedência sobre o do sistema: sem remover, o menu continua abrindo a versão
 # velha por mais que o pacote novo seja instalado. Só os caminhos exatos da
 # instalação antiga são apagados — ~/.config, onde mora o banco, não é tocado.
+if [[ "$channel" == normal ]]; then
 cat > "$stage_dir/DEBIAN/preinst" <<'EOF'
 #!/bin/sh
 set -e
@@ -95,6 +102,10 @@ done
 exit 0
 EOF
 
+else
+  printf '#!/bin/sh\nexit 0\n' > "$stage_dir/DEBIAN/preinst"
+fi
+
 # Sem isto o app demora a aparecer na busca do sistema: o índice de atalhos e o
 # cache de ícones continuam com o estado anterior até algo mais os regenerar.
 cat > "$stage_dir/DEBIAN/postinst" <<'EOF'
@@ -120,7 +131,7 @@ EOF
 chmod 0755 "$stage_dir/DEBIAN"
 chmod 0644 "$stage_dir/DEBIAN/control"
 chmod 0755 "$stage_dir/DEBIAN/preinst" "$stage_dir/DEBIAN/postinst" "$stage_dir/DEBIAN/postrm"
-chmod 0644 "$stage_dir/usr/share/applications/lionpocket.desktop"
+chmod 0644 "$stage_dir/usr/share/applications/$executable.desktop"
 dpkg-deb --root-owner-group --build "$stage_dir" "$package_path"
 
 echo "Instalador criado em: $package_path"

@@ -91,6 +91,21 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 def privateBeta = project.hasProperty("privateBeta") && project.property("privateBeta") == "true"
 
+// Release identity is supplied externally. Beta/development never consume these credentials.
+def developmentSigning = project.findProperty("developmentSigning") == "true"
+if (privateBeta && developmentSigning) throw new GradleException("privateBeta already uses development signing; do not combine channels.")
+def releaseVersion = new groovy.json.JsonSlurper().parse(file("../../../../tools/release/version.json"))
+def signingProperties = new Properties()
+def signingFile = System.getenv("LIONPOCKET_ANDROID_SIGNING_FILE")
+if (!privateBeta && !developmentSigning && signingFile) {
+    def externalFile = new File(signingFile)
+    if (!externalFile.isAbsolute() || !externalFile.isFile()) throw new GradleException("LIONPOCKET_ANDROID_SIGNING_FILE must point to an existing external absolute path.")
+    externalFile.withInputStream { signingProperties.load(it) }
+}
+def signingValue = { name -> signingProperties.getProperty(name) ?: System.getenv("LIONPOCKET_ANDROID_" + name.replaceAll(/([a-z])([A-Z])/, '$1_$2').toUpperCase()) }
+def signingNames = ["storeFile", "storePassword", "keyAlias", "keyPassword", "certificateSha256"]
+def productionConfigured = !privateBeta && !developmentSigning && signingNames.every { signingValue(it) }
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -100,13 +115,22 @@ android {
     defaultConfig {
         applicationId privateBeta ? "com.lionpocketmobile.beta" : "com.lionpocketmobile"
         buildConfigField "boolean", "PRIVATE_BETA", "${privateBeta}"
+        buildConfigField "String", "BETA_ENDPOINT", privateBeta ? '"https://sync-beta.lionslab.dev"' : '""'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         manifestPlaceholders += [appAuthRedirectScheme: privateBeta ? 'com.lionpocketmobile.beta' : 'com.lionpocketmobile.syncdev', appDisplayName: privateBeta ? 'LionPocket Beta' : 'LionPocket']
-        versionCode 2
-        versionName "0.3.9"
+        versionCode releaseVersion.androidVersionCode
+        versionName releaseVersion.version
     }
     signingConfigs {
+        if (productionConfigured) {
+            production {
+                storeFile new File(signingValue("storeFile"))
+                storePassword signingValue("storePassword")
+                keyAlias signingValue("keyAlias")
+                keyPassword signingValue("keyPassword")
+            }
+        }
         debug {
             storeFile file('debug.keystore')
             storePassword 'android'
@@ -119,9 +143,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig ((privateBeta || developmentSigning) ? signingConfigs.debug : (productionConfigured ? signingConfigs.production : null))
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
@@ -137,4 +159,29 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+}
+
+// Fail before bundling/packaging. No credential values are included in errors.
+def validateReleaseIdentity = tasks.register("validateReleaseIdentity") {
+    doLast {
+        if (privateBeta || developmentSigning) return
+        if (!productionConfigured) throw new GradleException("Production signing required. Set external LIONPOCKET_ANDROID_SIGNING_FILE or LIONPOCKET_ANDROID_* variables. For disposable local tests only, use -PdevelopmentSigning=true. See docs/local-first-sync-release-readiness.md.")
+        def store = new File(signingValue("storeFile"))
+        if (!store.isAbsolute() || !store.isFile()) throw new GradleException("Production keystore must be an existing absolute external path.")
+        def checkout = file("../../../..").canonicalFile.toPath()
+        if (store.canonicalFile.toPath().startsWith(checkout)) throw new GradleException("Production keystore must be outside the checkout.")
+        try {
+            def keys = java.security.KeyStore.getInstance(store, signingValue("storePassword").toCharArray())
+            def certificate = keys.getCertificate(signingValue("keyAlias"))
+            def digest = java.security.MessageDigest.getInstance("SHA-256").digest(certificate.encoded).encodeHex().toString()
+            def expected = signingValue("certificateSha256").toLowerCase().replace(":", "")
+            if (!(expected ==~ /[0-9a-f]{64}/) || digest != expected || digest == "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c" || certificate.subjectX500Principal.name.contains("CN=Android Debug"))
+                throw new GradleException("Invalid production signing identity.")
+        } catch (Exception ignored) {
+            throw new GradleException("Production signing identity could not be verified. Check external keystore, alias, passwords and certificateSha256. Development certificates are refused.")
+        }
+    }
+}
+tasks.configureEach { task ->
+    if (task.name == "preReleaseBuild") task.dependsOn(validateReleaseIdentity)
 }

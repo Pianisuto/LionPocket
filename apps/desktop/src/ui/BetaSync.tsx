@@ -14,7 +14,7 @@ export function BetaSyncPanel({
   onChanged: () => Promise<void>;
 }) {
   const [status, setStatus] = useState<BetaStatus | null>(null),
-    [endpoint, setEndpoint] = useState('https://sync-beta.lionslab.dev'),
+    [endpoint, setEndpoint] = useState(''),
     [invitation, setInvitation] = useState(''),
     [fingerprint, setFingerprint] = useState(''),
     [authority, setAuthority] = useState(''),
@@ -93,6 +93,7 @@ export function BetaSyncPanel({
       <p>
         {betaActivityLabel[status.activity]} · Pendentes: {status.sync?.pending ?? 0}
       </p>
+      {status.compatibilityMessage && <p role="alert">{status.compatibilityMessage}</p>}
       {status.lastCompletedAt && <p>Último sync concluído: {new Date(status.lastCompletedAt).toLocaleString('pt-BR')}</p>}
       <p>Salvo neste aparelho primeiro. Sync automático ao abrir/retomar e após salvar, com o app ativo. “Sincronizar agora” continua disponível.</p>
       {status.phase === 'local' && (

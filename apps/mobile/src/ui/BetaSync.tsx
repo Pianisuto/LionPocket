@@ -8,7 +8,7 @@ import type {
   ReviewedSlot,
 } from '@lionpocket/sync-local';
 import type { PairingRequest } from '@lionpocket/sync-protocol';
-import { betaSync, privateBeta } from '../sync/beta';
+import { betaSync, privateBeta, betaEndpoint } from '../sync/beta';
 import { Button, useStyles } from './components';
 export function BetaSyncPanel({
   onChanged,
@@ -17,7 +17,7 @@ export function BetaSyncPanel({
 }) {
   const styles = useStyles(),
     [status, setStatus] = useState<BetaStatus>(),
-    [endpoint, setEndpoint] = useState('https://sync-beta.lionslab.dev'),
+    [endpoint, setEndpoint] = useState(betaEndpoint),
     [invitation, setInvitation] = useState(''),
     [fingerprint, setFingerprint] = useState(''),
     [authority, setAuthority] = useState(''),
@@ -499,6 +499,7 @@ export function BetaSyncPanel({
           ))}
         </>
       )}
+      {status.compatibilityMessage && <Text accessibilityRole="alert">{status.compatibilityMessage}</Text>}
       {!!error && <Text accessibilityRole="alert">{error}</Text>}
     </View>
   );

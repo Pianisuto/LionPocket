@@ -8,6 +8,7 @@ import { androidCrypto } from "./crypto";
 import { AndroidSecretStore } from "./secretStore";
 import { androidDevelopmentOidc } from "./oidc";
 export const privateBeta = !!NativeModules.LionPocketIdentity?.privateBeta;
+export const betaEndpoint: string = privateBeta ? (NativeModules.LionPocketIdentity?.betaEndpoint ?? "") : "";
 let controller: Promise<BetaSync> | undefined;
 export function betaSync(): Promise<BetaSync> {
   if (!privateBeta)
@@ -20,6 +21,7 @@ export function betaSync(): Promise<BetaSync> {
         secrets: new AndroidSecretStore(),
         sodium: await androidCrypto(),
         dialect: "android",
+        defaultEndpoint: betaEndpoint,
         storage: {
           load: async () => {
             const [row] = (

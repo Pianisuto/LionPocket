@@ -106,3 +106,10 @@ apps/mobile/android/build/
 .metro-health-check*
 
 packages/sync-local/dist/
+
+# External signing material (the existing public debug fixture is the only exception)
+*.jks
+*.keystore
+!apps/mobile/android/app/debug.keystore
+*signing*.properties
+release-candidates/

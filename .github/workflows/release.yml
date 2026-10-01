@@ -1,270 +1,143 @@
-name: Release LionPocket
+name: Release readiness (no publication)
 
 on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional expected version tag (vX.Y.Z); no tag/release is created
+        required: false
+        type: string
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-    paths:
-      - apps/desktop/package.json
-      - apps/mobile/android/**
-      - package-lock.json
-      - .github/workflows/release.yml
+    branches: [main]
+    tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: readiness-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
-    name: Validate release
-    if: startsWith(github.ref, 'refs/tags/') || startsWith(github.event.head_commit.message, 'Release ')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    outputs:
-      release_tag: ${{ steps.release-context.outputs.release_tag }}
-
+    timeout-minutes: 25
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
+      - run: npm ci
+      - run: npm run release:validate
+      - name: Validate requested tag without shell interpolation
+        env:
+          EXPECTED_TAG: ${{ inputs.tag }}
+        run: node tools/release/validate.cjs "$EXPECTED_TAG"
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run sync:dev:up
+      - run: npm run sync:dev:test
+      - if: always()
+        run: npm run sync:dev:down
+      - run: git diff --check
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Resolve and validate release version
-        id: release-context
-        shell: bash
-        run: |
-          package_version="$(node -p "require('./apps/desktop/package.json').version")"
-          release_tag="v$package_version"
-
-          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$release_tag" ]]; then
-            echo "A tag $GITHUB_REF_NAME não corresponde à versão $package_version de apps/desktop/package.json." >&2
-            exit 1
-          fi
-
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-
-      - name: Validate application
-        run: |
-          npm test
-          npm run typecheck
-          npm run lint
-
-  prepare-release:
-    name: Prepare GitHub Release
+  desktop:
     needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      release_tag: ${{ needs.validate.outputs.release_tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        channel: [normal, private-beta]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     env:
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
-
+      LIONPOCKET_BUILD_CHANNEL: ${{ matrix.channel }}
     steps:
-      - name: Create draft release
-        shell: bash
-        run: |
-          version="${RELEASE_TAG#v}"
-
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG já existe; os artefatos serão atualizados."
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --draft \
-              --title "LionPocket $version" \
-              --generate-notes
-          else
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --draft \
-              --title "LionPocket $version" \
-              --generate-notes
-          fi
-
-  windows:
-    name: Build Windows x64
-    needs: prepare-release
-    runs-on: windows-latest
-    timeout-minutes: 30
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Windows installer and portable ZIP
+      - run: npm ci
+      - run: npm run build:core
+      - run: npm run test --workspace apps/desktop
+      - if: runner.os == 'Windows'
         run: npm run make -- --platform=win32 --arch=x64
-
-      - name: Upload Windows release assets
-        shell: pwsh
-        run: |
-          $assets = @(
-            "apps/desktop/out/make/squirrel.windows/x64/LionPocket-Instalador.exe"
-            (Get-ChildItem "apps/desktop/out/make/squirrel.windows/x64/*.nupkg").FullName
-            "apps/desktop/out/make/squirrel.windows/x64/RELEASES"
-            (Get-ChildItem "apps/desktop/out/make/zip/win32/x64/*.zip").FullName
-          )
-
-          foreach ($asset in $assets) {
-            gh release upload $env:RELEASE_TAG $asset --repo $env:GITHUB_REPOSITORY --clobber
-          }
-
-  linux:
-    name: Build Linux x64
-    needs: prepare-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Linux DEB and portable ZIP
+      - if: runner.os == 'Linux'
         run: npm run make:linux
-
-      - name: Upload Linux release assets
-        shell: bash
-        run: |
-          gh release upload "$RELEASE_TAG" \
-            apps/desktop/out/make/deb/x64/*.deb \
-            apps/desktop/out/make/zip/linux/x64/*.zip \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+      - if: runner.os == 'Windows'
+        run: node tools/release/checksums.cjs apps/desktop/out/make .exe .nupkg .zip RELEASES
+      - if: runner.os == 'Linux'
+        run: node tools/release/checksums.cjs apps/desktop/out/make .deb .zip
+      - name: Test real packaged Electron, SQLite, profiles and OS secret store
+        if: runner.os == 'Windows'
+        run: node tools/release/desktop-smoke.cjs
+      - name: Test packaged Electron with deliberately unavailable Linux vault
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node tools/release/desktop-smoke.cjs
+      # Deliberately no upload-artifact, GH Release or publish step.
 
   android:
-    name: Build Android APK
-    needs: prepare-release
+    needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
-
+    timeout-minutes: 90
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-
-      - name: Set up Java
-        uses: actions/setup-java@v6
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
           cache: gradle
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Install Android build packages
-        run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.1.12297006"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Android release APK
-        run: npm run mobile:build:android:release
-
-      - name: Upload Android APK
-        shell: bash
+      - uses: android-actions/setup-android@v4
+      - run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.1.12297006"
+      - run: npm ci
+      - run: npm run build:core
+      - name: Debug (no private credentials)
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
+      - name: Missing public signing must fail clearly
+        run: node tools/release/android-signing-check.cjs
+      - name: Disposable development-signed normal release
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease -PdevelopmentSigning=true -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
+      - name: Preserve normal candidate separately
         run: |
-          version="${RELEASE_TAG#v}"
-          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
-          asset="LionPocket-Android-${version}-debug-signed.apk"
-          cp "$apk" "$asset"
-          gh release upload "$RELEASE_TAG" "$asset" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
-
-  publish-release:
-    name: Publish GitHub Release
-    needs:
-      - validate
-      - windows
-      - linux
-      - android
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
-
-    steps:
-      - name: Download release assets for checksums
-        shell: bash
+          mkdir -p release-candidates/normal
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk release-candidates/normal/LionPocket-Android-0.3.10-DEVELOPMENT-ONLY.apk
+      - name: Isolated private beta release
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease -PprivateBeta=true -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
+      - run: |
+          mkdir -p release-candidates/private-beta
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk release-candidates/private-beta/LionPocket-Beta-Android-0.3.10-DEVELOPMENT-ONLY.apk
+          node tools/release/checksums.cjs release-candidates .apk
+      - name: Validate external signing with an ephemeral fixture (never production)
+        run: node tools/release/android-signing-fixture.cjs --build
+      - name: Build previous normal/beta from the audited base in a disposable checkout
+        run: node tools/release/prepare-old-android.cjs
+      - name: Prepare synthetic SQLite v1/v4/v5/v8 fixtures
+        run: npx tsx tools/release/mobile-fixtures.ts /tmp/lion-release-fixtures-ci
+      - name: Enable KVM for the disposable AVD
         run: |
-          mkdir -p release-files
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir release-files
-
-      - name: Generate SHA256 checksums
-        shell: bash
-        run: |
-          rm -f release-files/SHA256SUMS.txt
-          (
-            cd release-files
-            sha256sum * > SHA256SUMS.txt
-          )
-
-      - name: Upload checksums and publish release
-        shell: bash
-        run: |
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > release-notes.md
-          if ! grep -q "## Android" release-notes.md; then
-            cat >> release-notes.md <<'EOF'
-
-          ## Android
-
-          O APK Android está incluído para testes. Ele usa a chave de desenvolvimento do projeto e não é assinado para distribuição pela Google Play.
-          EOF
-          fi
-          gh release upload "$RELEASE_TAG" release-files/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
-          gh release edit "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --notes-file release-notes.md \
-            --draft=false
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: APK replacements preserve every SQLite record without clearing storage
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          script: python3 tools/release/android-upgrade.py --serial emulator-5554 --fixtures /tmp/lion-release-fixtures-ci --old-normal release-candidates/base-normal.apk --new-normal release-candidates/normal/LionPocket-Android-0.3.10-DEVELOPMENT-ONLY.apk --old-beta release-candidates/base-beta.apk --new-beta release-candidates/private-beta/LionPocket-Beta-Android-0.3.10-DEVELOPMENT-ONLY.apk --report /tmp/android-upgrades.json
+      # APKs are test candidates; never uploaded or called production signed.

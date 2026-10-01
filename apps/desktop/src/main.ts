@@ -1,3 +1,4 @@
+import { releaseSmokeDirectory, verifyReleaseSmoke } from './main/releaseSmoke';
 import { privateBeta, registerBetaSync } from './main/sync/beta';
 import { setInterval, setTimeout } from 'node:timers';
 import { existsSync } from 'node:fs';
@@ -9,8 +10,11 @@ import { LionPocketDatabase } from './main/database';
 import { registerIpcHandlers } from './main/ipc';
 import { desktopSyntheticDirectory, registerDevelopmentSync } from './main/sync/development';
 const syntheticDirectory = desktopSyntheticDirectory();
+const smokeDirectory = releaseSmokeDirectory();
 if (privateBeta) app.setPath('userData', path.join(app.getPath('appData'), 'LionPocket Beta'));
 if (syntheticDirectory) app.setPath('userData', path.join(syntheticDirectory, 'electron-app'));
+
+if (smokeDirectory) app.setPath('userData', path.join(smokeDirectory, privateBeta ? 'LionPocket Beta' : 'LionPocket'));
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -23,7 +27,7 @@ if (process.platform === 'linux') {
   // Mantém o identificador da janela igual ao arquivo instalado em
   // /usr/share/applications. Sem isso o painel pode abrir um segundo item sem
   // ícone por não conseguir associar a janela ao launcher do LionPocket.
-  app.setDesktopName('lionpocket.desktop');
+  app.setDesktopName(privateBeta ? 'lionpocket-beta.desktop' : 'lionpocket.desktop');
   app.commandLine.appendSwitch('disable-gpu-sandbox');
 }
 
@@ -188,7 +192,7 @@ const createWindow = () => {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
   if (process.platform === 'win32') {
-    app.setAppUserModelId('com.squirrel.lionpocket.lionpocket');
+    app.setAppUserModelId(privateBeta ? 'com.squirrel.lionpocket_beta.lionpocket-beta' : 'com.squirrel.lionpocket.lionpocket');
   }
 
   const databasePath = syntheticDirectory ? path.join(syntheticDirectory, 'manual.sqlite') : path.join(app.getPath('userData'), 'lionpocket.sqlite');
@@ -197,7 +201,14 @@ app.whenReady().then(async () => {
   await registerDevelopmentSync(database, syntheticDirectory);
   await registerBetaSync(database);
   createWindow();
-  configureAutoUpdates();
+  if (smokeDirectory) {
+    mainWindow!.webContents.once('did-finish-load', () => {
+      void verifyReleaseSmoke(database, smokeDirectory, privateBeta).catch(error => {
+        console.error('Release smoke failed:', error.message);
+        app.exit(1);
+      });
+    });
+  } else configureAutoUpdates();
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common

@@ -1,0 +1,21 @@
+// Builds the actual base revision in its own checkout/dependency tree, with no uploads.
+const { mkdtempSync, writeFileSync, copyFileSync } = require('node:fs');
+const { join, resolve } = require('node:path');
+const { tmpdir } = require('node:os');
+const { execFileSync } = require('node:child_process');
+const root = resolve(__dirname, '../..');
+const directory = mkdtempSync(join(tmpdir(), 'lion-release-base-'));
+const base = '8de0087cdbcdcc670ec2073ba3f4ea51932072b4';
+const archive = execFileSync('git', ['archive', base], { cwd: root, maxBuffer: 40 * 1024 * 1024 });
+execFileSync('tar', ['-x', '-C', directory], { input: archive });
+const run = (file, args, cwd = directory) => execFileSync(file, args, { cwd, stdio: 'inherit' });
+run('npm', ['ci']);
+run('npm', ['run', 'build:core']);
+const android = join(directory, 'apps/mobile/android');
+writeFileSync(join(android, 'local.properties'), `sdk.dir=${process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT}\n`);
+const build = beta => run('./gradlew', [':app:assembleRelease', '-PreactNativeArchitectures=x86_64', '--no-daemon', '--max-workers=2', ...(beta ? ['-PprivateBeta=true'] : [])], android);
+build(false);
+copyFileSync(join(android, 'app/build/outputs/apk/release/app-release.apk'), join(root, 'release-candidates/base-normal.apk'));
+build(true);
+copyFileSync(join(android, 'app/build/outputs/apk/release/app-release.apk'), join(root, 'release-candidates/base-beta.apk'));
+console.log(`PASS: disposable base APKs built from ${base}; never production artifacts.`);

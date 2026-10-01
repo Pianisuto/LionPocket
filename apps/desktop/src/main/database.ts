@@ -1,7 +1,7 @@
 import { syncMigration, transportMigration, captureFinancial, financialMigration, financialTriggers, financialTableTypes, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type LocalSyncDatabase, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { initializeLocalSchema, hasCurrentFinancialSchema } from './migrationProtection';
+import { initializeLocalSchema, hasCurrentFinancialSchema, assertSupportedDesktopSchema } from './migrationProtection';
 import type {
   CatalogInput,
   Catalogs,
@@ -136,6 +136,7 @@ export class LionPocketDatabase {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     try {
+      assertSupportedDesktopSchema(this.db);
       this.db.function('search_key', { deterministic: true }, normalizeSearchText);
       this.db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
       initializeLocalSchema(this.db, path, () => {
