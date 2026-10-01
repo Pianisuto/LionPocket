@@ -24,11 +24,12 @@ export async function acceptCommit(
   grants: DeviceGrant[],
   deviceId: string,
   crypto: ProvisioningCrypto,
+  activeKeyVersion = pin.keyVersion,
 ) {
   const envelope = decodeCommit(bytes);
   sameScope(envelope, pin);
   if (envelope.deviceId !== deviceId) throw new Error('forbidden');
-  if (envelope.keyVersion !== pin.keyVersion)
+  if (envelope.keyVersion !== activeKeyVersion)
     throw new Error('key_version_mismatch');
   const current = validateGrantChain(grants, pin, crypto);
   const author = activeDevice(current.devices, deviceId);

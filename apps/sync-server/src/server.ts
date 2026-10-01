@@ -1,3 +1,4 @@
+import { betaControl, betaRecoveryRequest } from './betaControl';
 import { acceptCommit, changesPage, CommitRejection } from './commits';
 import { createServer, type IncomingMessage } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -96,6 +97,8 @@ const knownErrors: Record<string, number> = {
 };
 export function controlServer(options: {
   financialEnabled?: boolean;
+  privateBeta?: boolean;
+  oidc?: { issuer: string; desktopClientId: string; androidClientId: string; desktopRedirect: string; androidRedirect: string };
   pool: Pool;
   crypto: ProvisioningCrypto;
   environment: { serverId: string; serverEpoch: string };
@@ -126,7 +129,8 @@ export function controlServer(options: {
         respond(200, {
           ...environment,
           financialSyncEnabled: options.financialEnabled === true,
-          entityScopes: options.financialEnabled ? ['manualTransaction'] : [],
+          entityScopes: options.financialEnabled ? (options.privateBeta ? ['category','paymentMethod','card','recurring','installmentPurchase','transaction','goal','recurringPriorityList','monthlyPriorityList'] : ['manualTransaction']) : [],
+          ...(options.oidc ? {oidc:options.oidc} : {}),
           controlVersion: 1,
         });
         return;
@@ -134,7 +138,7 @@ export function controlServer(options: {
       // Opt-in controls the only financial routes; every other domain remains absent.
       const create = method === 'POST' && target === '/v1/vaults';
       const match =
-        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|grants|deliveries|registry|commits|changes)$/.exec(
+        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|pairing-list|grants|deliveries|registry|commits|changes|recovery-fetch|recover|recovery-store|key-checkpoints)$/.exec(
           target,
         );
       if (
@@ -275,6 +279,10 @@ export function controlServer(options: {
         sameScope(pin, proof);
         grants = await chain(tx, vaultId);
         const registry = validateGrantChain(grants, pin, crypto);
+        if (['recovery-fetch','recover'].includes(action) && options.privateBeta) {
+          const result=await betaRecoveryRequest(tx,action,body.value,pin,grants,proof.deviceId,crypto,key=>checkProof(proof,key));
+          await tx.query('COMMIT'); respond(200,result);return;
+        }
         if (action === 'pairings' && method === 'POST') {
           request = body.value as PairingRequest;
           verifyPairing(request, crypto);
@@ -312,7 +320,12 @@ export function controlServer(options: {
         } else {
           const author = activeDevice(registry.devices, proof.deviceId);
           await checkProof(proof, author.signingPublicKey);
+          if (['key-checkpoints','recovery-store'].includes(action)) {
+            if (!options.privateBeta) throw new Error('forbidden');
+            await betaControl(tx,action,body.value,pin,grants,crypto);
+          }
           if (action === 'commits' || action === 'changes') {
+            if (action==='commits' && vault.rotation_required) throw new Error('rotation_required');
             const result =
               action === 'commits'
                 ? await acceptCommit(
@@ -322,14 +335,15 @@ export function controlServer(options: {
                     grants,
                     proof.deviceId,
                     crypto,
+                    options.privateBeta ? (vault.key_checkpoints.length ? vault.key_checkpoints[vault.key_checkpoints.length-1].keyVersion : 1) : 1,
                   )
                 : await changesPage(tx, body.value, pin, proof.deviceId);
             await tx.query('COMMIT');
             respond(200, result);
             return;
           }
-          if (action === 'pairings') {
-            if (proof.deviceId !== pin.founderDeviceId)
+          if (action === 'pairings' || action === 'pairing-list') {
+            if (!options.privateBeta && proof.deviceId !== pin.founderDeviceId)
               throw new Error('forbidden');
             const requests = (
               await tx.query(
@@ -342,7 +356,7 @@ export function controlServer(options: {
             return;
           }
           if (action === 'grants') {
-            if (proof.deviceId !== pin.founderDeviceId)
+            if (!options.privateBeta && proof.deviceId !== pin.founderDeviceId)
               throw new Error('forbidden');
             const grant = body.value;
             assertDeviceGrant(grant);
@@ -375,6 +389,7 @@ export function controlServer(options: {
               [vaultId, grant.registryVersion],
             );
             grants.push(grant);
+            if (options.privateBeta && grant.status==='revoked') await tx.query('UPDATE sync_vaults SET rotation_required=true WHERE vault_id=$1',[vaultId]);
           }
           if (action === 'deliveries') {
             const delivery = body.value;
@@ -399,8 +414,9 @@ export function controlServer(options: {
             [pin.vaultId, proof.deviceId],
           )
         ).rows[0]?.delivery ?? null;
+      const beta=options.privateBeta ? (await tx.query('SELECT key_checkpoints,recovery,rotation_required FROM sync_vaults WHERE vault_id=$1',[pin.vaultId])).rows[0] : null;
       await tx.query('COMMIT');
-      respond(create ? 201 : 200, { pin, grants, delivery });
+      respond(create ? 201 : 200, { pin, grants, delivery,...(beta?{keyCheckpoints:beta.key_checkpoints,recovery:beta.recovery,rotationRequired:beta.rotation_required}:{}) });
     } catch (error) {
       if (tx) {
         try {
