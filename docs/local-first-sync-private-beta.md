@@ -2,6 +2,12 @@
 
 A beta usa `com.lionpocketmobile.beta` no Android e o perfil `LionPocket Beta` no desktop (`--private-beta`). O pacote e o perfil normais continuam separados. O uso local funciona sem conta. Categorias, formas de pagamento, cartões, lançamentos, recorrências, compras parceladas, objetivos e as duas listas de prioridades usam o mesmo protocolo no ambiente local e no LionsLab.
 
+## Sincronização automática com o app ativo
+
+A evolução após o PR #5 solicita sync ao abrir/retomar a beta e 2 segundos após a última escrita sincronizável confirmada no SQLite. **Sincronizar agora** permanece e antecipa essa espera. Debounce/coalescing controla o transporte, sem compactar commits. Offline não bloqueia uso nem salvamento financeiro. O automático nunca abre login: após reiniciar o processo ou expirar a sessão, use o botão para entrar conscientemente.
+
+Android fechado não tem garantia de transporte; não há background service, WorkManager, push ou polling. Background sync continua futuro. Veja [arquitetura, status, lifecycle e validação do foreground](local-first-sync-foreground.md). A entrega e as evidências manuais do PR #5 abaixo são históricas.
+
 ## Instalar e conectar
 
 1. Instale o APK arm64 da entrega no Galaxy S23. Abra **LionPocket Beta**. Não desinstale nem limpe o LionPocket normal.
@@ -58,7 +64,7 @@ Um restore remoto com perda de história exige um novo `serverEpoch` e reconcili
 
 - É uma beta privada, sem auditoria independente de criptografia. A revisão de código e os testes desta entrega não equivalem a essa auditoria. Prefira fixtures e cópias isoladas durante a avaliação.
 - Conteúdo financeiro remoto é cifrado. SQLite, JSON, CSV e backups locais permanecem em claro. JavaScript cria algumas representações de segredos em strings que não permitem limpeza garantida de memória; buffers de chaves são apagados também em caminhos de erro.
-- O transporte é manual em primeiro plano; não há push, sync em background ou serviço Cloud público. Logs/receipts preservam metadados públicos de identidade, causalidade, volume e tempo.
+- O transporte ocorre automaticamente somente em foreground, com botão manual disponível; não há push, sync em background ou serviço Cloud público. Logs/receipts preservam metadados públicos de identidade, causalidade, volume e tempo.
 - Um lote financeiro com mais de 100 operações é conservado e bloqueado com `batch_too_large`; não é fragmentado silenciosamente. Use lotes menores. Baseline é retomável em commits individuais.
 - A revisão de cadastros oferece conservar ambos separadamente. A fusão arbitrária de duas identidades globais de catálogo já publicadas não está habilitada; aliases implementados nesta beta são os de slots e os recebidos na linhagem existente.
 - Restore com remoção física de registros exige confirmação explícita das exclusões encontradas. Diferenças de prioridades também são preparadas como ramos e ficam sujeitas à revisão da base remota.

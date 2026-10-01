@@ -1,3 +1,4 @@
+import { betaActivityLabel } from '@lionpocket/sync-local';
 import React, { useEffect, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import type {
@@ -40,7 +41,22 @@ export function BetaSyncPanel({
     }
   };
   useEffect(() => {
-    if (privateBeta) void refresh().catch((e) => setError(String(e)));
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+    let lastCompleted: string | undefined;
+    if (privateBeta) {
+      void refresh().catch((e) => setError(String(e)));
+      void betaSync().then(c => {
+        if (!disposed) unsubscribe = c.subscribe(() => {
+          void refresh().catch(() => { /* Status remains best effort; local use continues. */ });
+          if (c.coordinator.lastCompletedAt && c.coordinator.lastCompletedAt !== lastCompleted) {
+            lastCompleted = c.coordinator.lastCompletedAt;
+            void onChanged().catch(() => { /* Refresh cannot affect saved data. */ });
+          }
+        });
+      }).catch(() => { /* Status remains best effort; local use continues. */ });
+    }
+    return () => { disposed = true; unsubscribe?.(); };
   }, []);
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -76,10 +92,10 @@ export function BetaSyncPanel({
         conteúdo enviado é cifrado; banco e backups locais permanecem em claro.
       </Text>
       <Text style={styles.text}>
-        Estado: {status.phase} · {status.paused ? 'Pausado' : 'Disponível'} ·
-        Pendentes: {status.sync?.pending ?? 0} · Revisões:{' '}
-        {status.reviews.length} · Quarentena: {status.quarantine.length}
+        {betaActivityLabel[status.activity]} · Pendentes: {status.sync?.pending ?? 0}
       </Text>
+      {status.lastCompletedAt && <Text style={styles.muted}>Último sync concluído: {new Date(status.lastCompletedAt).toLocaleString('pt-BR')}</Text>}
+      <Text style={styles.muted}>Salvo neste aparelho primeiro. Sync automático ao abrir/retomar e após salvar, com o app ativo. Android fechado não garante envio. “Sincronizar agora” continua disponível.</Text>
       {status.phase === 'local' && (
         <>
           <TextInput
@@ -266,7 +282,7 @@ export function BetaSyncPanel({
             </>
           )}
           <Button
-            label={busy ? 'Aguarde…' : 'Entrar e sincronizar agora'}
+            label={busy ? 'Aguarde…' : 'Sincronizar agora'}
             disabled={busy || status.paused || status.restoreReview}
             onPress={() => act((c) => c.sync())}
           />

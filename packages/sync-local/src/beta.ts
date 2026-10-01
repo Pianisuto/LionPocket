@@ -1,3 +1,5 @@
+import { bankSyncCoordinator, type SyncCoordinator } from './coordinator';
+import { syncFetchText } from './network';
 import {
   activeDevice,
   assertTrustPin,
@@ -54,6 +56,8 @@ export interface BetaSession {
   accessToken: string;
   issuer: string;
   subject: string;
+  /** Validated access-token expiration, milliseconds since epoch. Never persisted. */
+  expiresAt?: number;
 }
 export interface BetaSaved {
   endpoint: string;
@@ -98,7 +102,38 @@ export function normalizeEndpoint(input: string): string {
 }
 /** Complete foreground control flow shared by native clients. Storage contains public metadata only. */
 export class BetaSync {
-  constructor(readonly options: BetaOptions) {}
+  readonly coordinator: SyncCoordinator;
+  private cachedSession?: BetaSession;
+  constructor(readonly options: BetaOptions) {
+    this.coordinator = bankSyncCoordinator(options.db, {
+      eligible: async () => {
+        const saved = await options.storage.load();
+        const [state] = await options.db.read(
+          'SELECT mode,binding_id FROM sync_local_state WHERE id=1',
+        );
+        const [control] = await options.db.read(
+          'SELECT paused FROM sync_control WHERE id=1',
+        );
+        return (
+          saved?.phase === 'bound' &&
+          state.mode === 'financial' &&
+          !!state.binding_id &&
+          !control.paused
+        );
+      },
+      cycle: (interactive, signal) => this.syncCycle(interactive, signal),
+    });
+  }
+  localWriteCommitted() {
+    this.coordinator.request('local-write');
+  }
+  setForeground(active: boolean) {
+    this.coordinator.setForeground(active);
+  }
+  subscribe(listener: () => void) {
+    return this.coordinator.subscribe(listener);
+  }
+
   private crypto() {
     return new ProvisioningCrypto(this.options.sodium);
   }
@@ -111,16 +146,23 @@ export class BetaSync {
     await this.options.storage.save({ ...saved, endpoint: normalized });
     return this.status();
   }
-  async environment(endpoint?: string): Promise<BetaEnvironment> {
+  async environment(
+    endpoint?: string,
+    signal?: AbortSignal,
+  ): Promise<BetaEnvironment> {
     const origin = normalizeEndpoint(
       endpoint ??
         (await this.options.storage.load())?.endpoint ??
         'https://sync-beta.lionslab.dev',
     );
-    const response = await fetch(origin + '/v1/environment');
+    const response = await syncFetchText(
+      origin + '/v1/environment',
+      {},
+      signal,
+    );
     if (!response.ok)
       throw new Error('Servidor indisponível. O banco continua local.');
-    const text = await response.text();
+    const text = response.text;
     if (text.length > 65536) throw new Error('Invalid environment.');
     const e = decodeCanonical(encodeUtf8(text), 65536) as BetaEnvironment;
     assertUuid(e.serverId, '4');
@@ -148,17 +190,37 @@ export class BetaSync {
       this.crypto(),
     );
   }
-  private async session(saved: BetaSaved) {
-    const environment = await this.environment(saved.endpoint),
+  private async session(
+    saved: BetaSaved,
+    interactive = true,
+    signal?: AbortSignal,
+  ) {
+    const environment = await this.environment(saved.endpoint, signal);
+    if (
+      saved.profile &&
+      (environment.serverId !== saved.profile.pin.serverId ||
+        environment.serverEpoch !== saved.profile.pin.serverEpoch)
+    )
+      throw new Error('epoch_changed');
+    let session = this.cachedSession;
+    if (
+      !session ||
+      !session.expiresAt ||
+      session.expiresAt <= Date.now() + 30000
+    ) {
+      this.cachedSession = undefined;
+      if (!interactive) throw new Error('interaction_required');
       session = await this.options.login(environment);
+    }
     if (
       session.issuer !== environment.oidc.issuer ||
       (saved.identity &&
         (session.issuer !== saved.identity.issuer ||
           session.subject !== saved.identity.subject))
     )
-      throw new Error('A conta não corresponde ao cofre vinculado.');
+      throw new Error('account_mismatch');
     saved.identity = { issuer: session.issuer, subject: session.subject };
+    this.cachedSession = session;
     return session;
   }
   private async control(
@@ -329,6 +391,7 @@ export class BetaSync {
     }
     s.phase = 'bound';
     await this.options.storage.save(s);
+    this.coordinator.request('foreground');
   }
   async receive() {
     const s = await this.saved(),
@@ -342,7 +405,7 @@ export class BetaSync {
     await this.bind(s, true);
     return this.status();
   }
-  private async engine(s: BetaSaved) {
+  private async engine(s: BetaSaved, signal?: AbortSignal) {
     const d = this.device(s),
       [state] = await this.options.db.read(
         'SELECT binding_id FROM sync_local_state WHERE id=1',
@@ -361,16 +424,33 @@ export class BetaSync {
       this.options.sodium,
       this.options.dialect,
       s.endpoint,
+      fetchSyncHttp(s.endpoint, signal),
+      () => !signal?.aborted,
     );
   }
   async sync() {
-    const s = await this.saved(),
-      session = await this.session(s),
-      engine = await this.engine(s);
-    await engine.sync(session.accessToken);
-    s.profile = engine.device.profile;
-    await this.options.storage.save(s);
+    await this.coordinator.request('manual');
     return this.status();
+  }
+  private async syncCycle(interactive: boolean, signal: AbortSignal) {
+    const s = await this.saved();
+    try {
+      const session = await this.session(s, interactive, signal);
+      if (signal.aborted) throw new Error('foreground_inactive');
+      const engine = await this.engine(s, signal);
+      await engine.sync(session.accessToken);
+      s.profile = engine.device.profile;
+      await this.options.storage.save(s);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        ['unauthenticated', 'forbidden', 'device_revoked'].includes(
+          error.message,
+        )
+      )
+        this.cachedSession = undefined;
+      throw error;
+    }
   }
   async requests() {
     const s = await this.saved(),
@@ -705,6 +785,7 @@ export class BetaSync {
         this.crypto().uuid(),
       ),
     );
+    this.coordinator.request('foreground');
     return this.status();
   }
   async pause(paused: boolean) {
@@ -716,6 +797,8 @@ export class BetaSync {
         };
       })(),
     );
+    if (paused) this.coordinator.cancel();
+    else this.coordinator.request('foreground');
     return this.status();
   }
   async seriesReviews() {
@@ -780,6 +863,7 @@ export class BetaSync {
     await this.options.db.run(
       reviewLegacySeries(type, localId, slots, () => this.crypto().uuid()),
     );
+    this.localWriteCommitted();
     return this.status();
   }
   async reviewLegacyImport(objectId: string, confirm: boolean) {
@@ -813,6 +897,7 @@ export class BetaSync {
         yield* captureFinancial(uuid);
       })(),
     );
+    this.localWriteCommitted();
     return this.status();
   }
   async confirmLegacyDeletion(objectId: string, confirm: boolean) {
@@ -872,6 +957,7 @@ export class BetaSync {
         yield* captureFinancial(uuid);
       })(),
     );
+    this.localWriteCommitted();
     return this.status();
   }
   async catalogReviews() {
@@ -992,6 +1078,7 @@ export class BetaSync {
         yield { sql: "UPDATE sync_bootstrap SET state='confirmed' WHERE id=1" };
       })(),
     );
+    this.localWriteCommitted();
     return this.status();
   }
   async resolve(
@@ -1007,6 +1094,7 @@ export class BetaSync {
       revisionId,
       recover,
     );
+    this.localWriteCommitted();
     return this.status();
   }
   async status() {
@@ -1037,7 +1125,60 @@ export class BetaSync {
     const [control] = await this.options.db.read(
       'SELECT * FROM sync_control WHERE id=1',
     );
+    const reviews = await this.options.db.read(
+      "SELECT * FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance') AND reason NOT LIKE 'import_receipt:%'",
+    );
+    const quarantine = await this.options.db.read(
+      "SELECT commit_id,last_error FROM sync_inbox WHERE state='quarantined'",
+    );
+    const blocked = await this.options.db.read(
+      "SELECT commit_id FROM sync_outbox WHERE state='blocked' AND COALESCE(last_error,'') NOT IN ('key_rotated','remote_accepted_before_rotation')",
+    );
+    const error = this.coordinator.error;
+    const accountAction =
+      [
+        'interaction_required',
+        'unauthenticated',
+        'account_mismatch',
+        'forbidden',
+        'device_revoked',
+        'secret_unavailable',
+        'signing_secret_unavailable',
+        'epoch_changed',
+        'key_mismatch',
+        'key_version_mismatch',
+      ].includes(error ?? '') ||
+      /secret|cofre|vault.*(unavailable|locked)|key.*(unavailable|locked)/i.test(
+        error ?? '',
+      );
+    const needsReview = !!(
+      reviews.length ||
+      quarantine.length ||
+      sync?.conflicts.length ||
+      blocked.length ||
+      bootstrap?.state === 'joining_review' ||
+      (state.mode === 'disabled' && state.binding_id)
+    );
+    const activity = this.coordinator.running
+      ? 'syncing'
+      : control.paused
+        ? 'paused'
+        : accountAction
+          ? 'action-required'
+          : needsReview
+            ? 'review'
+            : error && error !== 'foreground_inactive'
+              ? 'unavailable'
+              : sync?.pending
+                ? 'pending'
+                : saved?.phase !== 'bound'
+                  ? 'local'
+                  : this.coordinator.lastCompletedAt
+                    ? 'synced'
+                    : 'ready';
     return {
+      activity: activity as BetaActivity,
+      lastCompletedAt: this.coordinator.lastCompletedAt ?? null,
       restoreReview: state.mode === 'disabled' && !!state.binding_id,
       activeKeyVersion: saved?.profile?.activeKeyVersion ?? 1,
       recoveryVersion: saved?.recoveryVersion ?? '0',
@@ -1064,12 +1205,8 @@ export class BetaSync {
       joiningReview: bootstrap?.state === 'joining_review',
       counts,
       sync,
-      reviews: await this.options.db.read(
-        "SELECT * FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance') AND reason NOT LIKE 'import_receipt:%'",
-      ),
-      quarantine: await this.options.db.read(
-        "SELECT commit_id,last_error FROM sync_inbox WHERE state='quarantined'",
-      ),
+      reviews,
+      quarantine,
       mode: String(state.mode),
     };
   }
@@ -1081,3 +1218,25 @@ export type CatalogReview = Awaited<
   ReturnType<BetaSync['catalogReviews']>
 >[number];
 export type BetaStatus = Awaited<ReturnType<BetaSync['status']>>;
+
+export type BetaActivity =
+  | 'syncing'
+  | 'paused'
+  | 'action-required'
+  | 'review'
+  | 'unavailable'
+  | 'pending'
+  | 'local'
+  | 'synced'
+  | 'ready';
+export const betaActivityLabel: Record<BetaActivity, string> = {
+  syncing: 'Sincronizando…',
+  paused: 'Sync pausado',
+  'action-required': 'Ação necessária para conta ou chaves',
+  review: 'Conflitos ou revisões pendentes',
+  unavailable: 'Offline ou servidor indisponível',
+  pending: 'Alterações pendentes',
+  local: 'Somente neste aparelho',
+  synced: 'Sincronizado',
+  ready: 'Pronto para sincronizar',
+};

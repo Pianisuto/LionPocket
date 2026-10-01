@@ -1,3 +1,4 @@
+import { syncFetchText } from './network';
 import { acceptKeyCheckpoints } from './beta-security';
 import { reissueForKeyVersion } from './reemission';
 import {
@@ -71,22 +72,10 @@ export class SyncHttpError extends Error {
     super(code);
   }
 }
-export function fetchSyncHttp(endpoint: string): SyncHttp {
+export function fetchSyncHttp(endpoint: string, signal?: AbortSignal): SyncHttp {
   return {
     async request(target, body, proof, token) {
-      const platformFetch = (
-        globalThis as unknown as {
-          fetch: (
-            url: string,
-            init: unknown,
-          ) => Promise<{
-            ok: boolean;
-            headers: { get(name: string): string | null };
-            text(): Promise<string>;
-          }>;
-        }
-      ).fetch;
-      const response = await platformFetch(endpoint + target, {
+      const response = await syncFetchText(endpoint + target, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -94,11 +83,8 @@ export function fetchSyncHttp(endpoint: string): SyncHttp {
           'x-lionpocket-proof': proof,
         },
         body,
-      });
-      // Bound before parsing, including a malicious or misconfigured endpoint.
-      if (Number(response.headers.get('content-length') ?? 0) > 4194304)
-        throw new Error('payload_too_large');
-      const text = await response.text();
+      }, signal);
+      const text = response.text;
       const result = decodeCanonical(encodeUtf8(text), 4194304, 100000);
       if (!response.ok)
         throw new SyncHttpError(
@@ -167,6 +153,7 @@ export class ManualSync {
     readonly dialect: ProjectionDialect,
     readonly endpoint: string,
     readonly http: SyncHttp = fetchSyncHttp(endpoint),
+    readonly canTransport: () => boolean = () => true,
   ) {}
   private async state() {
     const [state] = await this.db.read(
@@ -191,6 +178,7 @@ export class ManualSync {
     return state;
   }
   private async request(action: string, value: unknown, token: string) {
+    if (!this.canTransport()) throw new Error('foreground_inactive');
     const body = canonicalStringify(value),
       target = `/v1/vaults/${this.device.profile.pin.vaultId}/${action}`;
     const proof = await this.device.proof(
@@ -200,6 +188,7 @@ export class ManualSync {
       body,
       token,
     );
+    if (!this.canTransport()) throw new Error('foreground_inactive');
     return this.http.request(
       target,
       body,
@@ -560,7 +549,7 @@ export class ManualSync {
     }
     await this.applyInbox();
   }
-  /** Manual only. Caller obtains a fresh OIDC session; no background timer or token storage. */
+  /** One ordered pass; the foreground coordinator owns scheduling and session interaction. */
   async sync(token: string): Promise<void> {
     if (this.running) throw new Error('sync_in_progress');
     this.running = true;

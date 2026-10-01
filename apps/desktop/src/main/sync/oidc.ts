@@ -136,6 +136,7 @@ export async function loginDevelopmentOidc(
       accessToken: tokens.access_token,
       issuer,
       subject: access.payload.sub as string,
+      expiresAt: access.payload.exp! * 1000,
     };
   } finally {
     clearTimeout(timer);

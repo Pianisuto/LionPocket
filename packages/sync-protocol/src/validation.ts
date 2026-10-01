@@ -328,7 +328,7 @@ export function assertCommitReceipt(
   heads.forEach((value, index) => {
     const h = record(value);
     exactKeys(h, ['objectId', 'revisionIds']);
-    assertUuid(h.objectId, '4');
+    assertUuid(h.objectId);
     assertIdSet(h.revisionIds);
     if (
       !h.revisionIds.length ||

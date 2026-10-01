@@ -122,6 +122,16 @@ const seedPaymentMethods = [
 
 export class LionPocketDatabase {
   readonly db: DatabaseSync;
+  private syncWriteListeners = new Set<() => void>();
+  onLocalSyncWrite(listener: () => void): () => void {
+    this.syncWriteListeners.add(listener);
+    return () => this.syncWriteListeners.delete(listener);
+  }
+  private notifySyncWrite() {
+    for (const listener of this.syncWriteListeners) {
+      try { listener(); } catch { /* Post-commit scheduling must never fail a financial save. */ }
+    }
+  }
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
@@ -154,16 +164,19 @@ export class LionPocketDatabase {
         return;
       capturing = true;
       try {
+        const before = prepare('SELECT local_seq FROM sync_local_state WHERE id=1').get()?.local_seq;
         this.runSyncWorkflow(captureFinancial(randomUUID));
+        return before !== prepare('SELECT local_seq FROM sync_local_state WHERE id=1').get()?.local_seq;
       } finally {
         capturing = false;
       }
     };
     this.db.exec = (statement: string) => {
       if (/^COMMIT\b/i.test(statement.trim())) {
-        flush();
+        const changed = flush();
         exec(statement);
         transaction = false;
+        if (changed) this.notifySyncWrite();
         return;
       }
       exec(statement);
@@ -215,8 +228,9 @@ export class LionPocketDatabase {
     this.atomic(() => this.runSyncWorkflow(activateSyntheticManualPilot(randomUUID)));
   }
 
+  private syncAdapter?: LocalSyncDatabase;
   syncDatabase(): LocalSyncDatabase {
-    return { read: async (sql, params = []) => this.db.prepare(sql).all(...params) as SqlRow[], run: async (workflow) => this.atomic(() => this.runSyncWorkflow(workflow)) };
+    return this.syncAdapter ??= { read: async (sql, params = []) => this.db.prepare(sql).all(...params) as SqlRow[], run: async (workflow) => this.atomic(() => this.runSyncWorkflow(workflow)) };
   }
 
   private recordManualSync(id: string): void {

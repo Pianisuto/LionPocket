@@ -1,9 +1,12 @@
 import type { LocalSyncDatabase, SqlRow } from '@lionpocket/sync-local';
 import type { NitroSQLiteConnection } from 'react-native-nitro-sqlite';
+const adapters = new WeakMap<object, LocalSyncDatabase>();
 export function mobileSyncDatabase(
   db: NitroSQLiteConnection,
 ): LocalSyncDatabase {
-  return {
+  const known = adapters.get(db);
+  if (known) return known;
+  const adapter: LocalSyncDatabase = {
     read: async (sql, params) =>
       (await db.executeAsync<SqlRow>(sql, params)).rows._array,
     run: async (workflow) => {
@@ -18,4 +21,6 @@ export function mobileSyncDatabase(
       });
     },
   };
+  adapters.set(db, adapter);
+  return adapter;
 }

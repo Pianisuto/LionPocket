@@ -26,7 +26,8 @@ describe.skipIf(!enabled)(
     const database = "lion_beta_" + randomUUID().replaceAll("-", ""),
       endpoint = "http://127.0.0.1:18774",
       issuer = "http://127.0.0.1:18080/realms/lionpocket-dev",
-      banks: LionPocketDatabase[] = [];
+      banks: LionPocketDatabase[] = [],
+      controllers: BetaSync[] = [];
     let pool: pg.Pool, admin: pg.Pool, server: Server, sessions: BetaSession[];
     beforeAll(async () => {
       await sodium.ready;
@@ -65,6 +66,7 @@ describe.skipIf(!enabled)(
         );
     }, 30000);
     afterAll(async () => {
+      controllers.forEach(c => c.coordinator.dispose());
       banks.forEach((b) => b.db.close());
       if (server) await new Promise<void>((r) => server.close(() => r()));
       await pool?.end();
@@ -95,6 +97,9 @@ describe.skipIf(!enabled)(
         backup: async () => "/private/synthetic-backup.sqlite",
         login: async () => sessions[session],
       });
+      bank.onLocalSyncWrite(() => sync.localWriteCommitted());
+      controllers.push(sync);
+      sync.setForeground(true);
       return { bank, sync, secrets, profile: () => saved };
     }
     it("creates, pairs, reviews, synchronizes, rotates/reemits and recovers through the app commands", async () => {
@@ -205,6 +210,32 @@ describe.skipIf(!enabled)(
       expect(remote).not.toContain("Beta 🦁");
       expect(remote).not.toContain(r.code);
       expect((await a.sync.status()).activeKeyVersion).toBeGreaterThan(1);
+    }, 30000);
+    it("automatically transports rapid committed financial edits through real PostgreSQL/Keycloak", async () => {
+      const a = client();
+      await a.sync.configure(endpoint);
+      await a.sync.create();
+      await a.sync.sync();
+      const previous = a.sync.coordinator.lastCompletedAt;
+      const completed = new Promise<void>((resolve) => {
+        const remove = a.sync.subscribe(() => {
+          if (!a.sync.coordinator.running && a.sync.coordinator.lastCompletedAt !== previous) {
+            remove();
+            resolve();
+          }
+        });
+      });
+      const tx = a.bank.saveTransaction({ kind: "expense", description: "Automatic integration", plannedAmount: 12.34, dueDate: "2026-10-02", status: "planned" });
+      a.bank.saveTransaction({ id: tx.id, kind: "expense", description: "Automatic edited", plannedAmount: 12.34, dueDate: "2026-10-02", status: "planned" });
+      a.bank.setTransactionPriority({ month: "2026-10", transactionId: tx.id, pinned: true });
+      a.bank.settleTransaction(tx.id);
+      const immutable = a.bank.db.prepare("SELECT commit_id,payload_json FROM sync_outbox ORDER BY local_seq").all();
+      expect(immutable).toHaveLength(4);
+      for (let i = 0; i < 10; i++) a.sync.setForeground(true);
+      await completed;
+      expect((await a.sync.status()).sync?.pending).toBe(0);
+      expect(a.bank.db.prepare("SELECT commit_id,payload_json FROM sync_outbox ORDER BY local_seq").all()).toEqual(immutable);
+      expect((await pool.query("SELECT count(*)::int AS n FROM sync_commits WHERE vault_id=$1", [a.profile()!.profile!.pin.vaultId])).rows[0].n).toBe(4);
     }, 30000);
   },
 );

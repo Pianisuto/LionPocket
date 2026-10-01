@@ -61,5 +61,5 @@ export async function androidDevelopmentOidc(configured?: {issuer:string;android
   );
   if (subject !== accessSubject || session.tokenType !== 'Bearer')
     throw new Error('OIDC identity mismatch.');
-  return { accessToken: session.accessToken, issuer, subject };
+  return { accessToken: session.accessToken, issuer, subject, expiresAt: Date.parse(session.accessTokenExpirationDate) };
 }

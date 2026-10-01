@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { LionPocketApi, UpdateInfo, WindowState } from './api';
 
 const api: LionPocketApi = {
+  onBetaSyncChanged: (listener) => {
+    ipcRenderer.on('sync:beta:changed', listener);
+    return () => ipcRenderer.removeListener('sync:beta:changed', listener);
+  },
   betaSyncStatus: () => ipcRenderer.invoke('sync:beta:status'),
   betaSyncCommand: (action,args) => ipcRenderer.invoke('sync:beta:command',action,args),
   developmentSyncStatus: () => ipcRenderer.invoke('sync:development:status'),
