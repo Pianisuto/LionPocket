@@ -1,5 +1,7 @@
 # Contratos mínimos v1 — Etapa 0
 
+A [beta privada financeira de 01/10/2026](local-first-sync-private-beta.md) acrescenta validação, captura e projeção dos nove escopos financeiros em instalações separadas. As restrições sintéticas da Etapa 1 abaixo descrevem o piloto anterior; não são a capability da beta. A beta conserva UUIDv4 para identidades comuns/legadas e usa UUIDv5 para proveniência de importação comprovada e reservas de novos slots de parcelas, conforme as decisões registradas no guia.
+
 Estado: contratos v1 de desenvolvimento, 30/09/2026. O plano de controle está em [provisioning/trust/pareamento](local-first-sync-stage1-provisioning.md), e o transporte executável de `manualTransaction` em [fluxo vertical desktop ↔ Android](local-first-sync-stage1-transport.md). Tipos e validação em [`packages/sync-protocol/src`](../packages/sync-protocol/src). O transporte permanece desativado por padrão e exige opt-in sintético; contratos amplos de planejamento/cadastros não habilitam essas entidades. Os bindings foram validados nos runtimes nativos descritos nos guias, sem autorização para dados reais/publicação.
 
 ## 1. Versões, escopo e limites de responsabilidade

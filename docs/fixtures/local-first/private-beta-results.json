@@ -1,0 +1,180 @@
+{
+  "date": "2026-10-01",
+  "status": "PRIVATE_BETA_TESTABLE",
+  "implementationCommit": "3558de777c6ff52cdad684d94e35311c63342c92",
+  "scope": [
+    "category",
+    "paymentMethod",
+    "card",
+    "recurring",
+    "installmentPurchase",
+    "transaction",
+    "goal",
+    "recurringPriorityList",
+    "monthlyPriorityList"
+  ],
+  "checks": {
+    "fullSuiteWithIntegration": {
+      "passed": 322,
+      "skipped": 0,
+      "workspaces": {
+        "core": 61,
+        "desktop": 88,
+        "mobile": 81,
+        "sync-protocol": 38,
+        "sync-local": 2,
+        "sync-server": 52
+      }
+    },
+    "defaultSuite": {
+      "passed": 299,
+      "skipped": 23
+    },
+    "desktopElectronNode": {
+      "passed": 88,
+      "electron": "43.4.0"
+    },
+    "typecheck": "PASS",
+    "lint": {
+      "errors": 0,
+      "warnings": 59
+    },
+    "desktopPackage": "PASS",
+    "androidRelease": "PASS",
+    "gradleWorkspaceBundleInvalidation": "PASS",
+    "diffCheck": "PASS"
+  },
+  "runtimes": {
+    "node": "24.21.0",
+    "npm": "11.19.0",
+    "reactNative": "0.87.1",
+    "gradle": "9.4.1",
+    "buildJdk": 17,
+    "physicalAndroid": {
+      "model": "Galaxy S23 / SM-S911B",
+      "android": 16,
+      "serialSuffix": "X3YM"
+    }
+  },
+  "native": {
+    "realOidcSessions": 2,
+    "desktopSystemBrowser": "PASS",
+    "androidCustomTab": "PASS",
+    "nativeCofres": "PASS",
+    "fingerprintPairing": "PASS",
+    "keyVersion": 2,
+    "distinctPopulatedCatalogReview": "PASS",
+    "financialHttpsRoundTrip": {
+      "description": "Beta HTTPS 20261001",
+      "plannedCents": 1234,
+      "actualCents": 0,
+      "status": "paid",
+      "settledDate": "2026-10-01",
+      "referencesPreserved": true,
+      "categoryNameAfterReview": "Alimentação (Galaxy)"
+    },
+    "originalFinancialDataUploaded": false,
+    "notes": "The native flow uses seeded catalog bases and a financial fixture. Planning/import/conflict/recovery scenarios have repository/integration coverage; they were not all repeated manually on the physical phone.",
+    "finalStatus": {
+      "desktopAppliedCommits": 60,
+      "desktopPending": 0,
+      "desktopQuarantine": 0,
+      "androidPending": 0,
+      "androidQuarantine": 0,
+      "reviews": 0
+    }
+  },
+  "domainScenarios": [
+    "atomic financial writers and rollback",
+    "catalog references and deletes",
+    "zero, NULL, cents and Unicode",
+    "same-month offline recurring slots",
+    "card cycle",
+    "actual-settlement anchor",
+    "immutable installment slots with renumbering",
+    "goals as absolute balances",
+    "priority aggregates and batches",
+    "same-file renamed import provenance",
+    "semantic-group merges and obsolete conditional heads",
+    "delete/edit without resurrection",
+    "legacy slot review with original-date confirmation",
+    "restore differences and missing-record review"
+  ],
+  "securityScenarios": [
+    "account/vault isolation",
+    "signature/scope/cipher tampering",
+    "HTTP replay",
+    "cofre unavailability",
+    "recovery into new isolated installation",
+    "revocation and DEK rotation",
+    "checkpoint rollback",
+    "prepared bytes retained with new-ID reemission",
+    "retry after response loss",
+    "SQLite crash rollback",
+    "epoch mismatch stops transport"
+  ],
+  "lionslab": {
+    "project": "lionpocket-beta",
+    "image": "lionpocket-beta:20261001-beta4",
+    "imageId": "sha256:3e455981ee8104cb0fbdbfb39aad7757a45a168eeaf9efa8efa53bd1a9be61cc",
+    "endpoint": "https://sync-beta.lionslab.dev",
+    "issuer": "https://auth-beta.lionslab.dev/realms/lionpocket-beta",
+    "publishedHostPorts": 0,
+    "httpsEnvironmentAndDiscovery": "PASS",
+    "restart": "PASS",
+    "imageRollbackAndRedeploy": "PASS",
+    "backupRestoreIsolated": {
+      "latestVerified": "20261001T121958Z",
+      "syncEnvironmentRows": 1,
+      "commits": 60,
+      "realmRows": 2
+    },
+    "plaintextCanaryMatches": {
+      "commitEnvelopes": 0,
+      "apiLogs": 0,
+      "plannedAmountFieldInCommitEnvelopes": 0
+    },
+    "previousWorkloadsReplaced": false,
+    "acceptedFinancialCommits": 60
+  },
+  "preservation": {
+    "separateAndroidPackage": "com.lionpocketmobile.beta",
+    "separateDesktopProfile": "LionPocket Beta",
+    "desktopOriginalFinancialTablesCompared": 9,
+    "desktopOriginalFinancialRowsUnchanged": true,
+    "desktopCopyMigrationRowsUnchanged": true,
+    "desktopIntegrity": "ok",
+    "desktopForeignKeyViolations": 0,
+    "androidOriginalApkSha256Unchanged": true,
+    "androidOriginalVersionCode": 1,
+    "androidOriginalVersionName": "1.0",
+    "androidOriginalLastUpdate": "2026-09-29 21:30:08",
+    "androidOriginalDatabaseExtracted": false,
+    "androidBackupLimitation": "Only an earlier supported financial export was available; it is not a fresh snapshot of the private release SQLite. Original package/data were not changed by this task.",
+    "privateBackupsOutsideGit": true
+  },
+  "artifacts": [
+    {
+      "name": "LionPocket-Beta-0.3.9-arm64.apk",
+      "bytes": 27032353,
+      "sha256": "0363266fbbd568226e6d11e1e2a3b885275441ffd1c33c9f9eb38ab1d5c68b10"
+    },
+    {
+      "name": "LionPocket-Beta-0.3.9-linux-x64.tar.gz",
+      "bytes": 126581263,
+      "sha256": "1c36068a8c1db9f460fa7d65776c7153725369ee62a3f969d9aabe5d2f2484ac"
+    }
+  ],
+  "limits": [
+    "private beta without independent crypto audit",
+    "local SQLite/exports/backups plaintext",
+    "foreground manual transport",
+    "public metadata remains visible",
+    "development APK signing",
+    "arbitrary fusion of already published catalog identities unavailable",
+    "atomic batches over 100 operations retained/blocked",
+    "automatic migration between epochs or servers unavailable",
+    "JavaScript secret strings cannot be guaranteed erased",
+    "remote retention/purge policy pending"
+  ]
+}
