@@ -1,6 +1,6 @@
 // Explicit disposable CI mode; never selects an existing user profile.
 import { app, safeStorage } from 'electron';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -13,7 +13,7 @@ export function releaseSmokeDirectory(): string | null {
   if (!argument) return null;
   const directory = argument.slice('--release-smoke='.length);
   const child = relative(tmpdir(), directory);
-  if (!isAbsolute(directory) || child.includes(sep) || !/^lion-release-smoke-[a-zA-Z0-9_-]+$/.test(child) || resolve(directory) !== directory)
+  if (!isAbsolute(directory) || child.includes(sep) || !/^lion-release-smoke-[a-zA-Z0-9_-]+$/.test(child) || resolve(directory) !== directory || realpathSync(directory) !== directory)
     throw new Error('Disposable release smoke directory required.');
   return directory;
 }

@@ -1,5 +1,5 @@
 // Disposable synthetic databases only. No source of personal files or secrets.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +15,7 @@ import { captureDatabaseManifest } from '../sync-stage0/database-manifest.cjs';
 async function main() {
   const directory = resolve(process.argv[2] ?? '');
   if (!process.argv[2] || relative(tmpdir(), directory).includes(sep) || !/^lion-release-fixtures-/.test(relative(tmpdir(), directory))) throw new Error('Disposable fixture directory required.');
+  if (existsSync(directory) && (realpathSync(directory) !== directory || readdirSync(directory).length)) throw new Error('Fresh empty disposable fixture directory required.');
   mkdirSync(directory, { recursive: true });
   for (const version of [1, 4, 5, 8]) {
     const { db, sqlite } = sqliteTestConnection(join(directory, `v${version}.sqlite`));
