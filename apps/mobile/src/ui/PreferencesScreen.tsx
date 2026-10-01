@@ -1,3 +1,4 @@
+import { SyncPanel } from './SyncPanel';
 import React, { useRef, useState } from 'react';
 import { Modal, ScrollView, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -5,7 +6,7 @@ import { useAppearance } from './Appearance';
 import { Choice, ScreenHeader, useStyles } from './components';
 import type { LocalPreferences } from '../db/preferences';
 
-export function PreferencesScreen({ onClose }: { onClose: () => void }) {
+export function PreferencesScreen({ onClose, onChanged }: { onClose: () => void; onChanged: () => Promise<void> }) {
   const styles = useStyles(),
     { preferences, colors, update } = useAppearance();
   const [busy, setBusy] = useState(false),
@@ -80,11 +81,12 @@ export function PreferencesScreen({ onClose }: { onClose: () => void }) {
               {error}
             </Text>
           )}
+          <SyncPanel onChanged={onChanged} />
           <View style={styles.card}>
             <Text style={styles.heading}>Privacidade local</Text>
             <Text style={styles.text}>
               Suas finanças ficam no banco deste aparelho. O LionPocket funciona
-              sem internet e não envia seus dados para um servidor.
+              sem internet. Você pode optar por sincronizar dados criptografados com seu servidor.
             </Text>
             <Text style={styles.muted}>
               O banco e as cópias privadas são protegidos pelo armazenamento do

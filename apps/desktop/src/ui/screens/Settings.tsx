@@ -1,4 +1,4 @@
-import { BetaSyncPanel } from '../BetaSync';
+import { SyncPanel } from '../SyncPanel';
 import { DevelopmentSync } from '../DevelopmentSync';
 import { useState } from 'react';
 import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
@@ -87,7 +87,7 @@ export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChan
   const categoryList = (categoryKind: MoneyKind) => catalogs.categories.filter((item) => item.kind === categoryKind);
   return (
     <section className="page-section settings-grid">
-      <BetaSyncPanel onChanged={onSyncChanged} />
+      <SyncPanel onChanged={onSyncChanged} />
       <DevelopmentSync onChanged={onSyncChanged} />
       <div className="panel settings-panel">
         <header className="panel__header"><div className="settings-icon"><HardDrive size={20} /></div><div><h3>Seus dados</h3><p>Importe a planilha, faça cópias e leve seus lançamentos com você.</p></div></header>

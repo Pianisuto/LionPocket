@@ -4527,15 +4527,20 @@ button.goal-mini {
   }
 }
 
-.sync-beta-panel { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px; }
-.sync-beta-panel p { color: var(--text-soft); line-height: 1.55; margin: 0; }
-.sync-beta-panel h4 { margin: 16px 0 0; }
-.sync-beta-panel label { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
-.sync-beta-panel label:has(input[type='checkbox']) { flex-direction: row; align-items: flex-start; }
-.sync-beta-panel input:not([type='checkbox']), .sync-beta-panel textarea { width: 100%; min-height: 42px; padding: 10px 13px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-1); border-radius: var(--radius-md); font: inherit; }
-.sync-beta-panel textarea { min-height: 90px; resize: vertical; }
-.sync-beta-panel button { align-self: flex-start; min-height: 42px; padding: 10px 18px; border: 1px solid var(--line-2); border-radius: var(--radius-md); color: var(--text); background: var(--surface-3); font: inherit; cursor: pointer; }
-.sync-beta-panel button:hover { border-color: var(--primary); }
-.sync-beta-panel button:disabled { opacity: .5; cursor: default; }
-.sync-beta-panel code, .sync-beta-panel pre { overflow-wrap: anywhere; white-space: pre-wrap; }
-.sync-beta-panel [role='alert'] { color: var(--danger); }
+.sync-panel { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px; }
+.sync-panel p { color: var(--text-soft); line-height: 1.55; margin: 0; }
+.sync-panel h4 { margin: 16px 0 0; }
+.sync-panel label { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.sync-panel label:has(input[type='checkbox']) { flex-direction: row; align-items: flex-start; }
+.sync-panel input:not([type='checkbox']), .sync-panel textarea { width: 100%; min-height: 42px; padding: 10px 13px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-1); border-radius: var(--radius-md); font: inherit; }
+.sync-panel textarea { min-height: 90px; resize: vertical; }
+.sync-panel button { align-self: flex-start; min-height: 42px; padding: 10px 18px; border: 1px solid var(--line-2); border-radius: var(--radius-md); color: var(--text); background: var(--surface-3); font: inherit; cursor: pointer; }
+.sync-panel button:hover { border-color: var(--primary); }
+.sync-panel button:disabled { opacity: .5; cursor: default; }
+.sync-panel code, .sync-panel pre { overflow-wrap: anywhere; white-space: pre-wrap; }
+.sync-panel [role='alert'] { color: var(--danger); }
+
+.sync-panel details { padding: 14px; border: 1px solid var(--line-1); border-radius: var(--radius-md); }
+.sync-panel summary { cursor: pointer; font-weight: 600; }
+.sync-panel details[open] > :not(summary) { margin-top: 12px; }
+.sync-panel .button--primary { background: var(--primary); color: var(--on-primary, #fff); }

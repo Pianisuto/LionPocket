@@ -31,6 +31,8 @@ it('validates issuer, subject, audience, authorized client, Bearer type and expi
     issuer,
     subject: 'synthetic',
   });
+  for (const azp of ['lionpocket-desktop', 'lionpocket-android']) expect(await verifyAccessIdentity(await sign({ ...base, azp }), issuer, keys, [azp])).toEqual({ issuer, subject: 'synthetic' });
+  await expect(verifyAccessIdentity(await sign(base), issuer, keys, ['lionpocket-desktop', 'lionpocket-android'])).rejects.toThrow('unauthenticated');
   for (const delta of [
     { iss: 'http://wrong' },
     { aud: 'wrong' },

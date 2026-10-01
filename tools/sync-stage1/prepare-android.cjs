@@ -21,6 +21,6 @@ cpSync(join(repo,'tools/sync-dev/native-checks.cjs'),join(app,'provisioning-chec
 
 // Only the synthetic application may use loopback HTTP in debug/release.
 const manifestPath=join(app,'android/app/src/main/AndroidManifest.xml');
-writeFileSync(manifestPath,readFileSync(manifestPath,'utf8').replace('<application','<uses-permission android:name="android.permission.INTERNET" />\n    <application').replace('android:usesCleartextTraffic="${usesCleartextTraffic}"','android:networkSecurityConfig="@xml/sync_dev_network_security"'));
+writeFileSync(manifestPath,readFileSync(manifestPath,'utf8').replace(/android:networkSecurityConfig="[^"]*"\s*/g,'').replace('<application','<uses-permission android:name="android.permission.INTERNET" />\n    <application').replace('android:usesCleartextTraffic="${usesCleartextTraffic}"','android:networkSecurityConfig="@xml/sync_dev_network_security"'));
 require('node:fs').mkdirSync(join(app,'android/app/src/main/res/xml'),{recursive:true});
 writeFileSync(join(app,'android/app/src/main/res/xml/sync_dev_network_security.xml'),'<network-security-config><base-config cleartextTrafficPermitted="false"/><domain-config cleartextTrafficPermitted="true"><domain includeSubdomains="false">127.0.0.1</domain></domain-config></network-security-config>');

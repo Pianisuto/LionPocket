@@ -1,5 +1,6 @@
-/** Development control plane only: no financial tables, commits, log or cursors. */
+/** Public identities and authorization only. No financial plaintext. */
 export const controlSchema = `
+CREATE TABLE IF NOT EXISTS sync_disabled_accounts (issuer text NOT NULL, subject text NOT NULL, PRIMARY KEY(issuer, subject));
 CREATE TABLE IF NOT EXISTS sync_environment (
   singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
   server_id uuid NOT NULL, server_epoch uuid NOT NULL

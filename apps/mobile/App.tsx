@@ -1,4 +1,4 @@
-import { startBetaForeground } from './src/sync/foreground';
+import { startSyncForeground } from './src/sync/foreground';
 import { AppearanceProvider, useAppearance } from './src/ui/Appearance';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -173,7 +173,7 @@ function AppContent(): React.JSX.Element {
   }, [refresh]);
   const syncRefresh = useRef(refresh);
   syncRefresh.current = refresh;
-  useEffect(() => startBetaForeground(() => {
+  useEffect(() => startSyncForeground(() => {
     if (!mutation.current && !dataScreenOpen.current) void syncRefresh.current();
   }), []);
   const changeMonth = (next: string) => {
@@ -928,7 +928,7 @@ function AppContent(): React.JSX.Element {
         />
       )}
       {preferencesOpen && (
-        <PreferencesScreen onClose={() => setPreferencesOpen(false)} />
+        <PreferencesScreen onClose={() => setPreferencesOpen(false)} onChanged={async () => { await refresh(); }} />
       )}
       {overviewOpen && (
         <OverviewScreen

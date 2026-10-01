@@ -71,6 +71,7 @@ describe.skipIf(!enabled)(
         environment,
         origin,
         identity: keycloakIdentity(issuer),
+        financialScope: 'manual',
       });
       await new Promise<void>((resolve) =>
         server.listen(18770, '127.0.0.1', resolve),
@@ -359,6 +360,7 @@ describe.skipIf(!enabled)(
       ).rows.map((r) => r.tablename);
       expect(names.sort()).toEqual([
         'sync_deliveries',
+        'sync_disabled_accounts',
         'sync_environment',
         'sync_grants',
         'sync_http_nonces',

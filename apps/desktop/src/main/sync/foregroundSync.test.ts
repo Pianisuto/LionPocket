@@ -103,7 +103,7 @@ async function setup(path = ':memory:') {
     ...client.profile.pin,
     financialSyncEnabled: true,
     entityScopes: ['transaction'],
-    oidc: { issuer: 'https://identity.invalid' },
+    oidc: { issuer: 'https://identity.invalid', desktopClientId: 'lionpocket-desktop', androidClientId: 'lionpocket-android', desktopRedirect: 'http://127.0.0.1:18761/callback', androidRedirect: 'com.lionpocketmobile:/callback' },
   };
   const fetch = vi.fn(
     async (url: string | URL | Request, init?: RequestInit) => {
@@ -204,7 +204,7 @@ describe('financial foreground sync boundaries', () => {
     expect(s.fetch.mock.calls.every(([, init]) => !init?.body)).toBe(true);
     expect(captureDatabaseManifest(s.bank.db)).toEqual(before);
     const status = await s.beta.status();
-    expect(status.activity).toBe('action-required');
+    expect(status.activity).toBe('review');
     expect(status.compatibilityMessage).toMatch(/preservad/);
   });
   it('accepts explicit v1 discovery without changing wire or domain versions', async () => {

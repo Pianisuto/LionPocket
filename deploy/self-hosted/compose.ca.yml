@@ -1,0 +1,12 @@
+# Optional public homelab root CA. Never mount/version its private key.
+services:
+  api:
+    environment:
+      NODE_EXTRA_CA_CERTS: /opt/lionpocket/trusted-ca.pem
+    volumes:
+      - ${HOMELAB_CA_FILE:?set public root CA file}:/opt/lionpocket/trusted-ca.pem:ro
+  operator:
+    environment:
+      NODE_EXTRA_CA_CERTS: /opt/lionpocket/trusted-ca.pem
+    volumes:
+      - ${HOMELAB_CA_FILE:?set public root CA file}:/opt/lionpocket/trusted-ca.pem:ro

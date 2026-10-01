@@ -1,0 +1,27 @@
+name: Self-hosted sync (fixtures, no publication)
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: self-hosted-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  clean-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run sync:self-hosted:validate
+      - run: npm run sync:self-hosted:test
+      - run: git diff --check
+      # Existing readiness workflow owns the full suites, lint, builds and IdP tests.
+      # No registry push, release, external secrets or publication.

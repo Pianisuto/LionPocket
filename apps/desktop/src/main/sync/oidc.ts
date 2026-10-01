@@ -1,3 +1,4 @@
+import { discoverOidc } from '@lionpocket/sync-local';
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
@@ -10,26 +11,23 @@ export const devOidc = {
   },
 } as const;
 export type DevClientId = keyof typeof devOidc.clients;
-/** System-browser Authorization Code + PKCE. Tokens/verifier live only in this main-process call. */
-export async function loginDevelopmentOidc(
-  clientId: DevClientId,
+/** Shared system-browser flow. Only the legacy synthetic wrapper enables loopback HTTP. */
+async function authenticateOidc(
+  config: { issuer: string; clientId: string; redirectUri: string },
   openExternal: (url: string) => Promise<void>,
-  timeoutMs = 180000,
-  configured?: { issuer:string; clientId:string; redirectUri:string },
+  timeoutMs: number,
+  development = false,
 ) {
-  if (!Object.hasOwn(devOidc.clients, clientId))
-    throw new Error('Unsupported development client.');
-  const issuer = configured?.issuer ?? devOidc.issuer,
-    redirectUri = configured?.redirectUri ?? devOidc.clients[clientId];
-  const loginClientId = configured?.clientId ?? clientId;
-  if (new URL(redirectUri).origin !== 'http://127.0.0.1:18761' && configured) throw new Error('Invalid desktop callback.');
+  const { issuer, clientId: loginClientId, redirectUri } = config;
+  if (!development && redirectUri !== 'http://127.0.0.1:18761/callback') throw new Error('Invalid desktop callback.');
+  const discovery = await discoverOidc(issuer, development);
   const verifier = randomBytes(32).toString('base64url'),
     state = randomBytes(32).toString('base64url'),
     nonce = randomBytes(32).toString('base64url');
   const keys = createRemoteJWKSet(
-    new URL(`${issuer}/protocol/openid-connect/certs`),
+    new URL(discovery.jwksUri),
   );
-  const auth = new URL(`${issuer}/protocol/openid-connect/auth`);
+  const auth = new URL(discovery.authorizationEndpoint);
   auth.search = new URLSearchParams({
     client_id: loginClientId,
     redirect_uri: redirectUri,
@@ -85,7 +83,7 @@ export async function loginDevelopmentOidc(
     // Hook is shell.openExternal in the Electron runner; test hook drives only the synthetic IdP form.
     await openExternal(auth.toString());
     const code = await codePromise;
-    const response = await fetch(`${issuer}/protocol/openid-connect/token`, {
+    const response = await fetch(discovery.tokenEndpoint, {
       method: 'POST',
       redirect: 'error',
       signal: AbortSignal.timeout(15000),
@@ -143,4 +141,16 @@ export async function loginDevelopmentOidc(
     callback.closeAllConnections();
     await new Promise<void>((resolve) => callback.close(() => resolve()));
   }
+}
+
+/** Normal and beta use discovered public clients; no development client ID is required. */
+export function loginOidc(config: { issuer: string; clientId: string; redirectUri: string }, open: (url: string) => Promise<void>) {
+  return authenticateOidc(config, open, 180000);
+}
+/** Compatibility entry point restricted to the isolated synthetic deployment. */
+export async function loginDevelopmentOidc(
+  clientId: DevClientId, openExternal: (url: string) => Promise<void>, timeoutMs = 180000,
+) {
+  if (!Object.hasOwn(devOidc.clients, clientId)) throw new Error('Unsupported development client.');
+  return authenticateOidc({ issuer: devOidc.issuer, clientId, redirectUri: devOidc.clients[clientId] }, openExternal, timeoutMs, true);
 }

@@ -1,0 +1,5 @@
+{
+  "extends": "../release/tsconfig.json",
+  "compilerOptions": { "jsx": "react-jsx" },
+  "include": ["contract.mts", "ui-preview.tsx", "../../apps/desktop/src/global.d.ts"]
+}

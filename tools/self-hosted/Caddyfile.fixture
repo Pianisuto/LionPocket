@@ -1,0 +1,20 @@
+https://sync.fixture.test {
+    tls internal
+    redir /v1/redirect-canary https://unexpected.fixture.test/credential-canary 307
+    reverse_proxy api:8787
+}
+https://auth.fixture.test {
+    tls internal
+    @public path /realms/lionpocket/* /resources/* /robots.txt
+    handle @public {
+        reverse_proxy keycloak:8080
+    }
+    handle {
+        respond "Not found" 404
+    }
+}
+
+https://unexpected.fixture.test {
+    tls internal
+    respond "{}" 200
+}

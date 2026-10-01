@@ -119,7 +119,7 @@ android {
         buildConfigField "String", "BETA_ENDPOINT", privateBeta ? '"https://sync-beta.lionslab.dev"' : '""'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        manifestPlaceholders += [appAuthRedirectScheme: privateBeta ? 'com.lionpocketmobile.beta' : 'com.lionpocketmobile.syncdev', appDisplayName: privateBeta ? 'LionPocket Beta' : 'LionPocket']
+        manifestPlaceholders += [appAuthRedirectScheme: privateBeta ? 'com.lionpocketmobile.beta' : 'com.lionpocketmobile', appDisplayName: privateBeta ? 'LionPocket Beta' : 'LionPocket']
         versionCode releaseVersion.androidVersionCode
         versionName releaseVersion.version
     }

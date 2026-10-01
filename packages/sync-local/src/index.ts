@@ -8,8 +8,14 @@ export * from './transport';
 export * from './development';
 export * from './financial';
 export * from './financial-projection';
+export * from './sync';
 export * from './beta';
-export * from './beta-security';
+export * from './security';
 export * from './reemission';
 export * from './merge';
 export * from './coordinator';
+
+export * from './oidc-discovery';
+export { syncFetchText, setSyncTextTransport } from './network';
+
+export { revisionSummary } from "./presentation";

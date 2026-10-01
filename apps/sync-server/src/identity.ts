@@ -7,6 +7,7 @@ export async function verifyAccessIdentity(
   token: string,
   issuer: string,
   keys: JWTVerifyGetKey,
+  clients = ["lionpocket-desktop", "lionpocket-android", "lionpocket-desktop-dev", "lionpocket-android-dev"],
 ): Promise<Identity> {
   const { payload } = await jwtVerify(token, keys, {
     issuer,
@@ -16,7 +17,7 @@ export async function verifyAccessIdentity(
   });
   if (
     payload.typ !== 'Bearer' ||
-    !['lionpocket-desktop-dev', 'lionpocket-android-dev'].includes(
+    !clients.includes(
       String(payload.azp),
     ) ||
     !payload.sub
@@ -24,9 +25,9 @@ export async function verifyAccessIdentity(
     throw new Error('unauthenticated');
   return { issuer, subject: payload.sub };
 }
-export function keycloakIdentity(issuer: string) {
+export function keycloakIdentity(issuer: string, clients?: string[]) {
   const keys = createRemoteJWKSet(
     new URL(`${issuer}/protocol/openid-connect/certs`),
   );
-  return (token: string) => verifyAccessIdentity(token, issuer, keys);
+  return (token: string) => verifyAccessIdentity(token, issuer, keys, clients);
 }

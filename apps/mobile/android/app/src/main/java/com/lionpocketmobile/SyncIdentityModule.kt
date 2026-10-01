@@ -4,6 +4,9 @@ import android.util.Base64
 import com.facebook.react.bridge.*
 import com.facebook.react.ReactPackage
 import com.facebook.react.uimanager.ViewManager
+import java.net.URL
+import java.net.HttpURLConnection
+import java.util.concurrent.ConcurrentHashMap
 import java.math.BigInteger
 import java.security.KeyFactory
 import java.security.Signature
@@ -14,6 +17,56 @@ import org.json.JSONObject
 /** Public RS256 verification only. Sessions, tokens and private keys are never persisted. */
 class SyncIdentityModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
   private val executor = Executors.newSingleThreadExecutor()
+  private val network = Executors.newCachedThreadPool()
+  private val cancelled = ConcurrentHashMap.newKeySet<String>()
+  private val requests = ConcurrentHashMap<String, HttpURLConnection>()
+  @ReactMethod fun cancelFetch(id: String) { cancelled.add(id); requests.remove(id)?.disconnect() }
+  @ReactMethod fun fetchText(id: String, url: String, method: String, headers: ReadableMap, body: String?, promise: Promise) {
+    network.execute {
+      var connection: HttpURLConnection? = null
+      try {
+        require(!cancelled.contains(id))
+        val target = URL(url)
+        require(target.userInfo == null && target.ref.isNullOrEmpty())
+        val syntheticHarness = reactApplicationContext.packageName == "com.lionpocketmobile.cryptospike"
+        require(target.protocol == "https" || ((BuildConfig.DEBUG || syntheticHarness) && target.protocol == "http" && target.host == "127.0.0.1"))
+        require(method == "GET" || method == "POST")
+        connection = target.openConnection() as HttpURLConnection
+        requests[id] = connection
+        require(!cancelled.contains(id))
+        connection.instanceFollowRedirects = false
+        connection.connectTimeout = 15000; connection.readTimeout = 15000
+        connection.requestMethod = method
+        val iterator = headers.keySetIterator()
+        while (iterator.hasNextKey()) { val key = iterator.nextKey(); connection.setRequestProperty(key, headers.getString(key)) }
+        if (body != null) {
+          require(body.toByteArray(Charsets.UTF_8).size <= 4194304)
+          connection.doOutput = true
+          connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        }
+        val status = connection.responseCode
+        require(status !in 300..399) { "redirect_rejected" }
+        require(connection.contentLengthLong <= 4194304)
+        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+        val bytes = stream?.use { input ->
+          val output = java.io.ByteArrayOutputStream()
+          val buffer = ByteArray(8192)
+          var total = 0
+          while (true) {
+            val count = input.read(buffer); if (count < 0) break
+            total += count; require(total <= 4194304)
+            output.write(buffer, 0, count)
+          }
+          output.toByteArray()
+        } ?: ByteArray(0)
+        val result = Arguments.createMap()
+        result.putBoolean("ok", status in 200..299)
+        result.putString("text", String(bytes, Charsets.UTF_8))
+        promise.resolve(result)
+      } catch (_: Exception) { promise.reject("SYNC_NETWORK", "Conexão segura não concluída.") }
+      finally { requests.remove(id); cancelled.remove(id); connection?.disconnect() }
+    }
+  }
   override fun getConstants(): MutableMap<String, Any> = mutableMapOf("privateBeta" to BuildConfig.PRIVATE_BETA, "betaEndpoint" to BuildConfig.BETA_ENDPOINT)
 
   override fun getName() = "LionPocketIdentity"

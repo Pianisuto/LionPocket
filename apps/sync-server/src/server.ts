@@ -1,4 +1,4 @@
-import { betaControl, betaRecoveryRequest } from './betaControl';
+import { vaultControl, vaultRecoveryRequest } from './vaultControl';
 import { acceptCommit, changesPage, CommitRejection } from './commits';
 import { createServer, type IncomingMessage } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -97,7 +97,10 @@ const knownErrors: Record<string, number> = {
 };
 export function controlServer(options: {
   financialEnabled?: boolean;
+  /** Deprecated channel hint, ignored by the generic server. */
   privateBeta?: boolean;
+  /** Restricted historical synthetic pilot only; production always uses full. */
+  financialScope?: 'manual' | 'full';
   oidc?: { issuer: string; desktopClientId: string; androidClientId: string; desktopRedirect: string; androidRedirect: string };
   pool: Pool;
   crypto: ProvisioningCrypto;
@@ -125,12 +128,14 @@ export function controlServer(options: {
     try {
       const target = req.url ?? '',
         method = req.method ?? '';
-      if (method === 'GET' && target === '/v1/environment') {
+      if (method === 'GET' && ['/v1/environment', '/.well-known/lionpocket'].includes(target)) {
         respond(200, {
           ...environment,
           financialSyncEnabled: options.financialEnabled === true,
-          entityScopes: options.financialEnabled ? (options.privateBeta ? ['category','paymentMethod','card','recurring','installmentPurchase','transaction','goal','recurringPriorityList','monthlyPriorityList'] : ['manualTransaction']) : [],
+          entityScopes: options.financialEnabled ? (options.financialScope !== 'manual' ? ['category','paymentMethod','card','recurring','installmentPurchase','transaction','goal','recurringPriorityList','monthlyPriorityList'] : ['manualTransaction']) : [],
           ...(options.oidc ? {oidc:options.oidc} : {}),
+          audience: 'lionpocket-sync-api',
+          cryptoSuites: ['lp-sodium-v1'],
           controlVersion: 1,
           protocolVersion: 1,
           domainSchema: 1,
@@ -170,6 +175,8 @@ export function controlServer(options: {
       } catch {
         throw new Error('unauthenticated');
       }
+      if ((await pool.query('SELECT 1 FROM sync_disabled_accounts WHERE issuer=$1 AND subject=$2', [account.issuer, account.subject])).rowCount)
+        throw new Error('forbidden');
       const body = await readBody(
         req,
         match?.[2] === 'commits' ? 1048576 : 65536,
@@ -281,8 +288,8 @@ export function controlServer(options: {
         sameScope(pin, proof);
         grants = await chain(tx, vaultId);
         const registry = validateGrantChain(grants, pin, crypto);
-        if (['recovery-fetch','recover'].includes(action) && options.privateBeta) {
-          const result=await betaRecoveryRequest(tx,action,body.value,pin,grants,proof.deviceId,crypto,key=>checkProof(proof,key));
+        if (['recovery-fetch','recover'].includes(action) ) {
+          const result=await vaultRecoveryRequest(tx,action,body.value,pin,grants,proof.deviceId,crypto,key=>checkProof(proof,key));
           await tx.query('COMMIT'); respond(200,result);return;
         }
         if (action === 'pairings' && method === 'POST') {
@@ -323,11 +330,10 @@ export function controlServer(options: {
           const author = activeDevice(registry.devices, proof.deviceId);
           await checkProof(proof, author.signingPublicKey);
           if (['key-checkpoints','recovery-store'].includes(action)) {
-            if (!options.privateBeta) throw new Error('forbidden');
-            await betaControl(tx,action,body.value,pin,grants,crypto);
+            await vaultControl(tx,action,body.value,pin,grants,crypto);
           }
           if (action === 'commits' || action === 'changes') {
-            if (action==='commits' && vault.rotation_required) throw new Error('rotation_required');
+            if (action==='commits' && options.financialScope !== 'manual' && vault.rotation_required) throw new Error('rotation_required');
             const result =
               action === 'commits'
                 ? await acceptCommit(
@@ -337,7 +343,7 @@ export function controlServer(options: {
                     grants,
                     proof.deviceId,
                     crypto,
-                    options.privateBeta ? (vault.key_checkpoints.length ? vault.key_checkpoints[vault.key_checkpoints.length-1].keyVersion : 1) : 1,
+                    options.financialScope !== 'manual' ? (vault.key_checkpoints.length ? vault.key_checkpoints[vault.key_checkpoints.length-1].keyVersion : 1) : 1,
                   )
                 : await changesPage(tx, body.value, pin, proof.deviceId);
             await tx.query('COMMIT');
@@ -345,7 +351,7 @@ export function controlServer(options: {
             return;
           }
           if (action === 'pairings' || action === 'pairing-list') {
-            if (!options.privateBeta && proof.deviceId !== pin.founderDeviceId)
+            if (options.financialScope === 'manual' && proof.deviceId !== pin.founderDeviceId)
               throw new Error('forbidden');
             const requests = (
               await tx.query(
@@ -358,7 +364,7 @@ export function controlServer(options: {
             return;
           }
           if (action === 'grants') {
-            if (!options.privateBeta && proof.deviceId !== pin.founderDeviceId)
+            if (options.financialScope === 'manual' && proof.deviceId !== pin.founderDeviceId)
               throw new Error('forbidden');
             const grant = body.value;
             assertDeviceGrant(grant);
@@ -391,7 +397,7 @@ export function controlServer(options: {
               [vaultId, grant.registryVersion],
             );
             grants.push(grant);
-            if (options.privateBeta && grant.status==='revoked') await tx.query('UPDATE sync_vaults SET rotation_required=true WHERE vault_id=$1',[vaultId]);
+            if (options.financialScope !== 'manual' && grant.status==='revoked') await tx.query('UPDATE sync_vaults SET rotation_required=true WHERE vault_id=$1',[vaultId]);
           }
           if (action === 'deliveries') {
             const delivery = body.value;
@@ -416,9 +422,9 @@ export function controlServer(options: {
             [pin.vaultId, proof.deviceId],
           )
         ).rows[0]?.delivery ?? null;
-      const beta=options.privateBeta ? (await tx.query('SELECT key_checkpoints,recovery,rotation_required FROM sync_vaults WHERE vault_id=$1',[pin.vaultId])).rows[0] : null;
+      const security=options.financialScope !== 'manual' ? (await tx.query('SELECT key_checkpoints,recovery,rotation_required FROM sync_vaults WHERE vault_id=$1',[pin.vaultId])).rows[0] : null;
       await tx.query('COMMIT');
-      respond(create ? 201 : 200, { pin, grants, delivery,...(beta?{keyCheckpoints:beta.key_checkpoints,recovery:beta.recovery,rotationRequired:beta.rotation_required}:{}) });
+      respond(create ? 201 : 200, { pin, grants, delivery,...(security?{keyCheckpoints:security.key_checkpoints,recovery:security.recovery,rotationRequired:security.rotation_required}:{}) });
     } catch (error) {
       if (tx) {
         try {
