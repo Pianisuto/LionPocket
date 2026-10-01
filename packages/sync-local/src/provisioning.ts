@@ -1,3 +1,4 @@
+import type { KeyCheckpoint } from './beta-security';
 import { sha256 } from '@noble/hashes/sha256';
 import {
   activeDevice,
@@ -111,11 +112,14 @@ export interface ProvisionedProfile {
   boxPublicKey: string;
   grants: DeviceGrant[];
   checkpoint?: RegistryCheckpoint;
+  activeKeyVersion?: number;
+  keyCheckpoints?: KeyCheckpoint[];
 }
 export interface RegistryResponse {
   pin: TrustPin;
   grants: DeviceGrant[];
   delivery: VaultKeyDelivery | null;
+  keyCheckpoints?: KeyCheckpoint[];
 }
 /** Profile is public metadata only. Caller durably saves it after each successful operation. */
 export class DeviceProvisioning {
@@ -126,7 +130,7 @@ export class DeviceProvisioning {
   ) {
     assertTrustPin(profile.pin);
   }
-  scope(purpose: SecretScope['purpose']): SecretScope {
+  scope(purpose: SecretScope['purpose'], keyVersion = this.profile.activeKeyVersion ?? 1): SecretScope {
     return {
       installationId: this.profile.installationId,
       deviceId: this.profile.deviceId,
@@ -134,7 +138,7 @@ export class DeviceProvisioning {
       serverEpoch: this.profile.pin.serverEpoch,
       vaultId: this.profile.pin.vaultId,
       purpose,
-      keyVersion: 1,
+      keyVersion: purpose === 'dataKey' ? keyVersion : 1,
     };
   }
   private async secret(purpose: SecretScope['purpose']) {
@@ -236,14 +240,10 @@ export class DeviceProvisioning {
     sameScope(request, this.profile.pin);
     if (confirmedFingerprint !== request.fingerprint)
       throw new Error('fingerprint_mismatch');
-    if (this.profile.deviceId !== this.profile.pin.founderDeviceId)
-      throw new Error('founder_required');
-    if (this.profile.grants.length)
-      this.acceptRegistry({
-        pin: this.profile.pin,
-        grants: this.profile.grants,
-        delivery: null,
-      });
+    if(this.profile.deviceId!==this.profile.pin.founderDeviceId){const authority=await this.secrets.load(this.scope('authoritySeed'));if(!authority)throw new Error('founder_required');this.crypto.erase(authority);}
+    // Possession of the independently stored authority seed authorizes administration.
+    // Paired devices receive only data keys, never this seed.
+    if(this.profile.grants.length)validateGrantChain(this.profile.grants,this.profile.pin,this.crypto,this.profile.checkpoint);
     const previous = this.profile.grants[this.profile.grants.length - 1];
     const unsigned = {
       formatVersion: 1 as const,
@@ -303,7 +303,8 @@ export class DeviceProvisioning {
     );
     activeDevice(registry.devices, this.profile.deviceId);
     const recipient = activeDevice(registry.devices, recipientDeviceId);
-    const key = await this.secret('dataKey');
+    const key = await this.secrets.load(this.scope('dataKey',1));
+    if (!key) throw new Error('secret_unavailable');
     try {
       const { serverId, serverEpoch, vaultId } = this.profile.pin;
       const bundle: KeyBundle = {
@@ -387,11 +388,11 @@ export class DeviceProvisioning {
       )
         throw new Error('key_bundle_mismatch');
       const key = this.crypto.decode(bundle.vaultKey);
-      const existing = await this.secrets.load(this.scope('dataKey'));
+      const existing = await this.secrets.load(this.scope('dataKey',1));
       try {
         if (existing && this.crypto.encode(existing) !== bundle.vaultKey)
           throw new Error('key_mismatch');
-        await this.secrets.store(this.scope('dataKey'), key);
+        await this.secrets.store(this.scope('dataKey',1), key);
       } finally {
         this.crypto.erase(key);
         if (existing) this.crypto.erase(existing);

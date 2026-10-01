@@ -1,3 +1,4 @@
+import { captureConnection } from './syncWriters';
 import {
   addDays,
   addMonths,
@@ -38,7 +39,7 @@ export async function newId(db: Query): Promise<string> {
 }
 // Transactions must use the native tx handle, never the queued connection inside a callback.
 export class PlanningRepository {
-  constructor(protected db: Connection) {}
+  constructor(protected db: Connection, syncUuid?: ()=>string) { this.db=captureConnection(db,syncUuid); }
 
   protected async readCatalogs(db: Query): Promise<Catalogs> {
     const categories = await db.executeAsync<SqlRow<Catalogs['categories'][number]>>(

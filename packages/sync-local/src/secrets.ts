@@ -5,7 +5,7 @@ export interface SecretScope {
   serverId: string;
   serverEpoch: string;
   vaultId: string;
-  purpose: 'authoritySeed' | 'signingSeed' | 'boxSeed' | 'dataKey';
+  purpose: 'authoritySeed' | 'signingSeed' | 'boxSeed' | 'dataKey' | 'recoveryMaster';
   keyVersion: number;
 }
 /** Authenticated local wrapping scope; independent of the durable network envelope. */
@@ -19,7 +19,7 @@ export function secretContext(scope: SecretScope): string {
   ] as const)
     assertUuid(scope[field], '4');
   if (
-    !['authoritySeed', 'signingSeed', 'boxSeed', 'dataKey'].includes(
+    !['authoritySeed', 'signingSeed', 'boxSeed', 'dataKey', 'recoveryMaster'].includes(
       scope.purpose,
     ) ||
     !Number.isSafeInteger(scope.keyVersion) ||

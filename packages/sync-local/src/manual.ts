@@ -102,7 +102,7 @@ export function* recordManualMutation(
 ): SqlWorkflow {
   const [state] = yield query('SELECT * FROM sync_local_state WHERE id = 1');
   if (!state) throw new Error('Missing local sync state.');
-  if (state.mode === 'disabled') return;
+  if (state.mode !== 'synthetic_manual') return;
   const [identity] = yield query(
     "SELECT object_id FROM sync_identity WHERE entity_type = 'manualTransaction' AND local_id = ?",
     [row.id],

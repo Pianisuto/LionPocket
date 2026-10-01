@@ -1,3 +1,5 @@
+import { privateBeta, registerBetaSync } from './main/sync/beta';
+import { setInterval, setTimeout } from 'node:timers';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { app, autoUpdater, BrowserWindow, nativeImage } from 'electron';
@@ -7,6 +9,7 @@ import { LionPocketDatabase } from './main/database';
 import { registerIpcHandlers } from './main/ipc';
 import { desktopSyntheticDirectory, registerDevelopmentSync } from './main/sync/development';
 const syntheticDirectory = desktopSyntheticDirectory();
+if (privateBeta) app.setPath('userData', path.join(app.getPath('appData'), 'LionPocket Beta'));
 if (syntheticDirectory) app.setPath('userData', path.join(syntheticDirectory, 'electron-app'));
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -71,7 +74,7 @@ const isSquirrelInstall = () => {
 };
 
 const configureAutoUpdates = () => {
-  if (!isSquirrelInstall() || process.argv.includes('--squirrel-firstrun')) return;
+  if (privateBeta || !isSquirrelInstall() || process.argv.includes('--squirrel-firstrun')) return;
 
   const feedUrl = `https://update.electronjs.org/Pianisuto/LionPocket/${process.platform}-${process.arch}/${app.getVersion()}`;
   autoUpdater.setFeedURL({ url: feedUrl });
@@ -92,10 +95,10 @@ const configureAutoUpdates = () => {
 
   // O Squirrel mantém um lock logo após a primeira instalação. A pequena espera
   // também evita competir com a inicialização do banco e da janela principal.
-  const initialCheck = setTimeout(checkForUpdates, 15_000);
+  const initialCheck = setTimeout(checkForUpdates, 15_000) as unknown as NodeJS.Timeout;
   initialCheck.unref();
 
-  const periodicCheck = setInterval(checkForUpdates, 60 * 60 * 1000);
+  const periodicCheck = setInterval(checkForUpdates, 60 * 60 * 1000) as unknown as NodeJS.Timeout;
   periodicCheck.unref();
 };
 
@@ -192,6 +195,7 @@ app.whenReady().then(async () => {
   database = new LionPocketDatabase(databasePath);
   registerIpcHandlers(database);
   await registerDevelopmentSync(database, syntheticDirectory);
+  await registerBetaSync(database);
   createWindow();
   configureAutoUpdates();
 });

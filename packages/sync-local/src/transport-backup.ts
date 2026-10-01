@@ -4,14 +4,14 @@ import {
   assertCommitReceipt,
   sameScope,
   assertDecimal64,
-  assertManualTransactionRevision,
+  assertManualTransactionRevision, assertFinancialRevision, assertSupportedRevision,
   assertTrustPin,
   assertUuid,
   canonicalStringify,
   type CommitEnvelope,
 } from '@lionpocket/sync-protocol';
 import { envelopeDigest } from './digest';
-import { syncColumns, syncTables } from './schema';
+import { transportColumns, transportTables, syncColumns, syncTables } from './schema';
 import type { SqlRow } from './manual';
 import { compareDecimal } from './transport-state';
 const json = (text: unknown): unknown => {
@@ -22,11 +22,13 @@ const json = (text: unknown): unknown => {
   return value;
 };
 export function validateTransportBackup(data: Record<string, SqlRow[]>): void {
-  for (const table of syncTables) {
+  const financial=!!data.sync_control;
+  const tables=financial ? syncTables : transportTables, columns=financial ? syncColumns : transportColumns;
+  for (const table of tables) {
     if (!Array.isArray(data[table]))
       throw new Error(`Missing sync table: ${table}`);
     for (const row of data[table]) {
-      const keys = syncColumns[table];
+      const keys = columns[table];
       if (
         Object.keys(row).length !== keys.length ||
         keys.some((k) => !Object.hasOwn(row, k)) ||
@@ -41,7 +43,7 @@ export function validateTransportBackup(data: Record<string, SqlRow[]>): void {
   if (states.length !== 1 || states[0].id !== 1)
     throw new Error('Invalid local sync state.');
   const state = states[0];
-  if (!['disabled', 'synthetic_manual'].includes(String(state.mode)))
+  if (!['disabled', 'synthetic_manual', 'financial'].includes(String(state.mode)))
     throw new Error('Invalid local sync mode.');
   if (state.local_scope_id !== null) assertUuid(state.local_scope_id, '4');
   if (state.mode === 'synthetic_manual' && !state.local_scope_id)
@@ -125,17 +127,17 @@ export function validateTransportBackup(data: Record<string, SqlRow[]>): void {
   const identities = new Map<string, SqlRow>(),
     localIds = new Set<string>();
   for (const r of data.sync_identity) {
-    assertUuid(r.object_id, '4');
+    assertUuid(r.object_id);
     if (
-      r.entity_type !== 'manualTransaction' ||
+      !['manualTransaction','transaction','category','paymentMethod','card','recurring','installmentPurchase','goal','recurringPriorityList','monthlyPriorityList'].includes(String(r.entity_type)) ||
       typeof r.local_id !== 'string' ||
       !r.local_id ||
       identities.has(String(r.object_id)) ||
-      localIds.has(r.local_id)
+      localIds.has(`${r.entity_type}:${r.local_id}`)
     )
       throw new Error('Invalid sync identity.');
     identities.set(String(r.object_id), r);
-    localIds.add(r.local_id);
+    localIds.add(`${r.entity_type}:${r.local_id}`);
   }
   const revisions = new Map<string, SqlRow>(),
     parents = new Map<string, string[]>(),
@@ -152,7 +154,7 @@ export function validateTransportBackup(data: Record<string, SqlRow[]>): void {
     )
       throw new Error('Invalid revision identity.');
     const payload = json(r.payload_json);
-    assertManualTransactionRevision(payload);
+    assertSupportedRevision(payload, financial);
     if (payload.action !== r.action || payload.authoredAt !== r.authored_at)
       throw new Error('Revision metadata mismatch.');
     const ids = json(r.parents_json);
@@ -266,7 +268,7 @@ export function validateTransportBackup(data: Record<string, SqlRow[]>): void {
       pending.commitId !== r.commit_id ||
       pending.localSeq !== r.local_seq ||
       !Array.isArray(pending.operations) ||
-      pending.operations.length !== 1
+      pending.operations.length < 1 || pending.operations.length > 100
     )
       throw new Error('Outbox/revision mismatch.');
     for (const op of pending.operations) {
@@ -274,7 +276,7 @@ export function validateTransportBackup(data: Record<string, SqlRow[]>): void {
       if (
         !rev ||
         rev.commit_id !== r.commit_id ||
-        rev.local_seq !== r.local_seq ||
+        compareDecimal(String(rev.local_seq),String(r.local_seq))>0 ||
         rev.object_id !== op.objectId ||
         rev.parents_json !== canonicalStringify(op.parents) ||
         rev.payload_json !== canonicalStringify(op.revision)
@@ -320,7 +322,7 @@ export function validateTransportBackup(data: Record<string, SqlRow[]>): void {
         throw new Error('Envelope/revision mismatch.');
       if (pending.operations.some((o) => !origins.has(o.opId)))
         throw new Error('Missing prepared origin.');
-    } else if (!['pending', 'retry'].includes(String(r.state)))
+    } else if (!['pending', 'retry'].includes(String(r.state)) && !(r.state==='blocked'&&['key_rotated','batch_too_large','rotation_resolution_review'].includes(String(r.last_error))))
       throw new Error('Missing prepared envelope.');
     if (r.receipt_json !== null) {
       const receipt = json(r.receipt_json);

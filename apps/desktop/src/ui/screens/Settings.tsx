@@ -1,3 +1,4 @@
+import { BetaSyncPanel } from '../BetaSync';
 import { DevelopmentSync } from '../DevelopmentSync';
 import { useState } from 'react';
 import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
@@ -86,6 +87,7 @@ export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChan
   const categoryList = (categoryKind: MoneyKind) => catalogs.categories.filter((item) => item.kind === categoryKind);
   return (
     <section className="page-section settings-grid">
+      <BetaSyncPanel onChanged={onSyncChanged} />
       <DevelopmentSync onChanged={onSyncChanged} />
       <div className="panel settings-panel">
         <header className="panel__header"><div className="settings-icon"><HardDrive size={20} /></div><div><h3>Seus dados</h3><p>Importe a planilha, faça cópias e leve seus lançamentos com você.</p></div></header>
@@ -98,8 +100,8 @@ export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChan
       </div>
 
       <div className="panel settings-panel">
-        <header className="panel__header"><div className="settings-icon settings-icon--safe"><ShieldCheck size={20} /></div><div><h3>Privacidade local</h3><p>Nesta versão, nada sai do seu computador.</p></div></header>
-        <div className="privacy-card"><ShieldCheck size={26} /><div><strong>Banco local protegido pelo sistema</strong><p>O LionPocket não envia dados para a internet. Para proteção contra acesso físico ao computador, mantenha a criptografia de disco do Linux ou Windows ativada.</p></div></div>
+        <header className="panel__header"><div className="settings-icon settings-icon--safe"><ShieldCheck size={20} /></div><div><h3>Privacidade local</h3><p>Você escolhe quando conectar a sincronização.</p></div></header>
+        <div className="privacy-card"><ShieldCheck size={26} /><div><strong>Banco local protegido pelo sistema</strong><p>O uso local funciona sem conta. Na beta, a sincronização opcional envia conteúdo financeiro cifrado. Banco e backups locais permanecem em claro. Para proteção contra acesso físico ao computador, mantenha a criptografia de disco do Linux ou Windows ativada.</p></div></div>
       </div>
 
       <div className="panel settings-panel settings-panel--wide">

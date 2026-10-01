@@ -1,4 +1,4 @@
-import { syncMigration, transportMigration } from '@lionpocket/sync-local';
+import { syncMigration, transportMigration, financialMigration, financialTriggers, financialTableTypes } from '@lionpocket/sync-local';
 import type { NitroSQLiteConnection } from 'react-native-nitro-sqlite';
 import { seedNewCatalogs } from './catalogDefaults';
 
@@ -147,6 +147,7 @@ export const migrations: ReadonlyArray<ReadonlyArray<string>> = [
   parityMigration,
   syncMigration,
   transportMigration,
+  financialMigration,
 ];
 
 export async function migrate(
@@ -183,6 +184,11 @@ export async function migrate(
         throw new Error(
           'A atualização não pôde preservar as referências do banco.',
         );
+      if (index === 7) {
+        const columns: Record<string, string[]> = {};
+        for (const table of Object.keys(financialTableTypes)) columns[table] = (await tx.executeAsync<{ name: string }>(`PRAGMA table_info(${table})`)).rows._array.map(r => r.name);
+        for (const statement of financialTriggers('android', columns)) await tx.executeAsync(statement);
+      }
       await tx.executeAsync(`PRAGMA user_version = ${index + 1}`);
     });
   }

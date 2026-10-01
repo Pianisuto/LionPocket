@@ -11,8 +11,8 @@ import type { ImportedTransaction } from './local-files';
 import type { XlsxCellValue, XlsxWorksheet, XlsxWorkbook } from './xlsx';
 export class SpreadsheetPlan {
   catalogs: CatalogInput[] = [];
-  recurring: RecurringExpenseInput[] = [];
-  goals: GoalInput[] = [];
+  recurring: (RecurringExpenseInput & { importSourceKey?: string })[] = [];
+  goals: (GoalInput & { importSourceKey?: string })[] = [];
   transactions: ImportedTransaction[] = [];
   private catalog(
     type: CatalogInput['type'],
@@ -22,10 +22,22 @@ export class SpreadsheetPlan {
   ) {
     const id = `${type}:${kind ?? ''}:${name}`;
     if (!this.catalogs.some((c) => c.id === id))
-      this.catalogs.push({ id, type, name, kind, color, dueDay: 10, closingDay: null });
+      this.catalogs.push({
+        id,
+        type,
+        name,
+        kind,
+        color,
+        dueDay: 10,
+        closingDay: null,
+      });
     return id;
   }
-  findOrCreateCategory(name: string, kind: 'income' | 'expense', color?: string) {
+  findOrCreateCategory(
+    name: string,
+    kind: 'income' | 'expense',
+    color?: string,
+  ) {
     return this.catalog('category', name, kind, color);
   }
   findOrCreatePaymentMethod(name: string) {
@@ -40,10 +52,12 @@ export class SpreadsheetPlan {
   listGoals(): GoalInput[] {
     return [];
   }
-  saveRecurringExpense(input: RecurringExpenseInput) {
+  saveRecurringExpense(
+    input: RecurringExpenseInput & { importSourceKey?: string },
+  ) {
     this.recurring.push(input);
   }
-  saveGoal(input: GoalInput) {
+  saveGoal(input: GoalInput & { importSourceKey?: string }) {
     this.goals.push(input);
   }
   insertImportedTransaction(
@@ -93,6 +107,13 @@ const number = (sheet: XlsxWorksheet, row: number, column: number): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const nullableNumber = (
+  sheet: XlsxWorksheet,
+  row: number,
+  column: number,
+): number | null =>
+  text(sheet, row, column) === '' ? null : number(sheet, row, column);
+
 const isoDate = (
   sheet: XlsxWorksheet,
   row: number,
@@ -113,7 +134,10 @@ const isoDate = (
   return fallback;
 };
 
-const transactionStatus = (value: string, kind: 'income' | 'expense'): TransactionStatus => {
+const transactionStatus = (
+  value: string,
+  kind: 'income' | 'expense',
+): TransactionStatus => {
   const normalized = value.toLocaleLowerCase('pt-BR');
   if (normalized === 'pago') return 'paid';
   if (normalized === 'recebido') return 'received';
@@ -159,49 +183,58 @@ export const planFinancialSpreadsheet = (
 
   const fixed = workbook.getWorksheet('Fixas');
   if (fixed) {
-    const existing = database.listRecurringExpenses();
-    const existingNames = new Set(
-      existing.map((item) => `${item.kind}:${item.description.trim().toLocaleLowerCase('pt-BR')}`),
-    );
     for (let row = 3; row <= 32; row += 1) {
       const description = text(fixed, row, 2);
       if (!description) continue;
-      const dueDay = Math.max(1, Math.min(31, Math.round(number(fixed, row, 6) || 1)));
-      const recurringKey = `expense:${description.trim().toLocaleLowerCase('pt-BR')}`;
-      if (existingNames.has(recurringKey)) continue;
+      const dueDay = Math.max(
+        1,
+        Math.min(31, Math.round(number(fixed, row, 6) || 1)),
+      );
+
       const categoryName = text(fixed, row, 3);
       const methodName = text(fixed, row, 4);
       database.saveRecurringExpense({
+        importSourceKey: sourceKey(filePath, 'Fixas', row),
         kind: 'expense',
         active: text(fixed, row, 1).toLocaleLowerCase('pt-BR') !== 'não',
         description,
         startMonth: currentMonth,
-        categoryId: categoryName ? database.findOrCreateCategory(categoryName, 'expense') : null,
-        paymentMethodId: methodName ? database.findOrCreatePaymentMethod(methodName) : null,
+        categoryId: categoryName
+          ? database.findOrCreateCategory(categoryName, 'expense')
+          : null,
+        paymentMethodId: methodName
+          ? database.findOrCreatePaymentMethod(methodName)
+          : null,
         plannedAmount: number(fixed, row, 5),
         dueDay,
         notes: text(fixed, row, 7),
       });
-      existingNames.add(recurringKey);
     }
   }
 
   const goals = workbook.getWorksheet('Objetivos');
   if (goals) {
-    const existing = database.listGoals();
     for (let row = 3; row <= 200; row += 1) {
       const name = text(goals, row, 1);
-      if (!name || existing.some((goal) => goal.name === name)) continue;
+      if (!name) continue;
       const categoryName = text(goals, row, 4);
       const priorityText = text(goals, row, 9).toLocaleLowerCase('pt-BR');
       database.saveGoal({
+        importSourceKey: sourceKey(filePath, 'Objetivos', row),
         name,
         itemModel: text(goals, row, 2),
         link: text(goals, row, 3),
-        categoryId: categoryName ? database.findOrCreateCategory(categoryName, 'expense') : null,
+        categoryId: categoryName
+          ? database.findOrCreateCategory(categoryName, 'expense')
+          : null,
         targetAmount: number(goals, row, 5),
         savedAmount: number(goals, row, 6),
-        priority: priorityText === 'alta' ? 'high' : priorityText === 'baixa' ? 'low' : 'medium',
+        priority:
+          priorityText === 'alta'
+            ? 'high'
+            : priorityText === 'baixa'
+              ? 'low'
+              : 'medium',
         dueDate: isoDate(goals, row, 10),
         status: goalStatus(text(goals, row, 11)),
         notes: text(goals, row, 13),
@@ -227,11 +260,16 @@ export const planFinancialSpreadsheet = (
         {
           kind: 'income',
           description,
-          categoryId: database.findOrCreateCategory(categoryName, 'income', '#3B9970'),
+          categoryId: database.findOrCreateCategory(
+            categoryName,
+            'income',
+            '#3B9970',
+          ),
           plannedAmount: number(sheet, row, 4),
-          actualAmount: number(sheet, row, 5) || null,
+          actualAmount: nullableNumber(sheet, row, 5),
           dueDate: isoDate(sheet, row, 1, fallbackDate) ?? fallbackDate,
-          settledDate: status === 'received' ? isoDate(sheet, row, 1, fallbackDate) : null,
+          settledDate:
+            status === 'received' ? isoDate(sheet, row, 1, fallbackDate) : null,
           status,
           notes: text(sheet, row, 7),
         },
@@ -242,24 +280,30 @@ export const planFinancialSpreadsheet = (
     for (let row = 32; row <= 61; row += 1) {
       const description = text(sheet, row, 3);
       const plannedAmount = number(sheet, row, 6);
-      const actualAmount = number(sheet, row, 7);
       const status = transactionStatus(text(sheet, row, 8), 'expense');
-      if (!description || (plannedAmount === 0 && actualAmount === 0 && status === 'planned'))
-        continue;
+      if (!description) continue;
       const categoryName = text(sheet, row, 4) || 'Outros';
       const methodName = text(sheet, row, 5);
-      const dueDay = Math.max(1, Math.min(31, Math.round(number(sheet, row, 2) || 1)));
+      const dueDay = Math.max(
+        1,
+        Math.min(31, Math.round(number(sheet, row, 2) || 1)),
+      );
       database.insertImportedTransaction(
         {
           kind: 'expense',
           description,
           categoryId: database.findOrCreateCategory(categoryName, 'expense'),
           plannedAmount,
-          actualAmount: actualAmount || null,
+          actualAmount: nullableNumber(sheet, row, 7),
           dueDate: `${month}-${String(dueDay).padStart(2, '0')}`,
-          settledDate: status === 'paid' ? `${month}-${String(dueDay).padStart(2, '0')}` : null,
+          settledDate:
+            status === 'paid'
+              ? `${month}-${String(dueDay).padStart(2, '0')}`
+              : null,
           status,
-          paymentMethodId: methodName ? database.findOrCreatePaymentMethod(methodName) : null,
+          paymentMethodId: methodName
+            ? database.findOrCreatePaymentMethod(methodName)
+            : null,
           notes: text(sheet, row, 9),
         },
         sourceKey(filePath, sheetName, row),
@@ -309,7 +353,9 @@ export const planFinancialSpreadsheet = (
           dueDate,
           settledDate: status === 'paid' ? dueDate : null,
           status,
-          paymentMethodId: methodName ? database.findOrCreatePaymentMethod(methodName) : null,
+          paymentMethodId: methodName
+            ? database.findOrCreatePaymentMethod(methodName)
+            : null,
           notes: text(sheet, row, 7),
         },
         sourceKey(filePath, sheetName, row),

@@ -1,8 +1,10 @@
+import { acceptKeyCheckpoints } from './beta-security';
+import { reissueForKeyVersion } from './reemission';
 import {
   activeDevice,
   assertCommitReceipt,
   assertDecimal64,
-  assertManualTransactionRevision,
+  assertManualTransactionRevision, assertFinancialRevision, assertSupportedRevision,
   assertUuid,
   canonicalStringify,
   commitSigningInput,
@@ -37,6 +39,7 @@ import {
   type ProjectionDialect,
   type DecodedOperation,
 } from './transport-state';
+import { captureFinancial } from './financial';
 import { incrementDecimal64, type SqlWorkflow } from './manual';
 
 export interface TransportSodium extends ProvisioningSodium {
@@ -170,7 +173,7 @@ export class ManualSync {
       'SELECT * FROM sync_local_state WHERE id=1',
     );
     if (
-      state.mode !== 'synthetic_manual' ||
+      !['synthetic_manual','financial'].includes(String(state.mode)) ||
       !state.binding_id ||
       state.device_id !== this.device.profile.deviceId
     )
@@ -249,7 +252,7 @@ export class ManualSync {
         deviceId: this.device.profile.deviceId,
         deviceSeq: incrementDecimal64(String(state.device_seq)),
         commitId,
-        keyVersion: this.device.profile.pin.keyVersion,
+        keyVersion: this.device.profile.activeKeyVersion ?? this.device.profile.pin.keyVersion,
         deviceRegistryVersion: registry.checkpoint.version,
         cryptoSuite: 'lp-sodium-v1',
         operations: pending.operations.map((op) => ({
@@ -262,7 +265,7 @@ export class ManualSync {
         })),
       };
       for (let i = 0; i < unsigned.operations.length; i++) {
-        assertManualTransactionRevision(pending.operations[i].revision);
+        assertSupportedRevision(pending.operations[i].revision, state.mode === 'financial');
         const bytes = encodeUtf8(
           canonicalStringify(pending.operations[i].revision),
         );
@@ -417,6 +420,15 @@ export class ManualSync {
       throw new Error('cursor_mismatch');
     return p as unknown as ChangesPage;
   }
+  async inspectInbox(commitId:string):Promise<DecodedOperation[]> {
+    const [row]=await this.db.read('SELECT * FROM sync_inbox WHERE commit_id=?',[commitId]);if(!row)throw new Error('inbox_missing');
+    const envelope=decodeCommit(encodeUtf8(String(row.envelope_json)));sameScope(envelope,this.device.profile.pin);
+    const accepted=String(row.accepted_registry_version),history=this.device.profile.grants.filter(g=>compareDecimal(g.registryVersion,accepted)<=0),registry=validateGrantChain(history,this.device.profile.pin,this.device.crypto);
+    if(registry.checkpoint.version!==accepted)throw new Error('registry_order');const author=activeDevice(registry.devices,envelope.deviceId),{signature,...unsigned}=envelope;
+    if(!this.device.crypto.verify(signature,commitSigningInput(unsigned),author.signingPublicKey))throw new Error('invalid_signature');
+    const key=await this.device.secrets.load(this.device.scope('dataKey',envelope.keyVersion));if(!key)throw new Error('secret_unavailable');
+    try{return envelope.operations.map((op,index)=>{const bytes=this.sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null,this.device.crypto.decode(op.ciphertext),operationAssociatedData(unsigned,index),this.device.crypto.decode(op.nonce),key);if(!bytes)throw new Error('invalid_ciphertext');try{const revision=decodeCanonical(bytes,transportLimits.commitBytes);assertFinancialRevision(revision);return{...op,revision};}finally{this.device.crypto.erase(bytes);}});}finally{this.device.crypto.erase(key);}
+  }
   async applyInbox(): Promise<void> {
     const state = await this.state();
     void state;
@@ -428,7 +440,7 @@ export class ManualSync {
       try {
         const envelope = decodeCommit(encodeUtf8(String(row.envelope_json)));
         sameScope(envelope, this.device.profile.pin);
-        if (envelope.keyVersion !== this.device.profile.pin.keyVersion)
+        if (envelope.keyVersion > (this.device.profile.activeKeyVersion ?? this.device.profile.pin.keyVersion))
           throw new Error('key_version_mismatch');
         const accepted = String(row.accepted_registry_version);
         assertDecimal64(accepted, true);
@@ -466,7 +478,7 @@ export class ManualSync {
           this.device.crypto,
         );
         activeDevice(authored.devices, envelope.deviceId);
-        key = await this.device.secrets.load(this.device.scope('dataKey'));
+        key = await this.device.secrets.load(this.device.scope('dataKey',envelope.keyVersion));
         if (!key) throw new Error('secret_unavailable');
         const operations: DecodedOperation[] = envelope.operations.map(
           (op, i) => {
@@ -484,7 +496,7 @@ export class ManualSync {
                 bytes,
                 transportLimits.commitBytes,
               );
-              assertManualTransactionRevision(revision);
+              assertSupportedRevision(revision, state.mode === 'financial');
               return { ...op, revision };
             } finally {
               this.device.crypto.erase(bytes);
@@ -514,20 +526,62 @@ export class ManualSync {
     }
     await this.db.run(appliedCursor());
   }
+  private async pull(token:string):Promise<void>{
+    let more = true;
+    while (more) {
+      const state = await this.state();
+      const { serverId, serverEpoch, vaultId } = this.device.profile.pin;
+      const value = await this.request(
+        'changes',
+        {
+        formatVersion: 1,
+        bindingId: state.binding_id,
+        serverId,
+        serverEpoch,
+        vaultId,
+        cursor: state.received_cursor,
+        upperBound: state.pull_upper_bound,
+        limit: 50,
+        },
+        token,
+      );
+      const page = this.page(value, state);
+      await this.db.run(
+        receivePage(
+        String(state.binding_id),
+        String(state.received_cursor),
+        page.upperBound,
+        page.nextCursor,
+        page.commits,
+        page.hasMore,
+        ),
+      );
+      more = page.hasMore;
+    }
+    await this.applyInbox();
+  }
   /** Manual only. Caller obtains a fresh OIDC session; no background timer or token storage. */
   async sync(token: string): Promise<void> {
     if (this.running) throw new Error('sync_in_progress');
     this.running = true;
     try {
-      await this.state();
+      const localState = await this.state();
+      if (localState.mode === 'financial') {
+        const [control] = await this.db.read('SELECT * FROM sync_control WHERE id=1');
+        if (control.paused) throw new Error('sync_paused');
+        await this.db.run(captureFinancial(() => this.device.crypto.uuid()));
+      }
       const response = (await this.request(
         'registry',
         {},
         token,
       )) as RegistryResponse;
       this.device.acceptRegistry(response);
+      if (localState.mode==='financial') await acceptKeyCheckpoints(this.device,response);
       await this.db.run(updateRegistry(this.device.profile));
-      const rows = await this.db.read(
+      if (localState.mode==='financial') { await this.pull(token);await this.db.run(reissueForKeyVersion(this.device.profile.activeKeyVersion??1,()=>this.device.crypto.uuid())); }
+      const bootstrap = localState.mode === 'financial' ? (await this.db.read('SELECT state FROM sync_bootstrap WHERE id=1'))[0] : null;
+      const rows = bootstrap?.state === 'joining_review' ? [] : await this.db.read(
         "SELECT commit_id FROM sync_outbox WHERE state!='acknowledged' AND state!='blocked' ORDER BY length(local_seq),local_seq",
       );
       let sendError: unknown;
@@ -563,38 +617,7 @@ export class ManualSync {
           break;
         }
       }
-      let more = true;
-      while (more) {
-        const state = await this.state();
-        const { serverId, serverEpoch, vaultId } = this.device.profile.pin;
-        const value = await this.request(
-          'changes',
-          {
-            formatVersion: 1,
-            bindingId: state.binding_id,
-            serverId,
-            serverEpoch,
-            vaultId,
-            cursor: state.received_cursor,
-            upperBound: state.pull_upper_bound,
-            limit: 50,
-          },
-          token,
-        );
-        const page = this.page(value, state);
-        await this.db.run(
-          receivePage(
-            String(state.binding_id),
-            String(state.received_cursor),
-            page.upperBound,
-            page.nextCursor,
-            page.commits,
-            page.hasMore,
-          ),
-        );
-        more = page.hasMore;
-      }
-      await this.applyInbox();
+      await this.pull(token);
       if (sendError) throw sendError;
     } finally {
       this.running = false;

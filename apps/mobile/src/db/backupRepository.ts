@@ -1,4 +1,4 @@
-import { syncTables, syncColumns, foundationColumns, foundationTables, transportMigration, validateSyncBackup, disableRestoredSync } from '@lionpocket/sync-local';
+import { syncTables, syncColumns, foundationColumns, foundationTables, transportMigration, transportColumns, transportTables, financialTriggers, financialTableTypes, validateSyncBackup, disableRestoredSync } from '@lionpocket/sync-local';
 import {
   isValidDate,
   validateMonth,
@@ -135,7 +135,7 @@ export function tablesForVersion(version: number): string[] {
     );
   return backupTables.filter(
     (t) =>
-      (!syncTables.includes(t) || (foundationTables.includes(t) ? version >= 6 : version >= 7)) &&
+      (!syncTables.includes(t) || (foundationTables.includes(t) ? version >= 6 : transportTables.includes(t) ? version >= 7 : version >= 8)) &&
       (t !== 'local_preferences' || version >= 5) &&
       (version === 1
         ? t === 'transactions'
@@ -153,6 +153,7 @@ export function tablesForVersion(version: number): string[] {
   );
 }
 function columnsForVersion(table: string, version: number) {
+  if (version === 7 && transportTables.includes(table)) return transportColumns[table];
   if (version === 6 && foundationTables.includes(table)) return foundationColumns[table];
   if (table === 'transactions')
     return version === 1
@@ -167,13 +168,16 @@ export async function verifyDatabase(
   version: number,
 ): Promise<void> {
   const tables = tablesForVersion(version);
+  const triggerColumns: Record<string,string[]> = {};
+  if (version>=8) for (const table of Object.keys(financialTableTypes)) triggerColumns[table]=columns[table];
+  const allowedTriggers=[transportMigration[transportMigration.length-1],...(version>=8 ? financialTriggers('android',triggerColumns) : [])];
   const objects = (
     await db.executeAsync<{ name: string; type: string; sql: string }>(
       "SELECT name, type, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND type != 'index'",
     )
   ).rows._array;
   if (
-    objects.some((o) => o.type === 'trigger' ? version < 7 || o.sql !== transportMigration[transportMigration.length - 1] : o.type !== 'table' || !tables.includes(o.name)) ||
+    objects.some((o) => o.type === 'trigger' ? version < 7 || !allowedTriggers.includes(o.sql) : o.type !== 'table' || !tables.includes(o.name)) ||
     tables.some((t) => !objects.some((o) => o.name === t))
   )
     throw new Error(
@@ -192,7 +196,7 @@ export async function verifyDatabase(
   }
   if (version >= 6) {
     const data: BackupData = {};
-    for (const table of (version >= 7 ? syncTables : foundationTables)) data[table] = (await db.executeAsync<BackupRow>(`SELECT * FROM ${table}`)).rows._array;
+    for (const table of (version >= 8 ? syncTables : version >= 7 ? transportTables : foundationTables)) data[table] = (await db.executeAsync<BackupRow>(`SELECT * FROM ${table}`)).rows._array;
     validateSyncBackup(data, version);
   }
   const check = (await db.executeAsync<BackupRow>('PRAGMA integrity_check'))
@@ -282,6 +286,7 @@ export async function loadBackupData(
   validateRows(data, version);
   for (const migration of migrations.slice(0, version))
     for (const sql of migration) await db.executeAsync(sql);
+  if (version>=8) for (const statement of financialTriggers('android',columns)) await db.executeAsync(statement);
   await db.executeAsync(`PRAGMA user_version = ${version}`);
   await db.transaction((tx) => replaceRows(tx, data, version));
   await verifyDatabase(db, version);

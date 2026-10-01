@@ -15,6 +15,7 @@ export interface DevelopmentSyncStatus {
   applied: string;
   pending: number;
   quarantined: number;
+  reemitted: number;
   conflicts: ConflictReview[];
 }
 /** UI actions receive public IDs/heads only; the engine and cofre stay outside renderer state. */
@@ -25,12 +26,19 @@ export class DevelopmentSyncActions {
       'SELECT * FROM sync_local_state WHERE id=1',
     );
     return {
-      enabled: s.mode === 'synthetic_manual' && s.binding_id !== null,
+      enabled:
+        ['synthetic_manual', 'financial'].includes(String(s.mode)) &&
+        s.binding_id !== null,
       received: String(s.received_cursor),
       applied: String(s.applied_cursor),
       pending: (
         await this.engine.db.read(
-          "SELECT commit_id FROM sync_outbox WHERE state!='acknowledged'",
+          "SELECT commit_id FROM sync_outbox WHERE state!='acknowledged' AND COALESCE(last_error,'') NOT IN ('key_rotated','remote_accepted_before_rotation')",
+        )
+      ).length,
+      reemitted: (
+        await this.engine.db.read(
+          "SELECT commit_id FROM sync_outbox WHERE state='blocked' AND last_error IN ('key_rotated','remote_accepted_before_rotation')",
         )
       ).length,
       quarantined: (

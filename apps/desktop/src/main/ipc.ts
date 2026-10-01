@@ -145,6 +145,7 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
       filters: [{ name: 'Planilha do Excel', extensions: ['xlsx'] }],
     });
     if (selection.canceled || !selection.filePaths[0]) return null;
+    const review=await dialog.showMessageBox({type:'question',buttons:['Cancelar','Confirmar associações e importar'],defaultId:0,cancelId:0,message:'Revise a importação',detail:'Categorias, cartões e formas de pagamento de mesmo nome serão associados aos cadastros locais. Recorrências e objetivos de nomes iguais serão registros distintos. Somente a proveniência do mesmo arquivo e linha identifica repetição. Confirme estas associações após conferir a planilha.'});if(review.response!==1)return null;
     return importFinancialSpreadsheet(database, selection.filePaths[0]);
   });
 

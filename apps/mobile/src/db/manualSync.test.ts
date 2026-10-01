@@ -4,7 +4,7 @@ import { mergedDesktopBackup } from './importRepository';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { sqliteTestConnection } from './sqliteTestConnection';
-import { migrate } from './migrations';
+import { migrate, migrations } from './migrations';
 import { MobileRepository } from './repository';
 import {
   captureBackup,
@@ -63,7 +63,7 @@ describe('manualTransaction synthetic Android adapter', () => {
       original.schemaVersion,
     );
     expect(backup.data).toEqual(original.data);
-    await verifyDatabase(stage.db, 7);
+    await verifyDatabase(stage.db, migrations.length);
     const target = await empty();
     await restoreBackup(target.db, backup, async () => {});
     const restored = await captureBackup(target.db);

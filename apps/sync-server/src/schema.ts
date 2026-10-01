@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS sync_vaults (
   vault_id uuid PRIMARY KEY, owner_issuer text NOT NULL, owner_subject text NOT NULL,
   pin jsonb NOT NULL, registry_version bigint NOT NULL DEFAULT 1
 );
+ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS key_checkpoints jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS recovery jsonb;
+ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS rotation_required boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS sync_grants (
   vault_id uuid NOT NULL REFERENCES sync_vaults(vault_id), registry_version bigint NOT NULL,
   grant_envelope jsonb NOT NULL, PRIMARY KEY(vault_id, registry_version)

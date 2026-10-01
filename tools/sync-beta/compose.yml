@@ -1,0 +1,60 @@
+name: lionpocket-beta
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lionbeta
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: lion_sync
+    volumes:
+      - beta-postgres:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/01-keycloak.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U lionbeta -d lion_sync']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+    restart: unless-stopped
+    command: [start, --import-realm]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak_beta
+      KC_DB_USERNAME: lionbeta
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME: https://auth-beta.lionslab.dev
+      KC_HTTP_ENABLED: 'true'
+      KC_PROXY_HEADERS: xforwarded
+      KC_BOOTSTRAP_ADMIN_USERNAME: beta-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?required}
+    volumes: ['./realm.json:/opt/keycloak/data/import/lionpocket-beta.json:ro']
+    depends_on:
+      postgres: {condition: service_healthy}
+  api:
+    image: ${API_IMAGE:?required}
+    restart: unless-stopped
+    environment:
+      LIONPOCKET_PRIVATE_BETA: isolated
+      SYNC_DATABASE_URL: postgresql://lionbeta:${POSTGRES_PASSWORD}@postgres:5432/lion_sync
+      SYNC_PUBLIC_ORIGIN: https://sync-beta.lionslab.dev
+      SYNC_OIDC_ISSUER: https://auth-beta.lionslab.dev/realms/lionpocket-beta
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8787/v1/environment').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+  tunnel:
+    user: "1000:1000"
+    image: cloudflare/cloudflared:2026.9.3
+    restart: unless-stopped
+    command: [tunnel, --no-autoupdate, --config, /etc/cloudflared/config.yml, run]
+    volumes:
+      - ./tunnel.yml:/etc/cloudflared/config.yml:ro
+      - ${TUNNEL_CREDENTIALS:?required}:/run/secrets/tunnel.json:ro
+    depends_on: [api, keycloak]
+volumes:
+  beta-postgres:

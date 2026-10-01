@@ -1,0 +1,8 @@
+tunnel: 1d7e026c-72fd-41c4-82bb-015e218a5cb2
+credentials-file: /run/secrets/tunnel.json
+ingress:
+  - hostname: sync-beta.lionslab.dev
+    service: http://api:8787
+  - hostname: auth-beta.lionslab.dev
+    service: http://keycloak:8080
+  - service: http_status:404
