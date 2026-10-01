@@ -15,7 +15,7 @@ try {
     console.log(JSON.stringify({ healthy: true }));
     process.exit(0);
   }
-  if (!['create', 'lookup', 'disable'].includes(action) || !/^[a-zA-Z0-9._@-]{1,128}$/.test(username))
+  if (!['create', 'lookup', 'disable', 'check-admin'].includes(action) || (action !== 'check-admin' && !/^[a-zA-Z0-9._@-]{1,128}$/.test(username)))
     throw new Error('invalid_input');
   const root = 'http://keycloak:8080';
   const admin = (await readFile('/run/secrets/admin_password', 'utf8')).trim();
@@ -25,6 +25,10 @@ try {
   });
   if (!auth.ok) throw new Error('admin_login_failed');
   const { access_token: token } = await auth.json();
+  if (action === 'check-admin') {
+    console.log(JSON.stringify({ authenticated: true }));
+    process.exit(0);
+  }
   const request = async (path, method = 'GET', body) => {
     const res = await fetch(root + '/admin/realms/lionpocket/' + path, {
       method, redirect: 'error', signal: AbortSignal.timeout(15000),

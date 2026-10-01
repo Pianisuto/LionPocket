@@ -14,7 +14,7 @@ O LionPocket funciona inteiramente no SQLite deste aparelho. Sincronização é 
    cp .env.example .env
    ```
 
-4. Edite **somente `.env`**. Troque `SYNC_HOST` e `AUTH_HOST` pelos seus nomes DNS, sem `https://`, caminhos ou portas. Mantenha `REVERSE_PROXY=caddy`. Prefira caminhos absolutos para os quatro arquivos de segredo, **fora do repositório**, por exemplo `/home/seuusuario/lionpocket-secrets/postgres`, `sync`, `auth`, `admin`. `.env.example` não contém senhas ou contas; os hosts de exemplo são recusados pela ferramenta.
+4. Edite **somente `.env`**. Troque `SYNC_HOST` e `AUTH_HOST` pelos seus nomes DNS, sem `https://`, caminhos ou portas. Mantenha `REVERSE_PROXY=caddy`. O exemplo guarda os quatro segredos em **`~/.local/share/lionpocket-sync/secrets`**, realmente fora do checkout. Você também pode escolher caminhos absolutos externos, como `/srv/lionpocket/secrets/postgres`, `sync`, `auth`, `admin`. `lpctl` expande `~`, resolve symlinks e fornece caminhos absolutos ao Docker Compose; recusa qualquer segredo cujo destino fique dentro do checkout. `.env.example` não contém senhas ou contas; os hosts de exemplo são recusados pela ferramenta.
 5. Gere os segredos e suba os serviços:
 
    ```sh
@@ -23,7 +23,7 @@ O LionPocket funciona inteiramente no SQLite deste aparelho. Sincronização é 
    ./lpctl status
    ```
 
-   `init` cria senhas aleatórias externas e privadas (diretório 700/arquivos 600), sem substituir arquivos existentes. `up` valida a configuração, compila localmente a API e espera PostgreSQL/Keycloak/API ficarem saudáveis. Caddy obtém e renova certificados públicos automaticamente. A primeira emissão pode levar alguns instantes: repita `status` se necessário.
+   `init` cria senhas aleatórias externas e privadas (diretório 700/arquivos 600), sem substituir arquivos existentes. O diretório de código pode ser substituído/reclonado **sem perder esses segredos**. Preserve também uma cópia da configuração `.env` fora do checkout (ou indique esse arquivo externo por `LP_ENV_FILE`) e mantenha o mesmo nome Compose/volumes ao trocar código. `up` valida a configuração, compila localmente a API e espera PostgreSQL/Keycloak/API ficarem saudáveis. Caddy obtém e renova certificados públicos automaticamente. A primeira emissão pode levar alguns instantes: repita `status` se necessário.
 6. Crie sua conta:
 
    ```sh
@@ -54,7 +54,7 @@ O LionPocket funciona inteiramente no SQLite deste aparelho. Sincronização é 
 | `HOMELAB_CA_FILE` | Opcional: raiz pública PEM de CA privada explicitamente confiável, para API/operação |
 | `LP_UID` | Opcional: UID proprietário dos segredos; `lpctl` usa `id -u` automaticamente |
 
-Os serviços sem privilégios usam o UID do operador para ler arquivos privados montados por Compose. Para usar Compose diretamente, defina `LP_UID` com o valor de `id -u` no `.env` e execute `docker compose --profile https up -d --build --wait --wait-timeout 300`. O PostgreSQL lê seus arquivos como root antes de baixar privilégios. Não coloque senhas em `.env`, linha de comando ou no Git. Senhas dos bancos são definidas na primeira inicialização; mudar um arquivo depois não é rotação automática de credenciais.
+Os serviços sem privilégios usam o UID do operador para ler arquivos privados montados por Compose. Para usar Compose diretamente, substitua `~` por caminhos absolutos externos no `.env`, defina `LP_UID` com o valor de `id -u` e execute `docker compose --profile https up -d --build --wait --wait-timeout 300`. A validação de `lpctl` deve ser executada antes; `.gitignore` não é a proteção contra perder segredos ao substituir o checkout. O PostgreSQL lê seus arquivos como root antes de baixar privilégios. Não coloque senhas em `.env`, linha de comando ou no Git. Senhas dos bancos são definidas na primeira inicialização; mudar um arquivo depois não é rotação automática de credenciais.
 
 O realm `lionpocket` e os public clients são importados automaticamente; não contêm URLs do homelab. O hostname configurado determina o issuer. Desktop usa callback loopback `http://127.0.0.1:18761/callback`; Android normal usa `com.lionpocketmobile:/callback`. Authorization Code, PKCE S256, state/nonce, issuer/audience e assinatura JWT são validados. Não há client secret no aplicativo. Não altere `applicationId` ou a assinatura Android para instalar um servidor.
 
@@ -106,7 +106,9 @@ Escolha um caminho privado **fora do Git**, em disco persistente:
 
 Backup interrompe brevemente API e Keycloak para obter um snapshot consistente dos dois bancos e retoma somente os serviços que estavam rodando. Inclui identidade/epoch, owners/memberships, dispositivos/pedidos/grants, envelopes/checkpoints/recovery cifrado, commits/log/receipts/cursors/nonces, revogações de conta e banco completo do IdP (usuários, senhas **hasheadas**, configurações e chaves de assinatura). Inclui também a raiz pública configurada em `HOMELAB_CA_FILE`, `.env` e arquivos de segredos externos para reconstruir a operação. Portanto **o backup é sensível mesmo que as finanças sejam ciphertext**: proteja permissões, cifre seu armazenamento de backup e mantenha cópia fora da máquina. Não contém DEKs ou recovery em claro de clientes.
 
-O manifesto registra checksums, serverId/epoch e contagens. Verificação restaura ambos os dumps em bancos temporários isolados, confere identidade/contagens/realm, ensaia mudança de epoch e remove esses bancos. Certificados públicos podem ser reemitidos pelo proxy; para uma CA privada preserve separadamente a configuração e as chaves da CA. Nenhum certificado privado é versionado. O SQLite/backups e segredo de recovery dos clientes também precisam de proteção própria.
+O manifesto registra checksums, serverId/epoch e contagens. **`verify-backup` nunca modifica a instalação ativa:** não escreve `.env`, arquivos de segredo/CA, configuração ou bancos ativos, não muda serverId/serverEpoch e não para, reinicia ou recria serviços/volumes ativos. Checksums são conferidos antes de criar recursos temporários. Verificação restaura ambos os dumps exclusivamente em bancos temporários isolados, confere identidade/contagens/realm, ensaia mudança de epoch somente nesses bancos e os remove inclusive em caso de erro. Uma senha administrativa diferente no backup não substitui a atual. A ferramenta falha explicitamente se a remoção dos bancos temporários não puder ser concluída.
+
+Certificados públicos podem ser reemitidos pelo proxy; para uma CA privada preserve separadamente a configuração e as chaves da CA. Nenhum certificado privado é versionado. O SQLite/backups e segredo de recovery dos clientes também precisam de proteção própria.
 
 ## Restore operacional e `serverEpoch`
 
@@ -118,7 +120,9 @@ Em uma instalação com os **mesmos hosts**, copie também `trust-ca.pem` do bac
 ./lpctl status
 ```
 
-Restore é uma ação explícita que substitui **ambos os bancos**. Mantém serverId, restaura o administrador correspondente ao backup e gera **um novo serverEpoch obrigatoriamente**, mesmo se o operador acredita que o snapshot é completo. Não apresenta log truncado como o histórico anterior. Se falhar, mantenha API/IdP parados até restaurar corretamente; não apague o backup ou o SQLite dos aparelhos.
+**`restore` é uma ação destrutiva explícita**, autorizada apenas por `--confirm-new-epoch`, que substitui **ambos os bancos**. Mantém serverId, restaura o segredo administrativo correspondente ao IdP do backup e gera **um novo serverEpoch obrigatoriamente**, mesmo se o operador acredita que o snapshot é completo. As senhas das roles de banco permanecem as da instalação corrente. A troca do arquivo administrativo é atômica; os writers são recriados para atualizar os mounts e a autenticação administrativa é conferida antes de declarar sucesso. Não apresenta log truncado como o histórico anterior.
+
+Se a restauração dos bancos, a escrita do segredo, a inicialização ou a autenticação falhar, a ferramenta mantém API/IdP parados e informa que o estado pode estar parcialmente restaurado. Não execute `up`/`restart` para contornar essa falha: corrija a causa e repita o restore confirmado com o backup válido e o segredo correspondente. Se Docker não permitir confirmar a parada, a mensagem exige parada manual imediata. Não apague o backup ou o SQLite dos aparelhos. Essa operação é diferente de `verify-backup`, que nunca troca o segredo ativo.
 
 **Limitação preservada do protocolo v1:** epoch integra trust pins, grants e envelopes assinados. O restore não os reescreve nem forja assinaturas. Clientes existentes detectam epoch diferente, bloqueiam transporte e conservam SQLite/outbox para revisão. O fluxo de migração/reconciliação **entre epochs** ainda não está implementado; “Reconectar cópia para revisão” cobre restore local no mesmo histórico, não autoriza trocar epoch. O histórico restaurado permanece arquivado; não volte manualmente ao epoch antigo, não edite os pins e não recrie perfis por cima da outbox. A retomada desses cofres exige uma migração revisada futura. É um bloqueio explícito do desenho atual, e não uma promessa de retomada automática. Uma instalação nova/novo cofre pode operar no novo epoch.
 

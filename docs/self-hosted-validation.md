@@ -7,6 +7,7 @@ Base: `main` em `73ce2ced49e93c087636e0f4d125baa5278ba326`. Nenhuma decisão de 
 | Camada | Comando/evidência | Resultado |
 | --- | --- | --- |
 | Configuração oficial | `npm run sync:self-hosted:validate` | Compose Caddy/proxy existente/addon CA válidos, segredos externos de fixture |
+| Regressões operacionais | `npm run sync:self-hosted:unit` e clean-install | Verify com admin ativo A/backup real B conserva quatro segredos, `.env`, CA, bancos, identidade e serviços; bancos temporários removidos; checksum inválido sem alterações; caminhos internos/symlinks recusados; falhas de restore deixam writers parados |
 | Suítes sem stack | `npm test` | Core 61, desktop 110, Android 90, protocolo 39, sync-local 25, servidor 29, release 2 passaram; 25 casos de integração são condicionais |
 | PostgreSQL/Keycloak existentes, sintéticos | `npm run sync:dev:test` | 53 passaram; 1 teste condicionado à implementação antiga executado separadamente abaixo |
 | Cliente anterior v1 | `node tools/release/version-skew.cjs` | 3 passaram; motor/controller anterior de `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` contra servidor atual |
@@ -44,7 +45,9 @@ As falhas DNS/expiração são simulações explícitas; as interrupções dos c
 
 ## Backup e restore
 
-`lpctl backup` conserva ambos os bancos, identidade, memberships/devices/grants/deliveries, security checkpoints/recovery cifrado, commits/receipts/log/cursors e IdP/usuários/chaves, configuração e segredos operacionais. Writers parados durante snapshot. `verify-backup` valida checksums e restaura em bancos separados, compara identidade/contagens/realm e ensaia novo epoch. Corrupção de dump é recusada antes de restore.
+`lpctl backup` conserva ambos os bancos, identidade, memberships/devices/grants/deliveries, security checkpoints/recovery cifrado, commits/receipts/log/cursors e IdP/usuários/chaves, configuração e segredos operacionais. Writers parados durante snapshot. `verify-backup` valida checksums e restaura em bancos separados, compara identidade/contagens/realm e ensaia novo epoch. Não altera arquivos, bancos, identidade ou serviços ativos. Corrupção de dump é recusada antes de qualquer criação de banco temporário.
+
+Na regressão clean-install, a senha do administrador da fixture foi trocada para B no IdP e no arquivo, um backup real foi criado, depois o IdP/arquivo ativo voltaram para A. Antes/depois de `verify-backup` foram comparados byte a byte `.env`, quatro segredos, raiz pública CA e dumps lógicos de ambos os bancos ativos (excluindo apenas guards aleatórios `\\restrict`/`\\unrestrict` do pg_dump), mais serverId/serverEpoch, nomes de bancos e IDs/estado/saúde dos containers. A ficou intacto; os bancos temporários foram removidos; status e login administrativo A continuaram funcionando. O backup corrompido também conservou todo esse snapshot. Restore confirmado do backup B restaurou o arquivo B correspondente ao IdP e permitiu criar usuário.
 
 O restore real na stack descartável manteve serverId, gerou novo serverEpoch e permitiu criar outra conta pela ferramenta oficial (administrador/configuração restaurados). Cliente detectou epoch diferente **antes de envio**, conservando SQLite e a outbox byte a byte. A infraestrutura permaneceu saudável após o restore.
 

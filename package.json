@@ -33,7 +33,8 @@
     "test:release": "node --test tools/release/*.test.cjs",
     "release:typecheck": "tsc -p tools/release/tsconfig.json",
     "sync:self-hosted:validate": "python3 tools/self-hosted/validate.py",
-    "sync:self-hosted:test": "python3 tools/self-hosted/smoke.py",
+    "sync:self-hosted:unit": "python3 -m unittest discover -s tools/self-hosted -p 'test_*.py'",
+    "sync:self-hosted:test": "npm run sync:self-hosted:unit && python3 tools/self-hosted/smoke.py",
     "sync:self-hosted:typecheck": "tsc -p tools/self-hosted/tsconfig.json"
   }
 }

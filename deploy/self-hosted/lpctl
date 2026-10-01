@@ -10,11 +10,13 @@ import re
 import secrets
 import subprocess
 import sys
+import tempfile
 import uuid
 import urllib.request
 
 BASE = Path(__file__).resolve().parent
-ENV = Path(os.environ.get('LP_ENV_FILE', BASE / '.env')).resolve()
+CHECKOUT = BASE.parents[1]
+ENV = Path(os.environ.get('LP_ENV_FILE', BASE / '.env')).expanduser().resolve()
 SECRET_KEYS = ['POSTGRES_PASSWORD_FILE', 'SYNC_DB_PASSWORD_FILE', 'AUTH_DB_PASSWORD_FILE', 'KEYCLOAK_ADMIN_PASSWORD_FILE']
 
 
@@ -43,16 +45,20 @@ def config(require_secrets=True):
     for key in SECRET_KEYS:
         if not cfg.get(key):
             raise ValueError('Configure os caminhos externos dos segredos.')
-        path = Path(cfg[key])
-        path = path if path.is_absolute() else BASE / path
+        path = Path(cfg[key]).expanduser()
+        path = (path if path.is_absolute() else BASE / path).resolve()
+        if path.is_relative_to(CHECKOUT):
+            raise ValueError('Segredos operacionais devem ficar fora do checkout. Use ~/.local/share/lionpocket-sync/secrets ou outro caminho externo.')
+        cfg[key] = str(path)
         if require_secrets:
             if not path.is_file() or len(path.read_bytes().strip()) < 32:
                 raise ValueError('Segredo ausente ou curto. Execute lpctl init.')
             if path.stat().st_mode & 0o077:
                 raise ValueError('Proteja os arquivos de segredo com chmod 600.')
     if cfg.get('HOMELAB_CA_FILE'):
-        ca = Path(cfg['HOMELAB_CA_FILE'])
-        ca = ca if ca.is_absolute() else BASE / ca
+        ca = Path(cfg['HOMELAB_CA_FILE']).expanduser()
+        ca = (ca if ca.is_absolute() else BASE / ca).resolve()
+        cfg['HOMELAB_CA_FILE'] = str(ca)
         if not ca.is_file() or b'BEGIN CERTIFICATE' not in ca.read_bytes() or b'PRIVATE KEY' in ca.read_bytes():
             raise ValueError('HOMELAB_CA_FILE exige apenas a raiz pública PEM confiável, nunca chave privada.')
     return cfg
@@ -70,6 +76,11 @@ def compose(cfg, *args, data=None, capture=False, check=True, output=None):
     if os.environ.get('LP_COMPOSE_OVERRIDE'):
         cmd += ['-f', os.environ['LP_COMPOSE_OVERRIDE']]
     runtime_env = dict(os.environ, LP_UID=cfg.get("LP_UID", str(os.getuid())))
+    # Compose does not expand ~ in secret paths. Environment interpolation takes
+    # precedence over .env, so pass the validated, resolved external paths only.
+    runtime_env.update({key: cfg[key] for key in SECRET_KEYS})
+    if cfg.get('HOMELAB_CA_FILE'):
+        runtime_env['HOMELAB_CA_FILE'] = cfg['HOMELAB_CA_FILE']
     result = subprocess.run(cmd + list(args), env=runtime_env, cwd=BASE, input=data, stdout=output or (subprocess.PIPE if capture else None), stderr=subprocess.PIPE)
     if check and result.returncode:
         # Docker errors can contain expanded environment/config. Do not echo them.
@@ -105,8 +116,34 @@ def verify(directory):
     return manifest
 
 
+def backup_admin(directory):
+    values = json.loads((directory / 'secrets.json').read_text())
+    admin = values.get('KEYCLOAK_ADMIN_PASSWORD_FILE') if isinstance(values, dict) else None
+    if not isinstance(admin, str) or len(admin.strip()) < 32:
+        raise ValueError('Segredo administrativo do backup inválido.')
+    return admin
+
+
+def write_private(path, content):
+    # Replace atomically, never truncate a live secret if writing fails. Restore
+    # recreates stopped writers afterwards so their secret mounts use this inode.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.lp-restore-', delete=False) as stream:
+            temporary = Path(stream.name)
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def rehearsal(cfg, directory):
     manifest = verify(directory)
+    backup_admin(directory)  # Validate without touching the installation's secret.
     suffix = uuid.uuid4().hex
     sync, auth = 'lp_verify_sync_' + suffix, 'lp_verify_auth_' + suffix
     try:
@@ -120,17 +157,6 @@ def rehearsal(cfg, directory):
         if counts != manifest['counts'] or sql(cfg, "SELECT count(*) FROM realm WHERE name='lionpocket';", auth) != '1':
             raise ValueError('Backup incompleto.')
         before = identity[1]
-        # The restored master realm has the backed-up administrative password.
-        # Database role passwords remain those of the current installation.
-        admin_key = 'KEYCLOAK_ADMIN_PASSWORD_FILE'
-        admin_path = Path(cfg[admin_key])
-        admin_path = admin_path if admin_path.is_absolute() else BASE / admin_path
-        backup_admin = json.loads((directory / 'secrets.json').read_text())[admin_key]
-        if not isinstance(backup_admin, str) or len(backup_admin.strip()) < 32:
-            raise ValueError('Segredo administrativo do backup inválido.')
-        with admin_path.open('w') as stream:
-            stream.write(backup_admin)
-        admin_path.chmod(0o600)
         epoch = str(uuid.uuid4())
         sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';", sync)
         if sql(cfg, 'SELECT server_epoch::text FROM sync_environment;', sync) == before:
@@ -138,8 +164,12 @@ def rehearsal(cfg, directory):
         print('Backup verificado; restore ensaiado em bancos isolados. Novo epoch confirmado.')
         return manifest
     finally:
+        cleanup_failed = False
         for name in [sync, auth]:
-            compose(cfg, 'exec', '-T', 'postgres', 'dropdb', '-U', 'postgres', '--if-exists', name, capture=True, check=False)
+            removed = compose(cfg, 'exec', '-T', 'postgres', 'dropdb', '-U', 'postgres', '--if-exists', name, capture=True, check=False)
+            cleanup_failed = cleanup_failed or removed.returncode != 0
+        if cleanup_failed:
+            raise ValueError('Não foi possível remover todos os bancos temporários lp_verify_. Verificação não concluída; confira PostgreSQL antes de repetir.')
 
 
 def main():
@@ -153,7 +183,6 @@ def main():
     if command == 'init':
         for key in SECRET_KEYS:
             path = Path(cfg[key])
-            path = path if path.is_absolute() else BASE / path
             path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             if not path.exists():
                 with path.open('x') as stream:
@@ -199,11 +228,11 @@ def main():
                 with (directory / name).open('xb') as stream:
                     compose(cfg, 'exec', '-T', 'postgres', 'pg_dump', '-U', 'postgres', '-Fc', database, output=stream)
             (directory / 'config.env').write_bytes(ENV.read_bytes())
-            (directory / 'secrets.json').write_text(json.dumps({key: (Path(cfg[key]) if Path(cfg[key]).is_absolute() else BASE / cfg[key]).read_text() for key in SECRET_KEYS}))
+            (directory / 'secrets.json').write_text(json.dumps({key: Path(cfg[key]).read_text() for key in SECRET_KEYS}))
             files = ['sync.dump', 'auth.dump', 'config.env', 'secrets.json']
             if cfg.get('HOMELAB_CA_FILE'):
                 ca = Path(cfg['HOMELAB_CA_FILE'])
-                (directory / 'trust-ca.pem').write_bytes((ca if ca.is_absolute() else BASE / ca).read_bytes())
+                (directory / 'trust-ca.pem').write_bytes(ca.read_bytes())
                 files.append('trust-ca.pem')
             identity = sql(cfg, 'SELECT server_id::text,server_epoch::text FROM sync_environment;').split('|')
             counts = json.loads(sql(cfg, "SELECT json_build_object('vaults',(SELECT count(*) FROM sync_vaults),'commits',(SELECT count(*) FROM sync_commits),'grants',(SELECT count(*) FROM sync_grants));"))
@@ -220,35 +249,38 @@ def main():
             raise ValueError('Restore substitui ambos os bancos. Faça backup atual e use restore DIR --confirm-new-epoch. Clientes precisarão de reconciliação.')
         directory = Path(args[1]).resolve()
         rehearsal(cfg, directory)
+        admin = backup_admin(directory)
         # Account subjects and signing keys in auth.dump must match issuer/domain of this deployment.
         backup_cfg = dict(line.split('=', 1) for line in (directory / 'config.env').read_text().splitlines() if line and not line.startswith('#') and '=' in line)
         if any(cfg[k] != backup_cfg[k] for k in ['SYNC_HOST', 'AUTH_HOST']):
             raise ValueError('Restore exige os mesmos hosts. Migração de domínio deve ser revisada separadamente.')
         if (directory / 'trust-ca.pem').is_file() and not cfg.get('HOMELAB_CA_FILE'):
             raise ValueError('Configure HOMELAB_CA_FILE com a raiz pública do backup antes de restaurar.')
-        compose(cfg, 'stop', 'api', 'keycloak', capture=True)
-        if (directory / 'trust-ca.pem').is_file():
-            ca = Path(cfg['HOMELAB_CA_FILE'])
-            ca = ca if ca.is_absolute() else BASE / ca
-            ca.write_bytes((directory / 'trust-ca.pem').read_bytes())
-        for database, owner, name in [('lion_sync', 'sync_api', 'sync.dump'), ('lion_auth', 'keycloak', 'auth.dump')]:
-            compose(cfg, 'exec', '-T', 'postgres', 'dropdb', '-U', 'postgres', '--force', database, capture=True)
-            compose(cfg, 'exec', '-T', 'postgres', 'createdb', '-U', 'postgres', '-O', owner, database, capture=True)
-            compose(cfg, 'exec', '-T', 'postgres', 'pg_restore', '--exit-on-error', '-U', 'postgres', '-d', database, data=(directory / name).read_bytes(), capture=True)
-        # The restored master realm has the backed-up administrative password.
-        # Database role passwords remain those of the current installation.
-        admin_key = 'KEYCLOAK_ADMIN_PASSWORD_FILE'
-        admin_path = Path(cfg[admin_key])
-        admin_path = admin_path if admin_path.is_absolute() else BASE / admin_path
-        backup_admin = json.loads((directory / 'secrets.json').read_text())[admin_key]
-        if not isinstance(backup_admin, str) or len(backup_admin.strip()) < 32:
-            raise ValueError('Segredo administrativo do backup inválido.')
-        with admin_path.open('w') as stream:
-            stream.write(backup_admin)
-        admin_path.chmod(0o600)
-        epoch = str(uuid.uuid4())
-        sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';")
-        compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', 'api', 'keycloak', capture=True)
+        try:
+            compose(cfg, 'stop', 'api', 'keycloak', capture=True)
+            if (directory / 'trust-ca.pem').is_file():
+                write_private(Path(cfg['HOMELAB_CA_FILE']), (directory / 'trust-ca.pem').read_bytes())
+            for database, owner, name in [('lion_sync', 'sync_api', 'sync.dump'), ('lion_auth', 'keycloak', 'auth.dump')]:
+                compose(cfg, 'exec', '-T', 'postgres', 'dropdb', '-U', 'postgres', '--force', database, capture=True)
+                compose(cfg, 'exec', '-T', 'postgres', 'createdb', '-U', 'postgres', '-O', owner, database, capture=True)
+                compose(cfg, 'exec', '-T', 'postgres', 'pg_restore', '--exit-on-error', '-U', 'postgres', '-d', database, data=(directory / name).read_bytes(), capture=True)
+            # Only confirmed restore changes this secret to match the restored
+            # master realm. Database role passwords remain current credentials.
+            write_private(Path(cfg['KEYCLOAK_ADMIN_PASSWORD_FILE']), admin.encode())
+            epoch = str(uuid.uuid4())
+            sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';")
+            compose(cfg, 'up', '-d', '--force-recreate', '--wait', '--wait-timeout', '300', 'api', 'keycloak', capture=True)
+            # Health endpoints alone cannot detect a mismatched admin password.
+            operator(cfg, 'check-admin', '')
+        except (ValueError, OSError, KeyboardInterrupt):
+            try:
+                stopped = compose(cfg, 'stop', 'api', 'keycloak', capture=True, check=False)
+                stop_failed = stopped.returncode != 0
+            except OSError:
+                stop_failed = True
+            if stop_failed:
+                raise ValueError('Restore falhou e não foi possível confirmar a parada da API/IdP. Pare-os manualmente imediatamente; não reinicie até restaurar bancos e segredo corretamente.') from None
+            raise ValueError('Restore falhou; API/IdP permanecem parados. Bancos podem estar parcialmente restaurados. Não reinicie até repetir o restore confirmado com backup válido e segredo correspondente.') from None
         print('Restore concluído com novo serverEpoch. Clientes conservam banco/outbox e exigem revisão; não altere envelopes assinados.')
     elif command == 'restart':
         compose(cfg, 'restart', 'api', 'keycloak')

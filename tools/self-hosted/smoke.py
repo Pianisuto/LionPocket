@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import shutil
 import re
+import secrets
 import tempfile
 import time
 
@@ -38,6 +39,31 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
         if result.returncode:
             print(result.stderr.decode())
             raise RuntimeError('Normal client fixture failed: ' + phase)
+    def rotate_admin(password):
+        next_file = directory / 'admin-next'
+        next_file.write_bytes(password)
+        next_file.chmod(0o600)
+        try:
+            lp.compose(cfg, 'run', '--rm', '-T', '--no-deps', '--entrypoint', 'node', 'fixture', '/app/tools/self-hosted/rotate-fixture-admin.mjs', capture=True)
+            Path(cfg['KEYCLOAK_ADMIN_PASSWORD_FILE']).write_bytes(password)
+        finally:
+            next_file.unlink(missing_ok=True)
+    def active_snapshot():
+        # pg_dump adds random \restrict guards, not database data. Ignore only
+        # those two lines; compare every other byte of both logical databases.
+        databases = {}
+        for database in ['lion_sync', 'lion_auth']:
+            dump = lp.compose(cfg, 'exec', '-T', 'postgres', 'pg_dump', '-U', 'postgres', database, capture=True).stdout
+            databases[database] = b'\n'.join(line for line in dump.splitlines() if not line.startswith((b'\\restrict ', b'\\unrestrict ')))
+        raw = lp.compose(cfg, 'ps', '--format', 'json', '--no-trunc', capture=True).stdout.decode().strip()
+        services = json.loads(raw) if raw.startswith('[') else [json.loads(line) for line in raw.splitlines()]
+        state = sorted((s['Service'], s['ID'], s['State'], s.get('Health')) for s in services)
+        return {
+            'env': env.read_bytes(), 'secrets': {key: Path(cfg[key]).read_bytes() for key in lp.SECRET_KEYS},
+            'ca': root.read_bytes(), 'databases': databases, 'services': state,
+            'identity': lp.sql(cfg, 'SELECT server_id::text,server_epoch::text FROM sync_environment;'),
+            'names': lp.sql(cfg, 'SELECT datname FROM pg_database ORDER BY datname;', 'postgres'),
+        }
     try:
         ctl('init')
         cfg = lp.config()
@@ -73,14 +99,27 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
         fixture('restart')  # Resume and drain every durable financial outbox.
         ctl('user', 'disable', 'fixture-alice')
         fixture('revoked')
+        admin_a = Path(cfg['KEYCLOAK_ADMIN_PASSWORD_FILE']).read_bytes()
+        admin_b = (secrets.token_urlsafe(48) + '\n').encode()
+        assert admin_a != admin_b
+        rotate_admin(admin_b)
         backup = directory / 'operational-backup'
         ctl('backup', str(backup))
+        rotate_admin(admin_a)
+        assert json.loads((backup / 'secrets.json').read_text())['KEYCLOAK_ADMIN_PASSWORD_FILE'].encode() == admin_b
+        before_verify = active_snapshot()
         ctl('verify-backup', str(backup))
+        assert active_snapshot() == before_verify, 'verify-backup modified active installation or left temporary databases'
+        ctl('status')
+        lp.operator(cfg, 'check-admin', '')  # Active admin A still authenticates.
+        print('verify-backup with active A / backup B: all secret/config/database/identity/service bytes unchanged; temporary databases removed')
         corrupt = directory / 'corrupt-backup'
         shutil.copytree(backup, corrupt)
         with (corrupt / 'sync.dump').open('ab') as dump: dump.write(b'CORRUPTED_FIXTURE')
+        before_corrupt = active_snapshot()
         check = subprocess.run([executable, 'verify-backup', str(corrupt)], capture_output=True)
         if check.returncode == 0: raise RuntimeError('Corrupt backup accepted')
+        assert active_snapshot() == before_corrupt, 'Corrupt backup modified active installation'
         print('Corrupt backup rejected before any restore')
         # Canary scans the complete logical databases and every container log.
         for database in ['lion_sync', 'lion_auth']:
@@ -106,6 +145,7 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
         lp.compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', 'postgres', 'keycloak', 'api')
         # Recovery of operational state is destructive only within this temporary project.
         ctl('restore', str(backup), '--confirm-new-epoch')
+        assert Path(cfg['KEYCLOAK_ADMIN_PASSWORD_FILE']).read_bytes() == admin_b, 'Confirmed restore did not restore admin B'
         fixture('epoch')
         ctl('user', 'create', 'fixture-after-restore', data=b'fixture-only-password-78931\n')
         ctl('status')
