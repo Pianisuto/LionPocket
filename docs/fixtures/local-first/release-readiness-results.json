@@ -1,0 +1,398 @@
+{
+  "date": "2026-10-01",
+  "base": "8de0087cdbcdcc670ec2073ba3f4ea51932072b4",
+  "codeRevision": "8e79e39fb8862c72d5020e74c40f0306a9c31bfa",
+  "syntheticDatabasesOnly": true,
+  "personalDatabaseRead": false,
+  "releasePublished": false,
+  "androidCurrentSigning": {
+    "kind": "public development key",
+    "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "permanentProductionIdentityChosen": false
+  },
+  "androidReplacementMatrix": {
+    "syntheticOnly": true,
+    "serial": "emulator-5582",
+    "scenarios": [
+      {
+        "package": "com.lionpocketmobile",
+        "sourceSchema": 1,
+        "targetSchema": 8,
+        "oldInstall": "Performing Streamed Install\nSuccess",
+        "replacement": "Performing Streamed Install\nSuccess",
+        "recordsCompared": 2,
+        "tablesCompared": 1,
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "storageCleared": false
+      },
+      {
+        "package": "com.lionpocketmobile",
+        "sourceSchema": 4,
+        "targetSchema": 8,
+        "oldInstall": "current fixture installation",
+        "replacement": "Performing Streamed Install\nSuccess",
+        "recordsCompared": 13,
+        "tablesCompared": 10,
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "storageCleared": false
+      },
+      {
+        "package": "com.lionpocketmobile",
+        "sourceSchema": 5,
+        "targetSchema": 8,
+        "oldInstall": "current fixture installation",
+        "replacement": "Performing Streamed Install\nSuccess",
+        "recordsCompared": 14,
+        "tablesCompared": 11,
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "storageCleared": false
+      },
+      {
+        "package": "com.lionpocketmobile",
+        "sourceSchema": 8,
+        "targetSchema": 8,
+        "oldInstall": "current fixture installation",
+        "replacement": "Performing Streamed Install\nSuccess",
+        "recordsCompared": 47,
+        "tablesCompared": 30,
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "storageCleared": false
+      },
+      {
+        "package": "com.lionpocketmobile.beta",
+        "sourceSchema": 8,
+        "targetSchema": 8,
+        "oldInstall": "Performing Streamed Install\nSuccess",
+        "replacement": "Performing Streamed Install\nSuccess",
+        "recordsCompared": 47,
+        "tablesCompared": 30,
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "storageCleared": false
+      }
+    ]
+  },
+  "androidCompatibility": [
+    {
+      "package": "com.lionpocketmobile",
+      "finalApkReplacement": "Success",
+      "allTablesPreserved": true
+    },
+    {
+      "package": "com.lionpocketmobile.beta",
+      "finalApkReplacement": "Success",
+      "allTablesPreserved": true
+    },
+    {
+      "signatureMismatch": "INSTALL_FAILED_UPDATE_INCOMPATIBLE",
+      "databasePreserved": true,
+      "uninstall": false
+    },
+    {
+      "futureSchema": 99,
+      "allTablesPreserved": true,
+      "versionPreserved": true,
+      "integrity": "ok",
+      "foreignKeyViolations": 0
+    }
+  ],
+  "desktopLinux": [
+    {
+      "platform": "linux",
+      "beta": false,
+      "profile": "LionPocket",
+      "version": "0.3.10",
+      "legacyTables": 9,
+      "integrity": "ok",
+      "foreignKeys": 0,
+      "vault": "basic_text refused",
+      "publicProfilePersistence": true,
+      "updateFeed": null,
+      "windowLoaded": true
+    },
+    {
+      "platform": "linux",
+      "beta": true,
+      "profile": "LionPocket Beta",
+      "version": "0.3.10",
+      "legacyTables": 9,
+      "integrity": "ok",
+      "foreignKeys": 0,
+      "vault": "basic_text refused",
+      "publicProfilePersistence": true,
+      "updateFeed": null,
+      "windowLoaded": true
+    },
+    {
+      "platform": "linux",
+      "beta": true,
+      "profile": "LionPocket Beta",
+      "version": "0.3.10",
+      "legacyTables": 9,
+      "integrity": "ok",
+      "foreignKeys": 0,
+      "vault": "basic_text refused",
+      "publicProfilePersistence": true,
+      "updateFeed": null,
+      "windowLoaded": true
+    }
+  ],
+  "tests": {
+    "integratedSuite": {
+      "core": 61,
+      "desktop": 110,
+      "mobile": 88,
+      "protocol": 39,
+      "syncLocal": 23,
+      "syncServer": 53,
+      "release": 2,
+      "passed": 376,
+      "separatePreviousClientTestSkippedInDefaultSuite": 1
+    },
+    "previousEngineAgainstCurrentServer": {
+      "passed": 3,
+      "uniqueAdditionalScenario": 1,
+      "source": "8de0087cdbcdcc670ec2073ba3f4ea51932072b4"
+    },
+    "electronNodeDesktop": 110,
+    "typecheck": "passed",
+    "lint": "passed with warnings",
+    "gitDiffCheck": "passed"
+  },
+  "androidBuilds": {
+    "debug": "passed x86_64 + arm64-v8a",
+    "normalDevelopmentRelease": "passed x86_64 + arm64-v8a",
+    "privateBetaRelease": "passed x86_64 + arm64-v8a",
+    "externalEphemeralRelease": "passed x86_64; test key deleted",
+    "missingSigning": "refused",
+    "wrongCertificatePin": "refused",
+    "developmentCertificateAsProduction": "refused",
+    "betaAndDevelopmentIgnorePublicCredentials": "passed"
+  },
+  "normalArtifactBetaEndpointOccurrences": {
+    "android": 0,
+    "electron": 0
+  },
+  "physicalInstalledApksUnchanged": {
+    "com.lionpocketmobile": "8812c7e8d1a2d14fd40c33ca5d0f0ea97518ec739657eb3fa34071f8d3ea15a2",
+    "com.lionpocketmobile.beta": "0363266fbbd568226e6d11e1e2a3b885275441ffd1c33c9f9eb38ab1d5c68b10"
+  },
+  "artifacts": [
+    {
+      "name": "LionPocket-Android-0.3.10-DEVELOPMENT-ONLY.apk",
+      "channel": "normal",
+      "sha256": "59248d1a41bf1580fca7eb1bba31223a9765b78136d0be6addb72bcbfbb4277b",
+      "published": false
+    },
+    {
+      "name": "LionPocket-linux-x64-0.3.10.zip",
+      "channel": "normal",
+      "sha256": "4bca183c35d325bd057ccf94b1445afbf2dabd27a3a4864d8120eecba99bb813",
+      "published": false
+    },
+    {
+      "name": "lionpocket_0.3.10_amd64.deb",
+      "channel": "normal",
+      "sha256": "a64db4815c93eaa04e6271681353d1e044deab5fbc6f54cec53dd840e2e3adb3",
+      "published": false
+    },
+    {
+      "name": "LionPocket-Beta-Android-0.3.10-DEVELOPMENT-ONLY.apk",
+      "channel": "private-beta",
+      "sha256": "b1d3c93fb38e94ef92df54e4fd39da43647f07963aa5315456a3573b5ec2d121",
+      "published": false
+    },
+    {
+      "name": "LionPocket-Beta-linux-x64-0.3.10.zip",
+      "channel": "private-beta",
+      "sha256": "a483243603dc9df523ecc4f7c536b366290583ad4af65d4c420c28dcf97d5ebc",
+      "published": false
+    },
+    {
+      "name": "lionpocket-beta_0.3.10_amd64.deb",
+      "channel": "private-beta",
+      "sha256": "6821d4e316517152ac85ff280e6487d4174688fe27c7f16f8116406e124516ab",
+      "published": false
+    }
+  ],
+  "limitations": [
+    "Production signing identity and migration from public debug key remain undecided.",
+    "No independent crypto audit or public service.",
+    "Native Android update exercised on disposable x86_64 AVD; arm64 built, personal physical installations untouched.",
+    "Windows signing certificate and authenticated public update distribution remain pending."
+  ],
+  "desktopWindows": [
+    {
+      "platform": "win32",
+      "beta": false,
+      "profile": "LionPocket",
+      "version": "0.3.10",
+      "legacyTables": 9,
+      "integrity": "ok",
+      "foreignKeys": 0,
+      "vault": "OS vault roundtrip passed",
+      "publicProfilePersistence": true,
+      "updateFeed": null,
+      "windowLoaded": true,
+      "jobUrl": "https://github.com/Pianisuto/LionPocket/actions/runs/36882728579/job/110439555175"
+    },
+    {
+      "platform": "win32",
+      "beta": true,
+      "profile": "LionPocket Beta",
+      "version": "0.3.10",
+      "legacyTables": 9,
+      "integrity": "ok",
+      "foreignKeys": 0,
+      "vault": "OS vault roundtrip passed",
+      "publicProfilePersistence": true,
+      "updateFeed": null,
+      "windowLoaded": true,
+      "jobUrl": "https://github.com/Pianisuto/LionPocket/actions/runs/36882728579/job/110439555175"
+    },
+    {
+      "platform": "win32",
+      "beta": false,
+      "profile": "LionPocket",
+      "version": "0.3.10",
+      "legacyTables": 9,
+      "integrity": "ok",
+      "foreignKeys": 0,
+      "vault": "OS vault roundtrip passed",
+      "publicProfilePersistence": true,
+      "updateFeed": "https://update.electronjs.org/Pianisuto/LionPocket/win32-x64/0.3.10",
+      "windowLoaded": true,
+      "squirrelInstalled": true,
+      "installerIdentity": "lionpocket",
+      "updateFeedPolicy": "existing normal feed; smoke skips network checks",
+      "jobUrl": "https://github.com/Pianisuto/LionPocket/actions/runs/36882728579/job/110439555175"
+    },
+    {
+      "platform": "win32",
+      "beta": true,
+      "profile": "LionPocket Beta",
+      "version": "0.3.10",
+      "legacyTables": 9,
+      "integrity": "ok",
+      "foreignKeys": 0,
+      "vault": "OS vault roundtrip passed",
+      "publicProfilePersistence": true,
+      "updateFeed": null,
+      "windowLoaded": true,
+      "jobUrl": "https://github.com/Pianisuto/LionPocket/actions/runs/36882728579/job/110439555226"
+    },
+    {
+      "platform": "win32",
+      "beta": true,
+      "profile": "LionPocket Beta",
+      "version": "0.3.10",
+      "legacyTables": 9,
+      "integrity": "ok",
+      "foreignKeys": 0,
+      "vault": "OS vault roundtrip passed",
+      "publicProfilePersistence": true,
+      "updateFeed": null,
+      "windowLoaded": true,
+      "squirrelInstalled": true,
+      "installerIdentity": "lionpocket_beta",
+      "updateFeedPolicy": "disabled",
+      "jobUrl": "https://github.com/Pianisuto/LionPocket/actions/runs/36882728579/job/110439555226"
+    }
+  ],
+  "ci": {
+    "url": "https://github.com/Pianisuto/LionPocket/actions/runs/36882728579",
+    "sourceRevision": "8e79e39fb8862c72d5020e74c40f0306a9c31bfa",
+    "validate": "passed",
+    "linuxNormal": "passed",
+    "linuxPrivateBeta": "passed",
+    "windowsNormal": "passed",
+    "windowsPrivateBeta": "passed",
+    "android": "passed",
+    "conclusion": "success",
+    "androidJobUrl": "https://github.com/Pianisuto/LionPocket/actions/runs/36882728579/job/110439555224",
+    "androidReplacementMatrix": {
+      "baseApkSource": "8de0087cdbcdcc670ec2073ba3f4ea51932072b4",
+      "syntheticOnly": true,
+      "scenarios": [
+        {
+          "package": "com.lionpocketmobile",
+          "sourceSchema": 1,
+          "targetSchema": 8,
+          "oldInstall": "Performing Streamed Install\nSuccess",
+          "replacement": "Performing Streamed Install\nSuccess",
+          "recordsCompared": 2,
+          "tablesCompared": 1,
+          "integrity": "ok",
+          "foreignKeyViolations": 0,
+          "storageCleared": false
+        },
+        {
+          "package": "com.lionpocketmobile",
+          "sourceSchema": 4,
+          "targetSchema": 8,
+          "oldInstall": "current fixture installation",
+          "replacement": "Performing Streamed Install\nSuccess",
+          "recordsCompared": 13,
+          "tablesCompared": 10,
+          "integrity": "ok",
+          "foreignKeyViolations": 0,
+          "storageCleared": false
+        },
+        {
+          "package": "com.lionpocketmobile",
+          "sourceSchema": 5,
+          "targetSchema": 8,
+          "oldInstall": "current fixture installation",
+          "replacement": "Performing Streamed Install\nSuccess",
+          "recordsCompared": 14,
+          "tablesCompared": 11,
+          "integrity": "ok",
+          "foreignKeyViolations": 0,
+          "storageCleared": false
+        },
+        {
+          "package": "com.lionpocketmobile",
+          "sourceSchema": 8,
+          "targetSchema": 8,
+          "oldInstall": "current fixture installation",
+          "replacement": "Performing Streamed Install\nSuccess",
+          "recordsCompared": 47,
+          "tablesCompared": 30,
+          "integrity": "ok",
+          "foreignKeyViolations": 0,
+          "storageCleared": false
+        },
+        {
+          "package": "com.lionpocketmobile.beta",
+          "sourceSchema": 8,
+          "targetSchema": 8,
+          "oldInstall": "Performing Streamed Install\nSuccess",
+          "replacement": "Performing Streamed Install\nSuccess",
+          "recordsCompared": 47,
+          "tablesCompared": 30,
+          "integrity": "ok",
+          "foreignKeyViolations": 0,
+          "storageCleared": false
+        }
+      ]
+    },
+    "androidCompatibility": [
+      {
+        "signatureMismatch": "INSTALL_FAILED_UPDATE_INCOMPATIBLE",
+        "databasePreserved": true,
+        "uninstall": false
+      },
+      {
+        "futureSchema": 99,
+        "allTablesPreserved": true,
+        "versionPreserved": true,
+        "integrity": "ok",
+        "foreignKeyViolations": 0
+      }
+    ]
+  }
+}
