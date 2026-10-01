@@ -5,11 +5,11 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 channel="${LIONPOCKET_BUILD_CHANNEL:-normal}"
 case "$channel" in
-  normal) app_name="LionPocket"; executable="lionpocket" ;;
-  private-beta) app_name="LionPocket Beta"; executable="lionpocket-beta" ;;
+  normal) app_name="LionPocket"; package_name="LionPocket"; executable="lionpocket" ;;
+  private-beta) app_name="LionPocket Beta"; package_name="LionPocket-Beta"; executable="lionpocket-beta" ;;
   *) echo "Unknown build channel" >&2; exit 1 ;;
 esac
-app_dir="$project_dir/out/$app_name-linux-x64"
+app_dir="$project_dir/out/$package_name-linux-x64"
 output_dir="$project_dir/out/make/deb/x64"
 version="$(node -p "require('$project_dir/package.json').version")"
 package_path="$output_dir/${executable}_${version}_amd64.deb"
@@ -27,16 +27,16 @@ fi
 
 mkdir -p \
   "$stage_dir/DEBIAN" \
-  "$stage_dir/opt/$app_name" \
+  "$stage_dir/opt/$package_name" \
   "$stage_dir/usr/bin" \
   "$stage_dir/usr/share/applications" \
   "$stage_dir/usr/share/icons/hicolor/512x512/apps" \
   "$output_dir"
 
-cp -a "$app_dir/." "$stage_dir/opt/$app_name/"
-chmod 0755 "$stage_dir/opt/$app_name"
-chmod 4755 "$stage_dir/opt/$app_name/chrome-sandbox"
-ln -s "/opt/$app_name/$executable" "$stage_dir/usr/bin/$executable"
+cp -a "$app_dir/." "$stage_dir/opt/$package_name/"
+chmod 0755 "$stage_dir/opt/$package_name"
+chmod 4755 "$stage_dir/opt/$package_name/chrome-sandbox"
+ln -s "/opt/$package_name/$executable" "$stage_dir/usr/bin/$executable"
 install -m 0644 "$project_dir/assets/icon.png" \
   "$stage_dir/usr/share/icons/hicolor/512x512/apps/$executable.png"
 
@@ -47,7 +47,7 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: Pianisuto
-Installed-Size: $(du -sk "$stage_dir/opt/$app_name" | cut -f1)
+Installed-Size: $(du -sk "$stage_dir/opt/$package_name" | cut -f1)
 Depends: libgtk-3-0, libnss3, libxss1, libasound2t64 | libasound2, libgbm1
 Description: Finanças pessoais simples, locais e bonitas
  LionPocket organiza entradas, despesas, parcelas e objetivos sem precisar de internet.

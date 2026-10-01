@@ -6,7 +6,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { captureDatabaseManifest } = require('../sync-stage0/database-manifest.cjs');
 const root = resolve(__dirname, '../..');
 const beta = process.env.LIONPOCKET_BUILD_CHANNEL === 'private-beta';
-const name = beta ? 'LionPocket Beta' : 'LionPocket';
+const name = beta ? 'LionPocket-Beta' : 'LionPocket';
 const executable = process.platform === 'win32' ? `${beta ? 'lionpocket-beta' : 'lionpocket'}.exe` : beta ? 'lionpocket-beta' : 'lionpocket';
 const binary = join(root, 'apps/desktop/out', `${name}-${process.platform}-x64`, executable);
 for (const mode of beta ? [true] : [false, true]) {

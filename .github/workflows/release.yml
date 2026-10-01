@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           if [[ "$LIONPOCKET_BUILD_CHANNEL" == private-beta ]]; then
-            sandbox="apps/desktop/out/LionPocket Beta-linux-x64/chrome-sandbox"
+            sandbox="apps/desktop/out/LionPocket-Beta-linux-x64/chrome-sandbox"
           else
             sandbox="apps/desktop/out/LionPocket-linux-x64/chrome-sandbox"
           fi

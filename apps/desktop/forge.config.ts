@@ -12,7 +12,7 @@ const beta = channel === 'private-beta';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    name: beta ? 'LionPocket Beta' : 'LionPocket',
+    name: beta ? 'LionPocket-Beta' : 'LionPocket',
     executableName: beta ? 'lionpocket-beta' : 'lionpocket',
     icon: 'assets/icon',
     // O plugin-vite empacota só a saída do build, então assets/ não entra no
