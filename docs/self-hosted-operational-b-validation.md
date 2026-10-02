@@ -21,7 +21,7 @@ Cancelamento antes de publicação significa pausa da mesma tentativa, com fase 
 | Parsing privado estrito, canários em erros, digest/reserva/present-secret mismatch, legacy blocked e metadata imutável | mesma suíte |
 | LP1/artifact estáveis após restart; pausa explícita em identity/pending/confirmed; plano reutilizável | mesma suíte |
 | Desktop safeStorage real empacotado, scope privado variável/releitura/immutability/plaintext canary ou basic_text refusal | `releaseSmoke.ts` nos jobs Linux/Windows |
-| Android JS adapter variável/domínio/erros, AndroidKeyStore real/AndroidX AtomicFile, primeira escrita .new interrompida, leitura .bak legada, novas instâncias, tamper/key loss, operação v1 preservada | `secretStore.test.ts`, `SyncSecretStorageTest.kt` (4 testes no emulador readiness) |
+| Android JS adapter variável/domínio/erros, AndroidKeyStore real/AndroidX AtomicFile, primeira escrita .new interrompida, leitura .bak legada, novas instâncias, tamper/key loss, operação v1 preservada | `secretStore.test.ts`, `SyncSecretStorageTest.kt` (4 testes no emulador readiness, relatório de conclusão obrigatório em step separado) |
 | TestSecrets reserva imutável e scope exato | `apps/sync-server/src/testSupport.test.ts` |
 | Envelopes persistidos uma vez, restart SQLite/adapters após begin/envelope/batch/manifest/validate/transition/remote prepared | mesma suíte |
 | 107 operações em batches 100+7, decrypt → importer/projeção normal | mesma suíte |

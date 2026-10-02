@@ -155,4 +155,6 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect -no-boot-anim -camera-back none
           script: node tools/release/android-update-ci.cjs
+      - name: Require completed native preparation SecretStore evidence
+        run: node tools/release/android-secret-store-report.cjs
       # APKs are test candidates; never uploaded or called production signed.
