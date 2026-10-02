@@ -11,6 +11,34 @@ import time
 PACKAGES = ('com.lionpocketmobile', 'com.lionpocketmobile.beta')
 
 
+def prepare_emulator_root(serial, *, timeout=20, clock=time.monotonic,
+                          sleep=time.sleep, execute=subprocess.check_output):
+    """Reconnect only the disposable ADB setup; require actual root before fixtures."""
+    if not serial.startswith('emulator-'):
+        raise ValueError('Disposable emulator only')
+    started, last_error = clock(), 'ADB root has not become ready'
+    def command(*args):
+        remaining = timeout - (clock() - started)
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired('adb', timeout)
+        return execute(['adb', '-s', serial, *args], text=True,
+                       stderr=subprocess.STDOUT, timeout=min(5, remaining)).strip()
+    while clock() - started < timeout:
+        try:
+            if command('shell', 'getprop ro.kernel.qemu') != '1':
+                raise ValueError('Emulator guard failed')
+            if (command('shell', 'id -u') == '0'
+                    and command('shell', 'getprop sys.boot_completed') == '1'):
+                return
+            # adbd can close the connection while switching UID, even when root succeeds.
+            command('root')
+            command('wait-for-device')
+        except subprocess.SubprocessError as error:
+            last_error = str(error) + '\n' + str(getattr(error, 'output', '') or '')
+        sleep(min(.25, max(0, timeout - (clock() - started))))
+    raise AssertionError('Disposable emulator ADB/root setup timed out: ' + last_error)
+
+
 def wait_for_readiness(observe, diagnostics, *, expected=8, legacy=False,
                        expected_failure=None, timeout=60, clock=time.monotonic, sleep=time.sleep):
     started = clock()
@@ -57,9 +85,9 @@ class EmulatorDatabase:
         if not self.uid.isdigit():
             raise ValueError('Missing package storage UID')
 
-    def adb(self, *args):
+    def adb(self, *args, timeout=5):
         return subprocess.check_output(['adb', '-s', self.serial, *args],
-                                       text=True, stderr=subprocess.STDOUT, timeout=5).strip()
+                                       text=True, stderr=subprocess.STDOUT, timeout=timeout).strip()
 
     def shell(self, command):
         return self.adb('shell', command)
@@ -102,7 +130,9 @@ class EmulatorDatabase:
             'process': 'pidof ' + self.package + '; for p in $(pidof ' + self.package + '); do cat /proc/$p/status | head -12; done',
             'files': 'stat -c "%n uid=%u inode=%i size=%s mtime=%y" ' + self.target + ' ' + self.target + '-wal ' + self.target + '-shm',
             'activity': 'dumpsys activity activities',
-            'logcat': 'logcat -d -v threadtime -s ReactNativeJS:V AndroidRuntime:V ReactNative:V LionPocket:V ActivityManager:I ActivityTaskManager:I',
+            # Background system services can evict the initial app crash from a shared tail.
+            # Retain this app UID's native/JS events, including the first failed launch.
+            'logcat': 'logcat -d -v threadtime --uid=' + self.uid,
         }
         output = dict(serial=self.serial, packageName=self.package, uid=self.uid, database=self.target)
         for name, command in commands.items():
@@ -114,7 +144,15 @@ class EmulatorDatabase:
 
     def start_and_wait(self, legacy=False, timeout=60, expected=8, expected_failure=None):
         self.adb('logcat', '-c')
-        launch = self.adb('shell', 'am', 'start', '-n', self.package + '/com.lionpocketmobile.MainActivity')
+        try:
+            # Await Android's single launch; never restart the product to make a check pass.
+            launch = self.adb('shell', 'am', 'start', '-W', '-n',
+                              self.package + '/com.lionpocketmobile.MainActivity', timeout=timeout)
+        except subprocess.SubprocessError as error:
+            raise AssertionError(json.dumps(dict(
+                reason='Android activity launch failed',
+                launch=str(error) + '\n' + str(getattr(error, 'output', '') or ''),
+                diagnostics=self.diagnostics()), ensure_ascii=False, indent=2)) from error
         def diagnostic():
             return dict(launch=launch, **self.diagnostics())
         return wait_for_readiness(lambda: self.observe(legacy), diagnostic,

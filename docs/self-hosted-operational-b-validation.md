@@ -29,6 +29,7 @@ O recorte não escolhe uma nova decisão do Vault nem tenta corrigir a limitaç�
 | Digest backup v4 paginado, ciphertext/transition/fase comprometidos | `tools/self-hosted/test_staging_backup.py` |
 | Instalação self-hosted limpa, TLS/contas, backup v4/verify/restore, read-only da instalação | `tools/self-hosted/smoke.py` |
 | Cliente anterior real com seu próprio protocolo antigo | `tools/release/version-skew.cjs`, commits `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` e `cbd7067644c63e6c09802b208731b43d239c0031` |
+| Readiness Android: reconexão limitada de ADB/root antes dos fixtures, launch único aguardado e logs do UID do app; nenhum restart/reinstall/clear para passar o check | `tools/release/test_android_readiness.py`; processo/banco aberto/schema 8 continuam obrigatórios |
 
 ## Verificações locais
 
