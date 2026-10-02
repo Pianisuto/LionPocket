@@ -2,6 +2,7 @@
 """Local operations for the official stack. No shell evaluation of .env or secrets."""
 import datetime
 import getpass
+import importlib.util
 import hashlib
 import json
 import os
@@ -18,6 +19,10 @@ BASE = Path(__file__).resolve().parent
 CHECKOUT = BASE.parents[1]
 ENV = Path(os.environ.get('LP_ENV_FILE', BASE / '.env')).expanduser().resolve()
 SECRET_KEYS = ['POSTGRES_PASSWORD_FILE', 'SYNC_DB_PASSWORD_FILE', 'AUTH_DB_PASSWORD_FILE', 'KEYCLOAK_ADMIN_PASSWORD_FILE']
+_spec = importlib.util.spec_from_file_location('lp_restore_ledger', BASE / 'restore_ledger.py')
+ledger = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ledger)
+RESTORE_SCHEMA = (CHECKOUT / 'apps/sync-server/src/restore-schema.sql').read_text()
 
 
 def config(require_secrets=True):
@@ -105,14 +110,15 @@ def checksum(path):
 
 def verify(directory):
     manifest = json.loads((directory / 'manifest.json').read_text())
-    if manifest.get('formatVersion') != 1 or set(manifest['files']) not in [{'sync.dump', 'auth.dump', 'config.env', 'secrets.json'}, {'sync.dump', 'auth.dump', 'config.env', 'secrets.json', 'trust-ca.pem'}]:
+    if manifest.get('formatVersion') not in [1, 2] or set(manifest['files']) not in [{'sync.dump', 'auth.dump', 'config.env', 'secrets.json'}, {'sync.dump', 'auth.dump', 'config.env', 'secrets.json', 'trust-ca.pem'}]:
         raise ValueError('Manifesto de backup inválido.')
     for name, digest in manifest['files'].items():
         if checksum(directory / name) != digest:
             raise ValueError('Checksum de backup divergente.')
     for key in ['serverId', 'serverEpoch']:
-        if str(uuid.UUID(manifest[key])) != manifest[key]:
-            raise ValueError('Identidade de backup inválida.')
+        ledger.canonical_uuid(manifest[key])
+    if manifest['formatVersion'] == 2 and not re.fullmatch('[0-9a-f]{64}', str(manifest.get('restoreLedgerSha256', ''))):
+        raise ValueError('Manifesto de restaurações inválido.')
     return manifest
 
 
@@ -136,6 +142,11 @@ def write_private(path, content):
             stream.flush()
             os.fsync(stream.fileno())
         temporary.replace(path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -156,6 +167,9 @@ def rehearsal(cfg, directory):
         counts = json.loads(sql(cfg, "SELECT json_build_object('vaults',(SELECT count(*) FROM sync_vaults),'commits',(SELECT count(*) FROM sync_commits),'grants',(SELECT count(*) FROM sync_grants));", sync))
         if counts != manifest['counts'] or sql(cfg, "SELECT count(*) FROM realm WHERE name='lionpocket';", auth) != '1':
             raise ValueError('Backup incompleto.')
+        history = ledger.snapshot(sql, cfg, sync)
+        if manifest['formatVersion'] == 2 and ledger.digest(history) != manifest['restoreLedgerSha256']:
+            raise ValueError('Registro de restaurações divergente do manifesto.')
         before = identity[1]
         epoch = str(uuid.uuid4())
         sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';", sync)
@@ -195,6 +209,11 @@ def main():
         compose(cfg, 'ps')
         operator(cfg, 'status', '')
         print('API e autenticação acessíveis por HTTPS confiável.')
+        if ledger.snapshot(sql, cfg) is not None:
+            counts = json.loads(sql(cfg, "SELECT json_build_object('pending',count(*) FILTER(WHERE v.state!='recovered'),'authorized',count(*) FILTER(WHERE v.state='authorized_awaiting_baseline'),'recovered',count(*) FILTER(WHERE v.state='recovered')) FROM sync_restore_vaults v JOIN sync_restores r USING(restore_id) JOIN sync_environment e ON e.server_epoch=r.to_epoch;"))
+            print(f"{counts['pending']} cofres aguardam recuperação após restauração; {counts['authorized']} autorizações aguardam baseline; {counts['recovered']} recuperados no epoch atual.")
+            if counts['pending']:
+                print('Ativação e reconciliação entre epochs ainda indisponíveis nesta versão. Não force pins ou bindings.')
     elif command == 'user' and len(args) >= 2:
         username = args[2] if len(args) > 2 else input('Usuário: ').strip()
         if not re.fullmatch('[a-zA-Z0-9._@-]{1,128}', username):
@@ -236,7 +255,7 @@ def main():
                 files.append('trust-ca.pem')
             identity = sql(cfg, 'SELECT server_id::text,server_epoch::text FROM sync_environment;').split('|')
             counts = json.loads(sql(cfg, "SELECT json_build_object('vaults',(SELECT count(*) FROM sync_vaults),'commits',(SELECT count(*) FROM sync_commits),'grants',(SELECT count(*) FROM sync_grants));"))
-            manifest = {'formatVersion': 1, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'serverId': identity[0], 'serverEpoch': identity[1], 'counts': counts, 'files': {name: checksum(directory / name) for name in files}}
+            manifest = {'formatVersion': 2, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'serverId': identity[0], 'serverEpoch': identity[1], 'counts': counts, 'restoreLedgerSha256': ledger.digest(ledger.snapshot(sql, cfg)), 'files': {name: checksum(directory / name) for name in files}}
             (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
             print('Backup completo criado. Proteja o diretório fora do Git.')
         finally:
@@ -248,7 +267,7 @@ def main():
         if len(args) != 3 or args[2] != '--confirm-new-epoch':
             raise ValueError('Restore substitui ambos os bancos. Faça backup atual e use restore DIR --confirm-new-epoch. Clientes precisarão de reconciliação.')
         directory = Path(args[1]).resolve()
-        rehearsal(cfg, directory)
+        manifest = rehearsal(cfg, directory)
         admin = backup_admin(directory)
         # Account subjects and signing keys in auth.dump must match issuer/domain of this deployment.
         backup_cfg = dict(line.split('=', 1) for line in (directory / 'config.env').read_text().splitlines() if line and not line.startswith('#') and '=' in line)
@@ -258,6 +277,9 @@ def main():
             raise ValueError('Configure HOMELAB_CA_FILE com a raiz pública do backup antes de restaurar.')
         try:
             compose(cfg, 'stop', 'api', 'keycloak', capture=True)
+            # Preserve prior public evidence even when restoring an older backup.
+            journal_path = Path(cfg['KEYCLOAK_ADMIN_PASSWORD_FILE'] + '.restore-ledger.json')
+            live_history, displaced_epoch = ledger.preserve_before_restore(sql, cfg, journal_path, manifest['serverId'], write_private)
             if (directory / 'trust-ca.pem').is_file():
                 write_private(Path(cfg['HOMELAB_CA_FILE']), (directory / 'trust-ca.pem').read_bytes())
             for database, owner, name in [('lion_sync', 'sync_api', 'sync.dump'), ('lion_auth', 'keycloak', 'auth.dump')]:
@@ -267,11 +289,11 @@ def main():
             # Only confirmed restore changes this secret to match the restored
             # master realm. Database role passwords remain current credentials.
             write_private(Path(cfg['KEYCLOAK_ADMIN_PASSWORD_FILE']), admin.encode())
-            epoch = str(uuid.uuid4())
-            sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';")
+            ledger.record(sql, cfg, RESTORE_SCHEMA, manifest, checksum(directory / 'manifest.json'), live_history, displaced_epoch)
             compose(cfg, 'up', '-d', '--force-recreate', '--wait', '--wait-timeout', '300', 'api', 'keycloak', capture=True)
             # Health endpoints alone cannot detect a mismatched admin password.
             operator(cfg, 'check-admin', '')
+            journal_path.unlink()
         except (ValueError, OSError, KeyboardInterrupt):
             try:
                 stopped = compose(cfg, 'stop', 'api', 'keycloak', capture=True, check=False)
@@ -281,7 +303,7 @@ def main():
             if stop_failed:
                 raise ValueError('Restore falhou e não foi possível confirmar a parada da API/IdP. Pare-os manualmente imediatamente; não reinicie até restaurar bancos e segredo corretamente.') from None
             raise ValueError('Restore falhou; API/IdP permanecem parados. Bancos podem estar parcialmente restaurados. Não reinicie até repetir o restore confirmado com backup válido e segredo correspondente.') from None
-        print('Restore concluído com novo serverEpoch. Clientes conservam banco/outbox e exigem revisão; não altere envelopes assinados.')
+        print('Restore concluído e registrado com novo serverEpoch. Clientes conservam banco/outbox; autorização do proprietário não ativa sync nesta versão. Não altere envelopes assinados.')
     elif command == 'restart':
         compose(cfg, 'restart', 'api', 'keycloak')
         compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', 'api', 'keycloak')

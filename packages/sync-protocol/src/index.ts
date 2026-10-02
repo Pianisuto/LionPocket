@@ -6,3 +6,4 @@ export * from './control';
 export * from './decoder';
 export * from './provisioning';
 export * from './financial';
+export * from './epoch-recovery';

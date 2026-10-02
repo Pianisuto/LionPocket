@@ -362,9 +362,13 @@ describe.skipIf(!enabled)(
         'sync_deliveries',
         'sync_disabled_accounts',
         'sync_environment',
+        'sync_epoch_authorizations',
+        'sync_epoch_challenges',
         'sync_grants',
         'sync_http_nonces',
         'sync_pairings',
+        'sync_restore_vaults',
+        'sync_restores',
         'sync_vaults',
       ]);
     });

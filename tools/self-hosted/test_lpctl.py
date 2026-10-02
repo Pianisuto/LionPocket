@@ -77,6 +77,8 @@ class OperationsTest(unittest.TestCase):
         def sql(_cfg, query, database):
             nonlocal epoch
             self.assertTrue(database.startswith('lp_verify_'))
+            if 'pg_tables' in query:
+                return '0'
             if 'server_id::text' in query:
                 return '|'.join(self.identity)
             if 'json_build_object' in query:
@@ -201,10 +203,10 @@ class OperationsTest(unittest.TestCase):
                     if args[0] != 'stop' and failure in args:
                         raise ValueError('Synthetic restore failure')
                     return subprocess.CompletedProcess(args, 0)
-                write = patch.object(lp, 'write_private', side_effect=OSError('Synthetic disk error')) if failure == 'write' else patch.object(lp, 'write_private')
+                write = patch.object(lp, 'write_private', side_effect=OSError('Synthetic disk error')) if failure == 'write' else patch.object(lp, 'write_private', wraps=lp.write_private)
                 with patch.object(lp.sys, 'argv', ['lpctl', 'restore', str(self.backup), '--confirm-new-epoch']), \
-                     patch.object(lp, 'rehearsal'), patch.object(lp, 'compose', side_effect=compose), \
-                     patch.object(lp, 'sql'), write, \
+                     patch.object(lp, 'rehearsal', return_value=self.manifest), patch.object(lp, 'compose', side_effect=compose), \
+                     patch.object(lp, 'sql', return_value='|'.join(self.identity)), patch.object(lp.ledger, 'snapshot', return_value=None), patch.object(lp.ledger, 'record', return_value=('fixture', self.identity[1])), write, \
                      patch.object(lp, 'operator', side_effect=ValueError('Synthetic admin failure') if failure == 'admin' else None):
                     with self.assertRaisesRegex(ValueError, 'API/IdP permanecem parados'):
                         lp.main()
@@ -224,7 +226,8 @@ class OperationsTest(unittest.TestCase):
                         raise ValueError('Synthetic restore failure')
                     return subprocess.CompletedProcess(args, 0)
                 with patch.object(lp.sys, 'argv', ['lpctl', 'restore', str(self.backup), '--confirm-new-epoch']), \
-                     patch.object(lp, 'rehearsal'), patch.object(lp, 'compose', side_effect=compose):
+                     patch.object(lp, 'rehearsal', return_value=self.manifest), patch.object(lp, 'compose', side_effect=compose), \
+                     patch.object(lp, 'sql', return_value='|'.join(self.identity)), patch.object(lp.ledger, 'snapshot', return_value=None):
                     with self.assertRaisesRegex(ValueError, 'Pare-os manualmente imediatamente'):
                         lp.main()
 
