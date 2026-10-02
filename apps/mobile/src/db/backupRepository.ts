@@ -207,6 +207,9 @@ export async function verifyDatabase(
     throw new Error('O backup possui referências inválidas.');
 }
 export async function captureBackup(db: Connection): Promise<LocalBackup> {
+  if ((await db.executeAsync("SELECT name FROM sqlite_master WHERE type='table' AND name='recovery_journal'")).rows._array.length &&
+      (await db.executeAsync('SELECT restore_id FROM recovery_journal LIMIT 1')).rows._array.length)
+    throw new Error('epoch_archive_requires_sqlite_backup');
   return db.transaction(async (tx) => {
     const version = Number(
       (await tx.executeAsync<{ user_version: number }>('PRAGMA user_version'))

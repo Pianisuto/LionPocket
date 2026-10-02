@@ -22,6 +22,9 @@ SECRET_KEYS = ['POSTGRES_PASSWORD_FILE', 'SYNC_DB_PASSWORD_FILE', 'AUTH_DB_PASSW
 _spec = importlib.util.spec_from_file_location('lp_restore_ledger', BASE / 'restore_ledger.py')
 ledger = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ledger)
+_generation_spec = importlib.util.spec_from_file_location('lp_generation_backup', BASE / 'generation_backup.py')
+generations = importlib.util.module_from_spec(_generation_spec)
+_generation_spec.loader.exec_module(generations)
 RESTORE_SCHEMA = (CHECKOUT / 'apps/sync-server/src/restore-schema.sql').read_text()
 
 
@@ -110,15 +113,17 @@ def checksum(path):
 
 def verify(directory):
     manifest = json.loads((directory / 'manifest.json').read_text())
-    if manifest.get('formatVersion') not in [1, 2] or set(manifest['files']) not in [{'sync.dump', 'auth.dump', 'config.env', 'secrets.json'}, {'sync.dump', 'auth.dump', 'config.env', 'secrets.json', 'trust-ca.pem'}]:
+    if manifest.get('formatVersion') not in [1, 2, 3] or set(manifest['files']) not in [{'sync.dump', 'auth.dump', 'config.env', 'secrets.json'}, {'sync.dump', 'auth.dump', 'config.env', 'secrets.json', 'trust-ca.pem'}]:
         raise ValueError('Manifesto de backup inválido.')
     for name, digest in manifest['files'].items():
         if checksum(directory / name) != digest:
             raise ValueError('Checksum de backup divergente.')
     for key in ['serverId', 'serverEpoch']:
         ledger.canonical_uuid(manifest[key])
-    if manifest['formatVersion'] == 2 and not re.fullmatch('[0-9a-f]{64}', str(manifest.get('restoreLedgerSha256', ''))):
+    if manifest['formatVersion'] >= 2 and not re.fullmatch('[0-9a-f]{64}', str(manifest.get('restoreLedgerSha256', ''))):
         raise ValueError('Manifesto de restaurações inválido.')
+    if manifest['formatVersion'] == 3 and not re.fullmatch('[0-9a-f]{64}', str(manifest.get('generationArchiveSha256', ''))):
+        raise ValueError('Compromisso de gerações inválido.')
     return manifest
 
 
@@ -168,8 +173,11 @@ def rehearsal(cfg, directory):
         if counts != manifest['counts'] or sql(cfg, "SELECT count(*) FROM realm WHERE name='lionpocket';", auth) != '1':
             raise ValueError('Backup incompleto.')
         history = ledger.snapshot(sql, cfg, sync)
-        if manifest['formatVersion'] == 2 and ledger.digest(history) != manifest['restoreLedgerSha256']:
+        if manifest['formatVersion'] >= 2 and ledger.digest(history) != manifest['restoreLedgerSha256']:
             raise ValueError('Registro de restaurações divergente do manifesto.')
+        generation_digest = generations.commitment(sql, cfg, sync)
+        if manifest['formatVersion'] == 3 and generation_digest != manifest['generationArchiveSha256']:
+            raise ValueError('Arquivo de gerações divergente do manifesto.')
         before = identity[1]
         epoch = str(uuid.uuid4())
         sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';", sync)
@@ -255,7 +263,10 @@ def main():
                 files.append('trust-ca.pem')
             identity = sql(cfg, 'SELECT server_id::text,server_epoch::text FROM sync_environment;').split('|')
             counts = json.loads(sql(cfg, "SELECT json_build_object('vaults',(SELECT count(*) FROM sync_vaults),'commits',(SELECT count(*) FROM sync_commits),'grants',(SELECT count(*) FROM sync_grants));"))
-            manifest = {'formatVersion': 2, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'serverId': identity[0], 'serverEpoch': identity[1], 'counts': counts, 'restoreLedgerSha256': ledger.digest(ledger.snapshot(sql, cfg)), 'files': {name: checksum(directory / name) for name in files}}
+            generation_digest = generations.commitment(sql, cfg)
+            if generation_digest is None:
+                raise ValueError('Atualize a API antes de criar backup com gerações.')
+            manifest = {'formatVersion': 3, 'generationArchiveSha256': generation_digest, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'serverId': identity[0], 'serverEpoch': identity[1], 'counts': counts, 'restoreLedgerSha256': ledger.digest(ledger.snapshot(sql, cfg)), 'files': {name: checksum(directory / name) for name in files}}
             (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
             print('Backup completo criado. Proteja o diretório fora do Git.')
         finally:

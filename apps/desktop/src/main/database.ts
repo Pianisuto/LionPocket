@@ -2142,6 +2142,9 @@ export class LionPocketDatabase {
   }
 
   verifySyncBackupState(): void {
+    if (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='recovery_journal'").get() &&
+        this.db.prepare('SELECT restore_id FROM recovery_journal LIMIT 1').get())
+      throw new Error('epoch_archive_requires_sqlite_backup');
     const data = Object.fromEntries(syncTables.map((table) => [table, this.db.prepare(`SELECT * FROM ${table}`).all() as SqlRow[]]));
     validateSyncBackup(data);
   }

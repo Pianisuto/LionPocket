@@ -7,3 +7,4 @@ export * from './decoder';
 export * from './provisioning';
 export * from './financial';
 export * from './epoch-recovery';
+export * from './epoch-transition';

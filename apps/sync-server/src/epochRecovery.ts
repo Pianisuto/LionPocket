@@ -6,6 +6,7 @@ import {
 import { validateKeyCheckpoints, type ProvisioningCrypto } from '@lionpocket/sync-local';
 import type { PoolClient } from 'pg';
 import type { Identity } from './identity';
+import { sealRestoredGeneration } from './generations';
 
 /** Caller locks the vault before issuing/consuming a challenge. This handler never activates sync. */
 export async function epochRecovery(
@@ -104,8 +105,10 @@ export async function epochRecovery(
   )).rows[0];
   // Lost response retry returns the existing permission, never another mutation, even after expiration.
   if (previous && canonicalStringify(previous.authorization_envelope) === canonicalStringify(authorization) &&
-      canonicalStringify(previous.known_grants) === canonicalStringify(knownGrants))
+      canonicalStringify(previous.known_grants) === canonicalStringify(knownGrants)) {
+    await sealRestoredGeneration(tx, vaultId, environment.serverEpoch);
     return { state: 'authorized_awaiting_baseline', activationAvailable: false, authorization: previous.authorization_envelope };
+  }
   if (row.consumed) throw new Error('replay');
   if (!row.fresh) throw new Error('epoch_challenge_expired');
   if (previous) throw new Error('epoch_recovery_already_authorized');
@@ -115,5 +118,6 @@ export async function epochRecovery(
     [restored.restore_id, vaultId, authorization.challengeId, authorization, JSON.stringify(knownGrants)],
   );
   await tx.query("UPDATE sync_restore_vaults SET state='authorized_awaiting_baseline' WHERE restore_id=$1 AND vault_id=$2", [restored.restore_id, vaultId]);
+  await sealRestoredGeneration(tx, vaultId, environment.serverEpoch);
   return { state: 'authorized_awaiting_baseline', activationAvailable: false, authorization };
 }
