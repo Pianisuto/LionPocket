@@ -1,5 +1,7 @@
 # Evidência do recorte de preparação de recuperação
 
+Evidência histórica do PR #9. O incremento de arquivo/planejamento do anchor possui [evidência separada](self-hosted-anchor-generation-validation.md); nenhuma execução abaixo comprova ativação financeira.
+
 Execução local em 2026-10-01, branch `codex/restore-epoch-continuity`, base `546a0754bd52a1fc28c6fdcc94f5b69d9af9c095`. Somente bancos/contas/SQLite sintéticos e ambientes descartáveis. A evidência histórica de `self-hosted-validation.md` permanece inalterada.
 
 | Verificação | Resultado local |

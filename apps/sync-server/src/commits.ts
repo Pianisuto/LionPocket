@@ -15,6 +15,7 @@ import {
   type TrustPin,
 } from '@lionpocket/sync-protocol';
 import type { ProvisioningCrypto } from '@lionpocket/sync-local';
+import { requireActiveGeneration } from './generations';
 
 /** Caller holds the vault row lock and the HTTP proof savepoint. All ciphertext and graph writes are atomic. */
 export async function acceptCommit(
@@ -26,6 +27,7 @@ export async function acceptCommit(
   crypto: ProvisioningCrypto,
   activeKeyVersion = pin.keyVersion,
 ) {
+  await requireActiveGeneration(tx, pin);
   const envelope = decodeCommit(bytes);
   sameScope(envelope, pin);
   if (envelope.deviceId !== deviceId) throw new Error('forbidden');
@@ -189,6 +191,7 @@ export async function changesPage(
   pin: TrustPin,
   deviceId: string,
 ) {
+  await requireActiveGeneration(tx, pin);
   const request = exactObject(value, [
     'formatVersion',
     'bindingId',

@@ -2,9 +2,21 @@
 
 ## Estado desta implementação
 
-Este recorte entrega **registro operacional e autorização criptográfica de preparação**. Não entrega retomada da sincronização entre epochs. Nenhuma autorização desta versão ativa uma geração, muda TrustPin/binding, entrega chave nova ou libera a outbox. Os aplicativos continuam em `epoch_changed`, com uso financeiro local disponível. A extensão anuncia explicitamente `activationAvailable: false`; não existe botão de recuperação funcional na interface nativa.
+**Draft — preservação de gerações e planejamento do aparelho âncora; ativação permanece indisponível.**
 
-O critério de conclusão da recuperação completa **não está atendido**. Esta implementação é base revisável, destinada a PR draft, conforme o recorte seguro permitido pela especificação. As limitações abaixo são bloqueios de implementação, não verificações que possam ser removidas.
+A base é `cfaf1ea99f56af2fa9c1ac23b429bd21f33320dc` (main depois do PR #9). O PR #9 entregou ledger e autorização de preparação. Este incremento acrescenta índice de gerações, arquivo remoto imutável, helper de backup SQLite aberto/hashado, arquivo local por tabela, journal de preparação, mapping durável e contratos separados de manifesto/`EpochTransition`.
+
+O critério de retomada financeira **ainda não está atendido**. Não existem staging remoto, nova identidade/key/recovery B, ativação, instalação do binding B ou botão nativo de recuperação. Discovery e autorização continuam anunciando `activationAvailable:false`. Foreground não chama os novos helpers. As APIs normais continuam bloqueando A diante de B. Os helpers locais são exercitados exclusivamente com fixtures sintéticos, não instalados automaticamente nos bancos dos usuários.
+
+**O fluxo futuro deste PR recupera apenas o aparelho âncora.** Segundo aparelho e recovery sem SQLite antigo permanecem pendentes; nenhuma parte deste draft reconecta qualquer aparelho.
+
+### Bloqueio arquitetural novo, reproduzido em teste
+
+A projeção atual (`projectObject` em `transport-state.ts`) usa a revisão de base comum para apresentar um objeto com conflito. Em A, X/Y podem compartilhar base Z e o objeto permanece disponível. Reemitir somente X/Y como raízes B mantém dois heads, mas retira Z do grafo ativo: a projeção encontra `base_revision_id=null` e oculta o objeto. O teste `demonstrates why normal projection cannot install a root-only conflict baseline yet` reproduz isso usando SQLite real: A possui projeção visível e dois heads; a aplicação normal de raízes equivalentes em B preserva as branches, mas não instala a transação visível.
+
+Há um segundo aspecto do mesmo bloqueio: um head pode depender de uma revisão A histórica que já não é head. Reemitir essa revisão como raiz B adicional faz dela um head ativo; trocar a dependência para o head atual sem prova também altera seu significado. Tombstones históricos fora dos heads têm problema equivalente. Não se pode reutilizar IDs A nem escolher por timestamp.
+
+Antes de habilitar ativação, é preciso definir e implementar um rebase de histórico/projeção que mantenha o contexto desses conflitos, as dependências históricas e os tombstones, sem produzir heads extras ou novas decisões financeiras. Uma possibilidade a avaliar é um checkpoint cifrado de projeção/conflito junto da baseline; outra é uma representação explícita de revisões auxiliares, com prova de fechamento do grafo. **Nenhuma dessas decisões foi improvisada neste draft.** O planner grava review para dependência/tombstone histórico; planos de heads suportados ainda não são instaláveis pelo caminho normal. A fronteira de epoch permanece fechada para todos os casos, inclusive os aparentemente simples.
 
 ## Fronteira de segurança
 
@@ -62,59 +74,89 @@ A primeira autorização consome o desafio, grava a prova e muda apenas o estado
 
 Sem aparelhos antigos, esta versão permite provar a authority com código válido, mas **não reconstruir o cofre nem retomar sync**. Reconstrução a partir de ciphertext restaurado, nova identidade, registry, chave e recovery B continuam pendentes. Dados posteriores ao backup ausentes de todos os aparelhos/backups são fisicamente irrecuperáveis. A interface futura precisa informar essa perda possível antes de escolher o estado restaurado como referência.
 
-## Registro operacional, schema e backups
+## Modelo de gerações e schema do servidor
 
-Quatro tabelas aditivas guardam somente metadados públicos/cifrados:
+Decisão deste draft: **tabelas ativas v1 + tabelas de arquivo por geração**, usando `serverEpoch` como chave inequívoca junto de `vaultId`. Isso mantém o caminho normal de commits/changes sem uma segunda dimensão em cada consulta de operação.
 
-| Tabela | Invariante |
-| --- | --- |
-| `sync_restores` | Identificador único, serverId, origem do snapshot, destino único, epoch deslocado, instante PostgreSQL e SHA-256 do manifesto |
-| `sync_restore_vaults` | Um estado por restore/cofre; `source_epoch` preserva o epoch do pin restaurado |
-| `sync_epoch_challenges` | Desafios vinculados a restore/cofre/owner, prazo e consumo |
-| `sync_epoch_authorizations` | Uma autorização imutável pela API por restore/cofre e challenge único, com registry conhecido |
+`sync_generations(vault_id,server_epoch,state,archive_sealed)` possui PK composta e índice parcial que impede duas linhas `active` no mesmo cofre. A migration roda depois dos schemas v1 e é idempotente: reconhece o pin atual de cada cofre como geração selecionada, sem editar IDs, grants, recovery ou envelopes e sem produzir commits. Um trigger registra a geração de cofres novos. `requireActiveGeneration` também exige que geração selecionada, pin e ambiente corrente correspondam antes de `/commits` e `/changes`.
 
-O estado `recovered` está reservado; nenhuma rota desta versão o produz. Não são tabelas de gerações financeiras. As tabelas/envelopes financeiros antigos permanecem intactos, sem reescrita ou ativação no novo epoch. Continuam recuperáveis operacionalmente no snapshot e no banco restaurado; ainda não existe arquivo lógico separado consultável pelo cliente.
+Durante restore, A continua sendo a geração selecionada (`state='active'`), porém **sem transporte**, porque seu epoch difere do ambiente B. Selo do arquivo não significa ativação ou troca de geração. Só uma futura transação de ativação poderá marcar A `archived` e B `active`; ela não existe neste draft.
 
-`lpctl restore` captura o ledger público da instalação antes de substituir os dumps. Persiste um journal privado ao lado do arquivo externo do segredo administrativo (`.restore-ledger.json` como sufixo), com escrita/rename/fsync, antes de qualquer drop de banco. Retry após perda do processo usa esse journal mesmo se o banco corrente ficou ausente. O journal é removido somente depois de serviços e autenticação administrativa confirmados; não o apague durante reparação. Depois do restore, mescla esse ledger com o do backup, recusando divergências de registros imutáveis. Estado/consumo são monotônicos. Registra o novo restore e os cofres pendentes **na mesma transação da geração do novo epoch**. Não modifica pins, grants, recovery, ciphertext ou outbox. Não há comando administrativo de ativação criptográfica.
+Há oito tabelas `archive_*`, com colunas originais tipadas, `generation_epoch`, PKs e índices por cofre/geração:
 
-`from_epoch` é o epoch do snapshot; `displaced_epoch` é o epoch da instalação substituída. Eles podem diferir quando um backup mais antigo é restaurado. O ledger não é uma cadeia de transições assinadas: registra fatos operacionais. Preservar o ledger evita esquecer restores anteriores ao restaurar snapshot antigo. Se o backup contém servidor em B mas um cofre ainda em A, o desafio em C falha `epoch_recovery_chain_required`; não fabrica A→C nem presume que B foi autorizado. A mesma recusa se aplica ao restaurar novamente um snapshot A quando o ledger já conhece autorização assinada A→B: essa autorização não pode ser ignorada. A resolução dessa cadeia permanece bloqueada até a implementação de gerações e prova final.
+- `archive_sync_vaults`: owner, pin, registry/log counters, checkpoints, recovery cifrado e flags;
+- `archive_sync_grants`, `archive_sync_pairings`, `archive_sync_deliveries`;
+- `archive_sync_commits`: bytes exatos de `envelope_text`, digest, receipt, device sequence, registry de aceite e log position;
+- `archive_sync_operations`: identidade e parents;
+- `archive_sync_remote_heads`;
+- `archive_sync_remote_bindings`.
 
-Manifesto de backup v2 inclui `restoreLedgerSha256`, digest hex do JSON público ordenado (tabelas, campos e linhas por chave primária). `verify-backup` restaura os dumps em bancos temporários, confere integridade estrutural, referências e digest, sem alterar a instalação. Não verifica criptograficamente as assinaturas: essas são verificadas na API/cliente. Manifestos v1 continuam aceitos; backup legado sem ledger não fornece evidência de restore anterior. SHA-256 não substitui autenticidade externa do backup.
+Após autorização PR #9 aceita, o servidor copia o estado restaurado A e sela o arquivo **na mesma transação da autorização**. O pin e o log originais não mudam. Falha durante a cópia reverte consumo do challenge, autorização, estado do restore e todas as linhas do arquivo. Retry exato lê o mesmo resultado e não recopia. Triggers recusam UPDATE/DELETE nas linhas e INSERT após selo. Não se pode retirar o selo, apagar geração selada ou reativar uma geração marcada `archived` por esse modelo. O usuário de banco privilegiado continua sendo o operador; o arquivo não é uma auditoria externa.
 
-`lpctl status` mostra quantos cofres ainda aguardam recuperação, quantos deles já possuem autorização aguardando baseline e quantos estão recuperados no epoch corrente, com aviso explícito de indisponibilidade de ativação. Não promete que a autorização devolveu sync.
+O arquivo remoto representa o snapshot que existe no servidor restaurado. C2 fisicamente perdido pelo restore é preservado no arquivo **local** do anchor, não inventado no servidor. Nonces HTTP expirados não são parte do arquivo lógico. O ledger PR #9, `known_grants` (incluindo revogações posteriores ao backup) e desafios/autorização continuam duráveis e separados.
 
-## Bloqueios para a recuperação completa
+## Backup e arquivo local do anchor
 
-O bootstrap atual publica diretamente no log ativo. Não há staging isolado, manifesto completo ou ativação atômica. O SQLite usa um único grafo de revisões/heads, posições de inbox e binding; a validação de backup associa a inbox a esse binding. A reemissão existente conserva parents/dependencies antigos e não serve como rebase entre epochs. Usar esses caminhos para ativar B quebraria os invariantes de causalidade, assinatura ou crash safety.
+`prepareAnchorArchive` exige ação explicitamente confirmada, profile/binding financeiro A válido, assinatura de autorização PR #9 e authority seed disponível. Possuir apenas signing key de aparelho pareado ou login não basta. A helper não gera baseline com recovery code sem SQLite antigo.
 
-São necessárias as seguintes extensões, **ainda não implementadas**:
+Antes de criar qualquer tabela de preparação, o callback nativo cria backup SQLite consistente. O adapter desktop `createEpochAnchorBackup` usa `VACUUM INTO` em arquivo novo privado, abre o resultado read-only, verifica `integrity_check`, `foreign_key_check` e pin do binding, calcula SHA-256 dos bytes e sincroniza o arquivo. A segunda inspeção compara hash/pin antes da transação de arquivo. Falha aborta sem criar journal/arquivo. Android tem o contrato de inspeção compartilhado e testes de seu adapter SQLite real; a integração **nativa** de abertura/hash ainda precisa ser feita antes de expor o fluxo no Android.
 
-1. Gerações arquivadas/ativas distintas, restrições de unicidade e normal sync limitado à ativa; preservar todo o histórico A.
-2. Staging com lotes limitados, hashes/manifesto, validação de assinaturas/grafo/escopo e ativação atômica idempotente.
-3. Prova final `EpochTransition` em domínio próprio (por exemplo `LionPocket/epoch-transition/v1`) comprometendo a autorização, geração/manifesto, registry/checkpoint/recovery B, chave pública da authority e transição final anterior. Preparação não pode substituí-la.
-4. Revisão explícita dos aparelhos, novos grants B assinados, nova data key/checkpoint e deliveries apenas para ativos. Preservar chaves antigas; nunca reativar revogados conhecidos. Não há como deduzir uma revogação pós-backup se sua única evidência foi perdida.
-5. Recovery B: reembrulhar com recoveryMaster confirmado quando disponível; caso contrário novo código com confirmação antes de ativar. O código antigo nesta versão recupera somente o bundle antigo.
-6. Backup SQLite consistente antes de qualquer mutação; arquivo/mapeamento durável de binding, outbox e revisões antigas; instalação transacional do binding B e estratégia recuperável para secrets fora do SQLite.
-7. UX explícita de aparelho âncora, estados duráveis de preparação/upload/ativação/revisão e ingresso dos demais aparelhos. Foreground jamais inicia essa transição automaticamente.
+A extensão local é criada somente depois desse backup validado. Ela não altera a versão normal do schema e não é chamada pelo controller/foreground. Os archives possuem uma linha tipada por linha original, PK por cofre/epoch/identidade, sem um blob único de cofre. Copiam todos os sidecars atuais: `sync_local_state`, bindings, identity, revisions, heads, tombstones, revision_origin, outbox (payload, envelope, digest e receipt), inbox, conflicts, rejected, control, dirty, series, slots, import_provenance, bootstrap, review e aliases. A cópia de `sync_dirty` preserva trabalho ainda não capturado, porém impede um plano incompleto.
 
-### Baseline, causalidade e outbox: contrato da etapa pendente
+A transação cria `recovery_generations`, `recovery_journal`, todas as linhas do arquivo e seu selo/digest. O digest começa com profile público A/autorização e incorpora cada linha canônica, por tabela ordenada e PK, em páginas de 100. Tabelas de arquivo ficam imutáveis; binding/grafo/outbox/financeiro A continuam intactos. Novas edições locais após o selo continuam em A: este draft não as marca como migradas e não pode ativar o plano congelado.
 
-A baseline futura deve incluir estado sincronizável completo: categorias, pagamentos, cartões, transações, recorrências, parcelas, objetivos, prioridades, slots, aliases, séries, proveniência, dependências, tombstones e múltiplos heads. Global object IDs e identidades financeiras comprovadas permanecem; commit/op/revision IDs, binding, sequence, cursor, receipt e nonces de transporte são novos. Nunca reutilizar um commit/op ID com bytes diferentes.
+`recovery_journal` registra restore, vault, epochs, backup path/hash, profile público A, autorização e phase. Não contém seeds, DEKs ou recovery master/code. Hoje as fases são `archived`, `planned`, `review-required`, `cancelled`. Ainda não é a saga completa de SecretStore/staging/ativação. Retry usa o mesmo arquivo e mapping, não substitui silenciosamente o snapshot. Cancelamento local é idempotente e conserva backup, arquivo, mapping e A. Retomar após corrigir um review exige ainda definir uma nova tentativa/snapshot explícito; editar o arquivo selado não é uma opção.
 
-Cada revisão antiga relevante precisa de snapshot validado e revisão nova, com parents exclusivamente no DAG B e rastreabilidade `restoredFrom` quando comprovada. Conflito antigo mantém múltiplos heads novos. Exclusão mantém tombstone. A outbox A nunca é transmitida em B; seus bytes ficam arquivados. Somente após ativação confirmada, efeitos comprovadamente incluídos podem ser marcados superseded pela migração. Escolhas não projetadas ou efeitos sem evidência ficam em revisão.
+Exports JSON de sync v1 não conhecem essa extensão. Desktop/mobile recusam export completo pelo caminho legado quando há journal, com `epoch_archive_requires_sqlite_backup`, em vez de omitir o arquivo silenciosamente. SQLite nativo contém a extensão completa. Versionamento e restore de um export JSON com gerações são trabalho pendente; isso é mais um motivo para não expor o fluxo nativo neste draft. Exports financeiros sem alegação de backup de sync continuam separados.
 
-No cenário C1 no backup, C2 aceito depois do backup no desktop e C3 offline no Android, C2/C3 sobrevivem localmente nesta versão; **não são reconciliados em B**. A etapa futura compara DAGs locais com o estado restaurado e mapeamentos de snapshots. Equivalência comprovada não produz commits financeiros redundantes no segundo aparelho. Causalidade comprovada produz parents B correspondentes; concorrência, edição versus exclusão e evidência insuficiente exigem conflitos/revisão. Nunca há last-write-wins por horário. Tombstone exclusivo deve ser reemitido para impedir ressurreição silenciosa.
+## Planejamento da baseline e mapping A→B
 
-O segundo aparelho só reconecta depois de verificar a **prova final** pela authority já confiável, inclusão ativa no registry B, grant B e delivery novo. Deve fazer backup antes de baixar/comparar baseline, preservando dados locais exclusivos. Aparelho não autorizado permanece local e não recebe chave nova. Estas ações não estão disponíveis nesta versão.
+O planner consulta **heads/revisões do arquivo local**, não varre tabelas visíveis. Para cada head com snapshot válido, reserva novo revision/op ID e commit ID B, mantém object ID, autoria/audit e identidade financeira, define parents B vazios, `provenance.origin='restore'` e `restoredFrom=revision A`. Exclusão continua exclusão; múltiplos heads produzem múltiplas branches, inclusive delete/edit. Não há escolha por timestamp, merge automático ou envelope A reaproveitado.
+
+`recovery_revision_mapping` conserva A→B, object, commit B, ordinal e revisão B local. Uma transação reserva e valida tudo; crash durante mapping reverte o plano inteiro antes de qualquer publicação. Retry após plano confirmado reutiliza exatamente os IDs. O resultado é paginado, até 100 operações por página, e ainda não contém envelopes cifrados/transmissíveis.
+
+Dependências que apontam para heads presentes no arquivo são mapeadas e ordenadas topologicamente. Dependência histórica não representável, tombstone histórico fora dos heads, ciclo, snapshot inválido, identity unresolved, inbox não aplicada/quarentenada, dirty write ou qualquer review não informativo produzem `review-required`, sem mapping parcial utilizável. Não se inventa prova. Informações de audit já reconhecidas pelo controller (`active_key_version`, `reemission_provenance`, `legacy_import_review_provenance`, `import_receipt:*`) não bloqueiam sozinhas.
+
+`anchorPlanCommitments` calcula compromissos públicos paginados de archive/mapping/heads e contagem decimal, sem plaintext no resultado. Mapping acumula ordinal, IDs A/B/object/commit e hash da revisão B; heads acumulam pares `(objectId,revisionB)` em ordem lexical. **Esses compromissos não são um manifesto staged completo.** Envelope hash, registry/key/recovery B e completude remota continuam ausentes.
+
+No teste integrado, C1 é aceito antes do snapshot PostgreSQL e C2 é aceito depois. Restore perde C2 remoto. Owner conserva C2 local, autoriza, faz backup e arquivo, e o plano novo contém semanticamente C1+C2. Os IDs novos diferem dos op IDs A; os envelopes/outbox A permanecem byte a byte iguais. Android offline conserva inclusive C3 e não envia nada. Isso prova preservação/planejamento, **não ativação nem sync normal B**.
+
+## Manifesto B e prova final separada
+
+O protocolo acrescenta o contrato público `EpochBaselineManifest`, com format/scope/restore/anchor, digest da autorização, registry, key checkpoint, recovery, archive e mapping; contagens int64 textuais de commits/operations/batches; compromisso ordenado dos envelopes e dos heads. O digest usa JSON canônico UTF-8 com domínio `LionPocket/epoch-baseline-manifest/v1`. Não aceita snapshots, secrets ou campos extras.
+
+`EpochTransition` tem domínio obrigatório **`LionPocket/epoch-transition/v1`** para Ed25519 detached. Vincula server/vault/from/to/restore/authority, digest da autorização PR #9, estado restaurado, manifesto, TrustPin B, registry/checkpoint/recovery B, archive/mapping e `previousTransitionSha256` (null na primeira). O hash de encadeamento usa `LionPocket/epoch-transition-chain/v1` sobre a transition completa assinada.
+
+A helper de verificação confere assinatura, compromissos, pin A confiável, pin B distinto no mesmo vault/authority e tip anterior já verificado. A preparação não pode substituir a assinatura final. A→B→C em testes contratuais compromete A→B e recusa omissão/fork/salto. O caller deve validar a cadeia inteira confiável e a semântica dos artifacts/staging antes de considerar ativação: o verificador de compromissos **não valida ciphertext financeiro nem declara recovery/key/registry prontos**.
+
+`fixtures/epoch-transition.json` e `tools/epoch-recovery/generate-transition-vector.cjs` congelam bytes, hashes e assinatura com Node/OpenSSL, independentemente dos adapters sodium. São seeds públicas e artifacts de compromisso **somente de teste**, não registry/key/recovery de produção. Contagens maiores que `MAX_SAFE_INTEGER` evitam coerção numérica acidental.
+
+Não há rota para publicar ou ativar uma transition, nem tabela de transitions finalizadas neste draft. Esses contratos são revisáveis em draft antes de qualquer produção. O ledger continua auxiliar; não é a cadeia criptográfica final.
+
+## Staging, identidade, chave, recovery e saga: pendentes
+
+Não há staging remoto nesta implementação. O próximo passo precisa de begin/batches imutáveis idempotentes/validate/manifest/prepare, vinculados a restore/vault/owner/autorização/anchor B, com uma tentativa concorrente por autorização. Assinaturas, escopo, keyVersion, grafo público B, contagens, hashes e completude precisam ser validados sem plaintext. Não usar bootstrap nem `/commits` normal para essa preparação.
+
+A identidade operacional B deve ser nova (device/signing/box), mantendo serverId/vaultId/authority. Registry inicial só anchor, grants novos pela authority, chaves A preservadas. A chave ativa B deve ser nova e monotônica (`activeKeyVersionA+1`), com checkpoint/delivery exclusivo ao anchor e scopes próprios. A inicialização dessa cadeia ainda precisa resolver as assumptions atuais de `TrustPin.keyVersion=1` e checkpoints que começam em 2; não transportar uma cadeia/checkpoint A como se fosse B.
+
+Recovery B deve existir confirmado antes de ativar: reembrulhar com master previamente confirmado, mantendo o mesmo código, ou apresentar código novo e exigir redigitação. Deve conter scope/authority/registry e keys corretos, com versão monotônica. Nenhum código é alterado por este draft; recovery B/abertura em instalação limpa **não foram implementados nem testados**.
+
+A saga completa deve persistir profile B público, estado dos scopes/segredos (sem material privado), tentativa/staging, manifesto/transition e activation state. Depois de ativação PostgreSQL atômica, deve verificar a transition ativa e retomar instalação SQLite/profile após crash, sem nova baseline. Não há activation transaction nem instalação B aqui; nenhum crash posterior a ativação pode ser anunciado como coberto. Nunca apagar A nem fazer “cancelar” voltar para A depois da ativação.
+
+A outbox A não é transmitida em B e não recebe marca de superseded nesta preparação. Uma implementação futura só pode marcar efeitos com evidência suficiente, preservando envelopes/receipts. Reviews/drafts fora do grafo não são migrados silenciosamente.
+
+## Operação self-hosted e backups
+
+O ledger PR #9 continua com `sync_restores`, `sync_restore_vaults`, `sync_epoch_challenges`, `sync_epoch_authorizations`. `lpctl restore` preserva esse ledger num journal externo durável antes de substituir bancos, mescla estados monotônicos e gera novo epoch. Um cofre A ainda pendente não pula para C; autorização anterior não é apagada por restore antigo. Não existe comando administrativo de ativação.
+
+Backup operacional agora produz manifesto **v3**, acrescentando `generationArchiveSha256` ao digest do ledger v2 e aos checksums dos dumps sync/IdP. `pg_dump` inclui índice/tabelas ativas/archives e evidência de autorização. `verify-backup` continua read-only para a instalação: restaura ambos os dumps em bancos temporários, valida referências/geração selecionada/selo/positions/parents/heads e hash dos bytes dos envelopes arquivados, e calcula o compromisso em páginas de 100. Confere o digest v3 antes do ensaio de novo epoch. Falha limpa os bancos temporários e não modifica segredos/configuração/serviços ativos.
+
+Manifestos v1/v2 continuam aceitos explicitamente. Ausência total de estrutura de gerações é legacy, mas presença parcial ou arquivo inconsistente falha. Atualização da API migra estado legacy sem onboarding novo. Os checksums não substituem autenticação externa do backup, e a ferramenta não interpreta finanças ou verifica signatures pela authority. Staging/transitions futuros precisam ser incluídos quando existirem; não estão disfarçados como campos já persistidos.
 
 ## Validação e limites da evidência
 
-Os testes de protocolo cobrem vetor determinístico, domínio próprio, campos exatos, chave/escopo externo e alterações de todos os compromissos. A integração descartável PostgreSQL/Keycloak usa adapters SQLite reais desktop/mobile e comprova bloqueio sem alterar tabelas sync, C2/C3 locais, conta errada, servidor sem ledger, assinatura ausente/de outra authority, vault/epochs/restore/nonce incorretos, expiração no servidor e autorização por recovery em contexto limpo.
+Veja [evidência deste draft](self-hosted-anchor-generation-validation.md). A [evidência PR #9](self-hosted-epoch-recovery-validation.md) permanece histórica, com seus próprios limites.
 
-Fault injection entregue: abandono após challenge/assinatura; exceção PostgreSQL depois do consumo e antes de gravar autorização (rollback); perda de resposta simulada com retry após restart e expiração; perda do processo de restore depois do drop de banco, preservando o ledger no journal externo. A autorização tem uma única linha durável. Canários financeiros/recovery são procurados no PostgreSQL e logs da implantação sintética. Não há dados pessoais nos fixtures.
+Entregue: normal sync/cliente anterior, arquivo remoto transacional e imutável, SQLite backup/arquivo/mapping, C1+C2, tombstone/branches no plano, reviews, paginação, rollback/retry de preparação, contratos finais/chaining, clean-install/backup/verify/restore operacional e canários. **Não entregue:** geração B ativa, nova proteção B, staging/upload, activation replay/concurrency, instalação/saga B, todos os fault points posteriores ao planejamento, integração financeira E1→E2→E3, UX funcional de recuperação.
 
-O ensaio oficial `lpctl` usa clean-install, TLS confiável, backup/verify/restore duas vezes e prova **ledger operacional E1→E2→E3**. O teste de controle recusa salto de um cofre A ainda não recuperado para C. Isso **não é** recuperação financeira completa A→B→C. Não foram implementadas nem certificadas falhas no staging/ativação/binding/secrets/rebase ou convergência de tombstones/conflitos entre epochs. Clientes anteriores continuam no bloqueio seguro.
-
-Limites adicionais: os controles mantêm o limite existente de 64 KiB por pedido e 4 MiB por resposta. Registry maior que esses limites falha sem mutação; paginação/prova compacta de registry é trabalho futuro. Hash do log é paginado, mas a emissão do challenge ainda mantém lock do cofre durante a leitura. O ledger não constitui auditoria independente nem altera a confiança no operador.
-
-`protocolVersion=1`, `domainSchema=1` e wire financeiro permanecem iguais. Discovery adiciona somente `epochRecovery:{formatVersion:1,authorizationAvailable:true,activationAvailable:false}`. Fora de escopo: outro serverId/issuer/domínio, Cloud, background Android, GC e funcionalidades financeiras. As decisões do Vault/Visão e Decisões não foram alteradas: local-first, causalidade sem relógio, revisão explícita e autoridade do usuário continuam necessárias.
+`protocolVersion=1`, `domainSchema=1` e wire financeiro normal permanecem iguais. Discovery continua `epochRecovery:{formatVersion:1,authorizationAvailable:true,activationAvailable:false}`. As decisões do Vault/Visão e Decisões não foram alteradas: local-first, causalidade sem relógio, revisão explícita e autoridade do usuário permanecem necessárias.

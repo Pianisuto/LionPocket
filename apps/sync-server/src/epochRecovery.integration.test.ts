@@ -9,6 +9,7 @@ import sodium from 'libsodium-wrappers-sumo';
 import {
   authorizeEpochRecovery, authorizeEpochRecoveryWithCode, DeviceProvisioning, ProvisioningCrypto,
   SyncController, syncTables, type SyncSaved, type SyncSession, type SignedRecovery,
+  prepareAnchorArchive, planAnchorBaseline,
 } from '@lionpocket/sync-local';
 import { canonicalStringify, epochRecoverySigningInput, type EpochRecoveryChallenge, type EpochRecoveryAuthorization } from '@lionpocket/sync-protocol';
 import { LionPocketDatabase } from '../../desktop/src/main/database';
@@ -21,6 +22,8 @@ import { TestSecrets, syntheticBrowserLogin } from './testSupport';
 import { controlSchema, commitSchema, bindingSchema } from './schema';
 import { controlServer, initialize } from './server';
 import { keycloakIdentity } from './identity';
+import { generationArchiveKeys } from './generations';
+import { createEpochAnchorBackup, inspectEpochAnchorBackup } from '../../desktop/src/main/sync/epochBackup';
 
 describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore preparation with real SQLite adapters, PostgreSQL and OIDC', () => {
   const database = 'lion_epoch_' + randomUUID().replaceAll('-', '');
@@ -111,6 +114,8 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     const tx = await pool.connect();
     try {
       await tx.query('BEGIN');
+      // A physical pg_restore recreates this schema too. The in-DB fixture clears its generation index before its vault rows.
+      await tx.query('DELETE FROM sync_generations');
       for (const t of [...tables].reverse()) await tx.query(`DELETE FROM ${t}`);
       for (const t of tables) await tx.query(`INSERT INTO ${t} SELECT * FROM jsonb_populate_recordset(NULL::${t},$1::jsonb)`, [JSON.stringify(snapshot.get(t))]);
       restoreId = crypto.uuid(); environment.serverEpoch = crypto.uuid();
@@ -182,6 +187,15 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     expect((await request('epoch-recovery-authorize', submission(accepted))).status).toBe(503);
     expect((await pool.query('SELECT consumed FROM sync_epoch_challenges WHERE challenge_id=$1', [active.challengeId])).rows[0].consumed).toBe(false);
     await pool.query('DROP TRIGGER epoch_fault ON sync_epoch_authorizations; DROP FUNCTION epoch_fault();');
+    // A crash while freezing the old ciphertext must roll back permission consumption AND every archive row.
+    await pool.query(`CREATE FUNCTION archive_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic_archive_fault'; END $$;
+      CREATE TRIGGER archive_fault BEFORE INSERT ON archive_sync_commits FOR EACH ROW EXECUTE FUNCTION archive_fault();`);
+    expect((await request('epoch-recovery-authorize', submission(accepted))).status).toBe(503);
+    expect((await pool.query('SELECT consumed FROM sync_epoch_challenges WHERE challenge_id=$1', [active.challengeId])).rows[0].consumed).toBe(false);
+    expect((await pool.query('SELECT count(*) FROM sync_epoch_authorizations')).rows[0].count).toBe('0');
+    for (const table of Object.keys(generationArchiveKeys))
+      expect((await pool.query(`SELECT count(*) FROM archive_${table}`)).rows[0].count).toBe('0');
+    await pool.query('DROP TRIGGER archive_fault ON archive_sync_commits; DROP FUNCTION archive_fault();');
     const result = await request('epoch-recovery-authorize', submission(accepted));
     expect(result.body).toMatchObject({ state: 'authorized_awaiting_baseline', activationAvailable: false });
     await new Promise<void>(resolve => server.close(() => resolve())); await startServer();
@@ -197,11 +211,39 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     expect(snapshotLocal()).toEqual(before);
     expect((await pool.query('SELECT pin FROM sync_vaults')).rows[0].pin.serverEpoch).toBe(epochA);
     expect((await request('commits', {})).body.error).toBe('invalid_http_proof');
-    for (const table of [...tables, 'sync_restores', 'sync_restore_vaults', 'sync_epoch_challenges', 'sync_epoch_authorizations']) {
+    for (const table of [...tables, ...Object.keys(generationArchiveKeys).map(t => `archive_${t}`), 'sync_generations', 'sync_restores', 'sync_restore_vaults', 'sync_epoch_challenges', 'sync_epoch_authorizations']) {
       const persisted = (await pool.query(`SELECT coalesce(jsonb_agg(t),'[]')::text AS value FROM ${table} t`)).rows[0].value;
       for (const privateValue of [canary, code, 'DESKTOP_C2_AFTER_BACKUP', 'ANDROID_C3_OFFLINE'])
         expect(persisted.includes(privateValue)).toBe(false);
     }
+  });
+  it('archives exact restored ciphertext and plans C1+C2 from the owner graph while Android A is untouched', async () => {
+    const before = snapshotLocal();
+    for (const table of Object.keys(generationArchiveKeys)) {
+      const source = (await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
+      const archive = (await pool.query(`SELECT to_jsonb(t)-'generation_epoch' AS row FROM archive_${table} t ORDER BY (to_jsonb(t)-'generation_epoch')::text`)).rows;
+      expect(archive).toEqual(source);
+    }
+    expect((await pool.query('SELECT archive_sealed,state FROM sync_generations')).rows).toEqual([{ archive_sealed: true, state: 'active' }]);
+    await expect(pool.query("UPDATE archive_sync_commits SET envelope_text='changed'")).rejects.toThrow('immutable');
+    await expect(pool.query('DELETE FROM archive_sync_grants')).rejects.toThrow('immutable');
+    await expect(pool.query('UPDATE sync_generations SET archive_sealed=false')).rejects.toThrow('immutable');
+    await expect(pool.query("INSERT INTO sync_generations(vault_id,server_epoch,state) VALUES($1,$2,'active')", [oldVault(), crypto.uuid()])).rejects.toThrow();
+    await pool.query(controlSchema + commitSchema + bindingSchema); // Idempotent migration preserves every sealed row.
+    const authorization = (await pool.query('SELECT authorization_envelope FROM sync_epoch_authorizations')).rows[0].authorization_envelope;
+    await prepareAnchorArchive({ db: bank.syncDatabase(), device: device(), acceptedAuthorization: authorization, confirmed: true,
+      backup: () => createEpochAnchorBackup(bank.db, join(directory, 'anchor-generation-backup.sqlite')), inspectBackup: inspectEpochAnchorBackup });
+    await bank.syncDatabase().run(planAnchorBaseline(authorization.restoreId, () => crypto.uuid()));
+    const planned = bank.db.prepare('SELECT * FROM recovery_revision_mapping ORDER BY ordinal').all();
+    expect(planned.map(r => JSON.parse(String(r.revision_b_json)).snapshot.description)).toEqual(expect.arrayContaining([canary, 'DESKTOP_C2_AFTER_BACKUP']));
+    expect(planned).toHaveLength(2);
+    const newIds = new Set(planned.map(r => r.revision_b));
+    for (const old of before.desktop.sync_revisions) expect(newIds.has(old.revision_id)).toBe(false);
+    expect(snapshotLocal()).toEqual(before);
+    // Neither normal financial table nor pin/profile B is installed by planning.
+    expect(bank.db.prepare('SELECT server_epoch FROM sync_local_state').get()!.server_epoch).toBe(epochA);
+    expect((await pool.query('SELECT count(*) FROM sync_commits')).rows[0].count).toBe('1');
+    expect((await request('epoch-recovery-activate', {})).status).toBe(404);
   });
   it('keeps pending authorization history across B→C and refuses A→C skipping unrecovered B', async () => {
     const epochB = environment.serverEpoch; environment.serverEpoch = crypto.uuid();

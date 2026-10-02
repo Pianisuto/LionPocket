@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { generationSchema } from './generations';
 export const restoreSchema = readFileSync(new URL('./restore-schema.sql', import.meta.url), 'utf8');
 /** Public identities and authorization only. No financial plaintext. */
 export const controlSchema = `
@@ -55,4 +56,4 @@ CREATE TABLE IF NOT EXISTS sync_remote_bindings (
   binding_id uuid PRIMARY KEY, vault_id uuid NOT NULL REFERENCES sync_vaults(vault_id),
   server_epoch uuid NOT NULL, device_id uuid NOT NULL
 );
-`;
+` + generationSchema;
