@@ -50,3 +50,5 @@ Coberto nesta preparação:
 **Não implementados/testados:** secrets/profile/registry/key/recovery B; abertura de recovery B em instalação limpa; staging/upload/manifesto remoto completo; activation transaction/replay/concorrência; crash após ativação e saga de instalação B; sync normal B; integração financeira do anchor E1→E2→E3. As contagens/nomes de testes acima não certificam esses cenários. Segundo aparelho e recovery sem SQLite antigo permanecem pendentes.
 
 Windows normal/beta, packaged/installed Electron smoke e upgrade Android de aplicativo instalado são responsabilidade dos workflows de readiness acionados pelo PR. O resultado remoto deve ser consultado no PR; a evidência local não afirma sucesso desses jobs. Nenhuma decisão do Vault/Visão e Decisões foi alterada.
+
+A primeira execução Windows do PR encontrou `EPERM` no flush do arquivo de backup aberto com `r`. A correção usa `r+`, sem truncar ou escrever bytes, pois `FlushFileBuffers` exige acesso de escrita. A inspeção SQLite/hash posterior continua read-only. Os oito testes locais de archive passaram novamente; os checks do HEAD atualizado são a evidência da validação Windows.

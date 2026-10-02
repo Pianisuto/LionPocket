@@ -9,7 +9,8 @@ import type { AnchorBackupInspection, VerifiedAnchorBackup } from '@lionpocket/s
 export async function createEpochAnchorBackup(db: DatabaseSync, target: string): Promise<VerifiedAnchorBackup> {
   db.prepare('VACUUM INTO ?').run(target);
   await chmod(target, 0o600);
-  const handle = await open(target, 'r');
+  // Windows FlushFileBuffers requires write access; r+ preserves the completed backup bytes.
+  const handle = await open(target, 'r+');
   try { await handle.sync(); } finally { await handle.close(); }
   if (process.platform !== 'win32') {
     const directory = await open(dirname(target), 'r');
