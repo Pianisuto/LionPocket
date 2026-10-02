@@ -3,7 +3,8 @@
 Requires old APKs supplied by the operator (or generated from the base revision).
 No clear-storage, uninstall, downgrade, personal data or signature workaround.
 """
-import argparse, json, os, pathlib, sqlite3, subprocess, tempfile, time
+import argparse, json, pathlib, sqlite3, subprocess, tempfile
+from android_readiness import EmulatorDatabase
 
 p = argparse.ArgumentParser()
 p.add_argument('--serial', required=True)
@@ -32,13 +33,18 @@ for pkg, old, new, versions in [
     # Refuse any already-present package in this emulator at the start.
     if shell('pm path ' + pkg + ' || true'): raise SystemExit('Use a fresh disposable AVD without LionPocket packages.')
     install_old = adb('install', old)
-    adb('shell', 'am', 'start', '-n', pkg + '/com.lionpocketmobile.MainActivity')
-    time.sleep(5)
-    adb('shell', 'am', 'force-stop', pkg)
+    observer = EmulatorDatabase(a.serial, pkg)
+    try:
+        observer.start_and_wait(legacy=True)
+    finally:
+        adb('shell', 'am', 'force-stop', pkg)
     uid = shell('stat -c %u /data/user/0/' + pkg)
+    storage = shell('stat -c %u:%i /data/user/0/' + pkg)
     for index, version in enumerate(versions):
         # Fixture injection is offline preparation, before replacement. No user storage is cleared.
         target = '/data/user/0/' + pkg + '/files/lionpocket.sqlite'
+        if shell('pidof ' + pkg + ' || true'):
+            raise AssertionError('Fixture injection requires a stopped process')
         src = fixtures / ('v' + str(version) + '.sqlite')
         shell('mkdir -p /data/user/0/' + pkg + '/files')
         adb('push', str(src), '/data/local/tmp/lion-release-fixture.sqlite')
@@ -47,10 +53,19 @@ for pkg, old, new, versions in [
         shell('chown ' + uid + ':' + uid + ' ' + target + '; chmod 600 ' + target + '; restorecon ' + target)
         # Record source schema and every value of every existing column, including queues.
         before = json.loads((fixtures / ('v' + str(version) + '.json')).read_text())
+        if observer.schema() != version:
+            raise AssertionError('Fixture injected into the wrong database or schema')
         replacement = adb('install', '-r', new)
-        adb('shell', 'am', 'start', '-n', pkg + '/com.lionpocketmobile.MainActivity')
-        time.sleep(6)
-        adb('shell', 'am', 'force-stop', pkg)
+        try:
+            readiness = observer.start_and_wait()
+            evidence = observer.diagnostics()
+            print(json.dumps(dict(package=pkg, sourceSchema=version, readiness=readiness, evidence=evidence)), flush=True)
+        finally:
+            adb('shell', 'am', 'force-stop', pkg)
+        if shell('pidof ' + pkg + ' || true'):
+            raise AssertionError('Cannot extract a live database')
+        if shell('stat -c %u:%i /data/user/0/' + pkg) != storage:
+            raise AssertionError('Replacement removed or changed package storage')
         with tempfile.TemporaryDirectory(prefix='lion-release-extracted-') as temp:
             local = pathlib.Path(temp) / 'after.sqlite'
             local.write_bytes(adb('exec-out', 'cat', target, binary=True))
@@ -73,6 +88,6 @@ for pkg, old, new, versions in [
             foreign = db.execute('PRAGMA foreign_key_check').fetchall()
             if integrity != [('ok',)] or foreign: raise AssertionError('Integrity/FK failure')
             db.close()
-        results.append(dict(package=pkg, sourceSchema=version, targetSchema=current, oldInstall=install_old if index == 0 else 'current fixture installation', replacement=replacement, recordsCompared=checks, tablesCompared=len(before['tables']), integrity='ok', foreignKeyViolations=0, storageCleared=False))
+        results.append(dict(package=pkg, sourceSchema=version, targetSchema=current, oldInstall=install_old if index == 0 else 'current fixture installation', replacement=replacement, recordsCompared=checks, tablesCompared=len(before['tables']), integrity='ok', foreignKeyViolations=0, storageCleared=False, storageIdentity=storage, readiness=readiness, evidence=evidence))
 pathlib.Path(a.report).write_text(json.dumps(dict(syntheticOnly=True, serial=a.serial, scenarios=results), indent=2) + '\n')
 print(json.dumps(results))

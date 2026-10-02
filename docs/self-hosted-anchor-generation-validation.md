@@ -8,7 +8,7 @@ O [modelo de fechamento, mapping, replay e reviews](self-hosted-epoch-recovery.m
 
 | Verificação | Resultado local |
 | --- | --- |
-| `npm test` | 407 passaram; 33 condicionais de integração separados |
+| `npm test` | 409 passaram; 33 condicionais de integração separados |
 | Desktop private beta, timeout/hookTimeout de 30s | 153 passaram |
 | `npm run typecheck` | Todos os workspaces/harnesses passaram |
 | `npm run lint` | Zero erros; warnings de non-null assertions/regras existentes |
@@ -74,5 +74,7 @@ Snapshots de todos os sidecars/outbox/binding e perfil A permanecem iguais. Andr
 `EpochBaselineManifest.mappingSha256` já compromete o novo digest causal v2. Manifesto, EpochTransition e vetor determinístico não mudaram; testes A→B→C e rejeição de A→C continuam passando. Nenhuma decisão do Vault/Visão e Decisões precisou mudar.
 
 Os workflows do PR verificam Windows/Linux normal/private beta, packaged/installed Electron e Android debug/normal/private beta/upgrade. A tabela acima é evidência local; resultado remoto deve ser consultado no PR, sem alegação antecipada de sucesso.
+
+A [investigação e validação de readiness Android](android-upgrade-readiness-validation.md) registra a falha do run inicial do PR #11, a reprodução controlada do encerramento antes do startup, o critério verificável que substitui sleeps e a matriz v1/v4/v5/v8/beta. O rebase causal, `workflow.throw`, `preserveUncapturedWrites` e `activationAvailable:false` não mudaram nessa correção.
 
 Limites explícitos: tombstone desconectado, ressurreição e audit de deletes sem interpretação inequívoca permanecem em review. Grafos cujo cache/referências não podem ser materializados normalmente também bloqueiam. Review v2 ainda requer desenho futuro de nova tentativa/snapshot; somente planos v1 incompatíveis possuem descarte/replanejamento nesta implementação. Não há proteção operacional B, staging/activation, recuperação multi-device, instalação B nem saga pós-ativação. O futuro uploader deverá consumir o mapping causal e as mesmas identities/slots, sem compactação ou redefinição dos heads.
