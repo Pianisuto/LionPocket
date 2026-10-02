@@ -242,7 +242,15 @@ export async function acceptKeyCheckpoints(
   const alreadyReceived =
     available !== null && device.profile.activeKeyVersion === version;
   if (available) device.crypto.erase(available);
-  if (entries.length && !alreadyReceived) {
+  // A delivery already received from an approved device must still match the authority checkpoint
+  // whenever that checkpoint includes this recipient. Only a newly joined recipient absent from
+  // the historical checkpoint can rely on its complete, signed epoch-key delivery instead.
+  const addressed =
+    entries.length &&
+    entries[entries.length - 1].deliveries.some(
+      (d) => d.deviceId === device.profile.deviceId,
+    );
+  if (entries.length && (!alreadyReceived || addressed)) {
     const delivery = entries[entries.length - 1].deliveries.find(
       (d) => d.deviceId === device.profile.deviceId,
     );

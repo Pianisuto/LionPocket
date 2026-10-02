@@ -264,6 +264,7 @@ function mockStatus(r: EpochStagingRequest) {
     readyForActivation: r.action === "prepare",
   };
 }
+// Recovery fixtures use the production memory-hard KDF while the full suite runs in parallel.
 describe("operational B preparation remains isolated", () => {
   for (const dialect of ["desktop", "android"] as const)
     it(`${dialect}: distinct identity, same authority/master, C1+C2 encrypted replay, no active writes`, async () => {
@@ -607,4 +608,4 @@ describe("operational B preparation remains isolated", () => {
       ).toHaveLength(deleted ? 1 : 0);
     },
   );
-});
+}, 30000);

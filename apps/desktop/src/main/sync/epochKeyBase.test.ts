@@ -120,6 +120,39 @@ describe("key base belongs to a generation", () => {
       ).toBe(base);
     },
   );
+  it("compares received keys to an authority checkpoint addressed to this device", async () => {
+    const { client: a } = await founder(new ProvisioningCrypto(sodium));
+    const b = await DeviceProvisioning.prepare(
+        a.profile.pin,
+        new TestSecrets(),
+        a.crypto,
+      ),
+      request = await b.request();
+    const grant = await a.grant(request, request.fingerprint);
+    a.acceptRegistry({
+      pin: a.profile.pin,
+      grants: [...a.profile.grants, grant],
+      delivery: null,
+    });
+    const checkpoint = await makeKeyCheckpoint(a);
+    const response = {
+      pin: a.profile.pin,
+      grants: a.profile.grants,
+      delivery: null,
+      keyCheckpoints: [checkpoint],
+    };
+    await acceptKeyCheckpoints(a, response);
+    await b.receive({
+      ...response,
+      delivery: await a.delivery(b.profile.deviceId),
+    });
+    const wrong = sodium.randombytes_buf(32);
+    await b.secrets.store(b.scope("dataKey", 2), wrong);
+    wrong.fill(0);
+    await expect(acceptKeyCheckpoints(b, response)).rejects.toThrow(
+      "key_mismatch",
+    );
+  });
   it("reads strict legacy recovery v1 and rejects mixed or permissive v2 fields", async () => {
     const { client: a } = await founder(new ProvisioningCrypto(sodium));
     const r = await makeRecovery(a, sodium, "1");
