@@ -2,7 +2,7 @@ package com.lionpocketmobile
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.AtomicFile
+import androidx.core.util.AtomicFile
 import android.util.Base64
 import com.facebook.react.bridge.*
 import com.facebook.react.ReactPackage
@@ -56,6 +56,7 @@ internal class SyncSecretStorage(private val context: android.content.Context) {
       .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).setRandomizedEncryptionRequired(true).build())
     return generator.generateKey()
   }
+  private fun committed(target: AtomicFile) = target.baseFile.exists() || File(target.baseFile.path + ".bak").exists()
   private fun validLength(preparation: Boolean, size: Int) = if (preparation) size in 1..MAX_PREPARATION_BYTES else size == 32
   fun store(aad: String, encoded: String): Unit = synchronized(lock) {
     val preparing = preparation(aad)
@@ -64,26 +65,30 @@ internal class SyncSecretStorage(private val context: android.content.Context) {
     try {
       require(validLength(preparing, secret.size) && Base64.encodeToString(secret, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) == encoded)
       val target = file(aad)
-      if (preparing && target.baseFile.exists()) {
+      if (preparing && committed(target)) {
         val existing = load(aad)
         check(existing == encoded) { "Preparation secret is immutable." }
         return@synchronized
       }
       // Never silently replace a lost key when an encrypted wrapper already exists in this domain.
       val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-      cipher.init(Cipher.ENCRYPT_MODE, key(aad, target.baseFile.parentFile!!.listFiles()?.none { it.name.endsWith(".bin") } == true))
+      cipher.init(Cipher.ENCRYPT_MODE, key(aad, target.baseFile.parentFile!!.listFiles()?.none { it.name.endsWith(".bin") || it.name.endsWith(".bin.bak") } == true))
       cipher.updateAAD(aad.toByteArray(Charsets.UTF_8))
       val encrypted = cipher.doFinal(secret)
       check(cipher.iv.size == 12 && encrypted.size == secret.size + 16)
+      // AndroidX writes .new on every supported API, including the first write on Android 24.
       val stream = target.startWrite()
-      try { stream.write(byteArrayOf(if (preparing) 2 else 1) + cipher.iv + encrypted); target.finishWrite(stream) }
-      catch (error: Exception) { target.failWrite(stream); throw error }
+      try {
+        stream.write(byteArrayOf(if (preparing) 2 else 1) + cipher.iv + encrypted)
+        stream.fd.sync() // Surface durability failures before publication; do not rely on logged-only errors.
+        target.finishWrite(stream)
+      } catch (error: Exception) { target.failWrite(stream); throw error }
     } finally { secret.fill(0) }
   }
   fun load(aad: String): String? = synchronized(lock) {
     val preparing = preparation(aad)
     val target = file(aad)
-    if (!target.baseFile.exists()) return@synchronized null
+    if (!committed(target)) return@synchronized null
     val bytes = target.openRead().use { stream ->
       require(stream.channel.size() <= if (preparing) (MAX_PREPARATION_BYTES + 29).toLong() else 61L)
       stream.readBytes()

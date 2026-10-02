@@ -61,7 +61,11 @@ class SyncSecretStorageTest {
   @Test fun incompleteFirstWriteDoesNotBecomeADurableReservation() {
     SyncSecretStorage(context).load(aad) // Resolve the directory without reserving a public identity.
     val name = java.security.MessageDigest.getInstance("SHA-256").digest(aad.toByteArray()).joinToString("") { "%02x".format(it) }
-    File(wrappers(), "$name.bin.new").writeBytes(byteArrayOf(2, 0, 0))
+    val publication = androidx.core.util.AtomicFile(File(wrappers(), "$name.bin"))
+    val interrupted = publication.startWrite()
+    interrupted.write(byteArrayOf(2, 0, 0)); interrupted.fd.sync(); interrupted.close() // Process dies before finishWrite.
+    assertFalse(publication.baseFile.exists())
+    assertTrue(File(publication.baseFile.path + ".new").exists())
     val restarted = SyncSecretStorage(context)
     assertNull(restarted.load(aad))
     restarted.store(aad, encoded)
@@ -96,5 +100,10 @@ class SyncSecretStorageTest {
     assertEquals(61L, file.length()); assertEquals(1.toByte(), file.readBytes()[0])
     refuses { store.store(operational, encoded) }
     assertTrue(store.load(operational) == secret)
+    // Legacy platform AtomicFile can leave only .bak after a crash. Preserve those operational bytes too.
+    val backup = File(file.path + ".bak")
+    assertTrue(file.renameTo(backup))
+    assertTrue(SyncSecretStorage(context).load(operational) == secret)
+    assertTrue(file.exists()); assertFalse(backup.exists())
   }
 }

@@ -195,7 +195,7 @@ O bundle privado formatVersion 1 guarda deviceId B; signingSeed, boxSeed e dataK
 
 Parsing exige JSON canônico/exact object, UUIDs, comprimentos exatos, scope/plano/profile A confiáveis. Recalcula public keys signing/box/authority e valida recovery A/master/DEKs antes de aceitar. Toda reserva pública precisa coincidir exatamente com o bundle, sem reparo de um lado pelo outro. Mensagens de parsing são fixas e não citam conteúdo privado. O bundle tem limite de 128 KiB.
 
-Desktop usa safeStorage seguro, tempfile fsynced e publicação create-if-absent por hard link; uma reserva existente diferente é recusada. Linux basic_text/unavailable continua recusado. Android usa AES-GCM AndroidKeyStore + AtomicFile no noBackupFilesDir, alias/diretório exclusivos da preparação, wrapper versão 2; wrappers operacionais versão 1/32 bytes permanecem compatíveis. TestSecrets aplica a mesma imutabilidade. Os três adapters aceitam bytes variáveis somente nesse scope específico.
+Desktop usa safeStorage seguro, tempfile fsynced e publicação create-if-absent por hard link; uma reserva existente diferente é recusada. Linux basic_text/unavailable continua recusado. Android usa AES-GCM AndroidKeyStore + AndroidX AtomicFile (.new em todas as APIs suportadas, incluindo primeira escrita, com fsync explícito antes de publicar; lê backups .bak operacionais legados) no noBackupFilesDir, alias/diretório exclusivos da preparação, wrapper versão 2; wrappers operacionais versão 1/32 bytes permanecem compatíveis. TestSecrets aplica a mesma imutabilidade. Os três adapters aceitam bytes variáveis somente nesse scope específico.
 
 ### Saga local e crash recovery
 
