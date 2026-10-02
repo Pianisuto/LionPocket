@@ -1,5 +1,8 @@
 import {
   activeDevice,
+  baseKeyVersion,
+  assertKeyVersion,
+  validateEpochDataKeys,
   assertBase64Url,
   assertDecimal64,
   assertUuid,
@@ -14,9 +17,9 @@ import {
   type RecoveryBundle,
   type RecoveryEnvelope,
   type TrustPin,
-} from '@lionpocket/sync-protocol';
-import { DeviceProvisioning, type RegistryResponse } from './provisioning';
-import type { TransportSodium } from './transport';
+} from "@lionpocket/sync-protocol";
+import { DeviceProvisioning, type RegistryResponse } from "./provisioning";
+import type { TransportSodium } from "./transport";
 export interface KeyCheckpoint {
   formatVersion: 1;
   serverId: string;
@@ -32,14 +35,14 @@ export interface SignedRecovery {
   envelope: RecoveryEnvelope;
   signature: string;
 }
-const keyInput = (v: Omit<KeyCheckpoint, 'signature'>) =>
+const keyInput = (v: Omit<KeyCheckpoint, "signature">) =>
   canonicalStringify({
-    context: 'LionPocket/beta-key-checkpoint/v1',
+    context: "LionPocket/beta-key-checkpoint/v1",
     checkpoint: v,
   });
 export const recoveryInput = (envelope: RecoveryEnvelope) =>
   canonicalStringify({
-    context: 'LionPocket/beta-recovery-store/v1',
+    context: "LionPocket/beta-recovery-store/v1",
     envelope,
   });
 interface RecoverySodium extends TransportSodium {
@@ -54,21 +57,21 @@ export function validateKeyCheckpoints(
   checkpoints: KeyCheckpoint[],
   pin: TrustPin,
   grants: DeviceGrant[],
-  device: Pick<DeviceProvisioning, 'crypto'>,
+  device: Pick<DeviceProvisioning, "crypto">,
 ): number {
-  let version = 1,
+  let version = baseKeyVersion(pin),
     previous: string | null = null;
   for (const entry of checkpoints) {
     exactObject(entry, [
-      'formatVersion',
-      'serverId',
-      'serverEpoch',
-      'vaultId',
-      'keyVersion',
-      'registryVersion',
-      'previousSha256',
-      'deliveries',
-      'signature',
+      "formatVersion",
+      "serverId",
+      "serverEpoch",
+      "vaultId",
+      "keyVersion",
+      "registryVersion",
+      "previousSha256",
+      "deliveries",
+      "signature",
     ]);
     sameScope(entry, pin);
     assertDecimal64(entry.registryVersion, true);
@@ -79,7 +82,7 @@ export function validateKeyCheckpoints(
       entry.previousSha256 !== previous ||
       !Array.isArray(entry.deliveries)
     )
-      throw new Error('invalid_key_checkpoint');
+      throw new Error("invalid_key_checkpoint");
     const history = grants.filter(
       (g) =>
         g.registryVersion.length < entry.registryVersion.length ||
@@ -88,19 +91,19 @@ export function validateKeyCheckpoints(
     );
     const registry = validateGrantChain(history, pin, device.crypto),
       active = [...registry.devices.values()]
-        .filter((d) => d.status === 'approved')
+        .filter((d) => d.status === "approved")
         .map((d) => d.deviceId)
         .sort();
     const recipients = entry.deliveries
       .map((d) => {
-        exactObject(d, ['deviceId', 'sealedBox']);
-        assertUuid(d.deviceId, '4');
+        exactObject(d, ["deviceId", "sealedBox"]);
+        assertUuid(d.deviceId, "4");
         assertBase64Url(d.sealedBox, undefined, 48);
         return d.deviceId;
       })
       .sort();
     if (canonicalStringify(active) !== canonicalStringify(recipients))
-      throw new Error('invalid_key_recipients');
+      throw new Error("invalid_key_recipients");
     const { signature, ...unsigned } = entry;
     if (
       !device.crypto.verify(
@@ -109,15 +112,15 @@ export function validateKeyCheckpoints(
         pin.authorityPublicKey,
       )
     )
-      throw new Error('invalid_signature');
+      throw new Error("invalid_signature");
     version = entry.keyVersion;
     previous = device.crypto.hash(canonicalStringify(entry));
   }
   return version;
 }
 async function authoritySign(device: DeviceProvisioning, text: string) {
-  const seed = await device.secrets.load(device.scope('authoritySeed'));
-  if (!seed) throw new Error('authority_secret_unavailable');
+  const seed = await device.secrets.load(device.scope("authoritySeed"));
+  if (!seed) throw new Error("authority_secret_unavailable");
   try {
     return device.crypto.sign(text, seed);
   } finally {
@@ -125,14 +128,15 @@ async function authoritySign(device: DeviceProvisioning, text: string) {
   }
 }
 export async function dataKeys(device: DeviceProvisioning) {
-  const result: RecoveryBundle['dataKeys'] = [];
+  const result: RecoveryBundle["dataKeys"] = [];
   for (
-    let keyVersion = 1;
-    keyVersion <= (device.profile.activeKeyVersion ?? 1);
+    let keyVersion = baseKeyVersion(device.profile.pin);
+    keyVersion <=
+    (device.profile.activeKeyVersion ?? baseKeyVersion(device.profile.pin));
     keyVersion++
   ) {
-    const key = await device.secrets.load(device.scope('dataKey', keyVersion));
-    if (!key) throw new Error('secret_unavailable');
+    const key = await device.secrets.load(device.scope("dataKey", keyVersion));
+    if (!key) throw new Error("secret_unavailable");
     try {
       result.push({ keyVersion, vaultKey: device.crypto.encode(key) });
     } finally {
@@ -150,7 +154,10 @@ export async function makeKeyCheckpoint(
       device.crypto,
     ),
     previous = device.profile.keyCheckpoints ?? [],
-    keyVersion = (device.profile.activeKeyVersion ?? 1) + 1;
+    keyVersion =
+      (device.profile.activeKeyVersion ?? baseKeyVersion(device.profile.pin)) +
+      1;
+  assertKeyVersion(keyVersion);
   const keys = await dataKeys(device),
     fresh = device.crypto.sodium.randombytes_buf(32);
   try {
@@ -160,7 +167,7 @@ export async function makeKeyCheckpoint(
   }
   const { serverId, serverEpoch, vaultId } = device.profile.pin;
   const deliveries = [...registry.devices.values()]
-    .filter((d) => d.status === 'approved')
+    .filter((d) => d.status === "approved")
     .sort((a, b) => a.deviceId.localeCompare(b.deviceId))
     .map((d) => {
       const bytes = encodeUtf8(
@@ -230,14 +237,18 @@ export async function acceptKeyCheckpoints(
       (c, i) => canonicalStringify(c) !== canonicalStringify(entries[i]),
     )
   )
-    throw new Error('key_checkpoint_rollback');
-  if (version > 1) {
+    throw new Error("key_checkpoint_rollback");
+  const available = await device.secrets.load(device.scope("dataKey", version));
+  const alreadyReceived =
+    available !== null && device.profile.activeKeyVersion === version;
+  if (available) device.crypto.erase(available);
+  if (entries.length && !alreadyReceived) {
     const delivery = entries[entries.length - 1].deliveries.find(
       (d) => d.deviceId === device.profile.deviceId,
     );
-    if (!delivery) throw new Error('device_revoked');
-    const seed = await device.secrets.load(device.scope('boxSeed'));
-    if (!seed) throw new Error('secret_unavailable');
+    if (!delivery) throw new Error("device_revoked");
+    const seed = await device.secrets.load(device.scope("boxSeed"));
+    if (!seed) throw new Error("secret_unavailable");
     const pair = device.crypto.sodium.crypto_box_seed_keypair(seed);
     device.crypto.erase(seed);
     let bytes: Uint8Array | null = null;
@@ -247,15 +258,15 @@ export async function acceptKeyCheckpoints(
         pair.publicKey,
         pair.privateKey,
       );
-      if (!bytes) throw new Error('invalid_sealed_box');
+      if (!bytes) throw new Error("invalid_sealed_box");
       const bundle = exactObject(decodeCanonical(bytes, 65536), [
-        'formatVersion',
-        'serverId',
-        'serverEpoch',
-        'vaultId',
-        'recipientDeviceId',
-        'keyVersion',
-        'dataKeys',
+        "formatVersion",
+        "serverId",
+        "serverEpoch",
+        "vaultId",
+        "recipientDeviceId",
+        "keyVersion",
+        "dataKeys",
       ]);
       sameScope(bundle as unknown as TrustPin, device.profile.pin);
       if (
@@ -263,18 +274,22 @@ export async function acceptKeyCheckpoints(
         bundle.recipientDeviceId !== device.profile.deviceId ||
         bundle.keyVersion !== version
       )
-        throw new Error('key_bundle_mismatch');
-      const keys = validateDataKeys(bundle.dataKeys, version);
+        throw new Error("key_bundle_mismatch");
+      const keys = validateEpochDataKeys(
+        bundle.dataKeys,
+        baseKeyVersion(device.profile.pin),
+        version,
+      );
       for (const k of keys) {
         const key = device.crypto.decode(k.vaultKey),
           existing = await device.secrets.load(
-            device.scope('dataKey', k.keyVersion),
+            device.scope("dataKey", k.keyVersion),
           );
         try {
           if (existing && device.crypto.encode(existing) !== k.vaultKey)
-            throw new Error('key_mismatch');
+            throw new Error("key_mismatch");
           await device.secrets.store(
-            device.scope('dataKey', k.keyVersion),
+            device.scope("dataKey", k.keyVersion),
             key,
           );
         } finally {
@@ -290,19 +305,6 @@ export async function acceptKeyCheckpoints(
   device.profile.activeKeyVersion = version;
   device.profile.keyCheckpoints = entries;
 }
-function validateDataKeys(
-  value: unknown,
-  version: number,
-): RecoveryBundle['dataKeys'] {
-  if (!Array.isArray(value) || value.length !== version || version > 1000)
-    throw new Error('invalid_data_keys');
-  return value.map((k, i) => {
-    const r = exactObject(k, ['keyVersion', 'vaultKey']);
-    if (r.keyVersion !== i + 1) throw new Error('invalid_data_keys');
-    assertBase64Url(r.vaultKey, 32);
-    return r as unknown as RecoveryBundle['dataKeys'][number];
-  });
-}
 export async function makeRecovery(
   device: DeviceProvisioning,
   sodium: TransportSodium,
@@ -314,28 +316,27 @@ export async function makeRecovery(
     authority: Uint8Array | null = null,
     bytes: Uint8Array | null = null;
   try {
-    const code = 'LP1.' + device.crypto.encode(master);
+    const code = "LP1." + device.crypto.encode(master);
     key = (sodium as RecoverySodium).crypto_kdf_derive_from_key(
       32,
       1,
-      'LPRECOV1',
+      "LPRECOV1",
       master,
     );
-    authority = await device.secrets.load(device.scope('authoritySeed'));
-    if (!authority) throw new Error('authority_secret_unavailable');
+    authority = await device.secrets.load(device.scope("authoritySeed"));
+    if (!authority) throw new Error("authority_secret_unavailable");
     const { serverId, serverEpoch, vaultId } = device.profile.pin;
     const header = {
       formatVersion: 1 as const,
-      cryptoSuite: 'lp-sodium-v1' as const,
+      cryptoSuite: "lp-sodium-v1" as const,
       serverId,
       serverEpoch,
       vaultId,
       recoveryVersion,
-      kdf: 'sodium-kdf-blake2b-LPRECOV1-1' as const,
+      kdf: "sodium-kdf-blake2b-LPRECOV1-1" as const,
       nonce: device.crypto.encode(sodium.randombytes_buf(24)),
     };
-    const bundle: RecoveryBundle = {
-      formatVersion: 1,
+    const fields = {
       serverId,
       serverEpoch,
       vaultId,
@@ -343,9 +344,18 @@ export async function makeRecovery(
       registryVersion: device.profile.checkpoint!.version,
       authoritySignSeed: device.crypto.encode(authority),
       authorityPublicKey: device.profile.pin.authorityPublicKey,
-      activeKeyVersion: device.profile.activeKeyVersion ?? 1,
+      activeKeyVersion:
+        device.profile.activeKeyVersion ?? baseKeyVersion(device.profile.pin),
       dataKeys: await dataKeys(device),
     };
+    const bundle: RecoveryBundle =
+      baseKeyVersion(device.profile.pin) === 1
+        ? { formatVersion: 1, ...fields }
+        : {
+            formatVersion: 2,
+            baseKeyVersion: baseKeyVersion(device.profile.pin),
+            ...fields,
+          };
     bytes = encodeUtf8(canonicalStringify(bundle));
     const envelope = {
       ...header,
@@ -380,40 +390,15 @@ export function openRecovery(
   code: string,
 ): RecoveryBundle {
   if (!/^LP1\.[A-Za-z0-9_-]{43}$/.test(code))
-    throw new Error('invalid_recovery_code');
+    throw new Error("invalid_recovery_code");
   assertBase64Url(code.slice(4), 32);
-  const { envelope, signature } = recovery;
-  exactObject(envelope, [
-    'formatVersion',
-    'cryptoSuite',
-    'serverId',
-    'serverEpoch',
-    'vaultId',
-    'recoveryVersion',
-    'kdf',
-    'nonce',
-    'ciphertext',
-  ]);
-  sameScope(envelope, device.profile.pin);
-  assertDecimal64(envelope.recoveryVersion, true);
-  assertBase64Url(envelope.nonce, 24);
-  assertBase64Url(envelope.ciphertext, undefined, 16);
-  if (
-    envelope.formatVersion !== 1 ||
-    envelope.cryptoSuite !== 'lp-sodium-v1' ||
-    envelope.kdf !== 'sodium-kdf-blake2b-LPRECOV1-1' ||
-    !device.crypto.verify(
-      signature,
-      recoveryInput(envelope),
-      device.profile.pin.authorityPublicKey,
-    )
-  )
-    throw new Error('invalid_recovery_envelope');
+  verifySignedRecovery(recovery, device.profile.pin, device.crypto);
+  const { envelope } = recovery;
   const master = device.crypto.decode(code.slice(4)),
     key = (sodium as RecoverySodium).crypto_kdf_derive_from_key(
       32,
       1,
-      'LPRECOV1',
+      "LPRECOV1",
       master,
     );
   device.crypto.erase(master);
@@ -427,29 +412,39 @@ export function openRecovery(
       device.crypto.decode(envelope.nonce),
       key,
     );
-    if (!bytes) throw new Error('invalid_recovery_code');
-    const b = exactObject(decodeCanonical(bytes, 65536), [
-      'formatVersion',
-      'serverId',
-      'serverEpoch',
-      'vaultId',
-      'recoveryVersion',
-      'registryVersion',
-      'authoritySignSeed',
-      'authorityPublicKey',
-      'activeKeyVersion',
-      'dataKeys',
+    if (!bytes) throw new Error("invalid_recovery_code");
+    const decoded = decodeCanonical(bytes, 65536);
+    const version = (decoded as { formatVersion?: unknown } | null)
+      ?.formatVersion;
+    if (version !== 1 && version !== 2) throw new Error("unsupported_version");
+    const b = exactObject(decoded, [
+      "formatVersion",
+      "serverId",
+      "serverEpoch",
+      "vaultId",
+      "recoveryVersion",
+      "registryVersion",
+      "authoritySignSeed",
+      "authorityPublicKey",
+      "activeKeyVersion",
+      "dataKeys",
+      ...(version === 2 ? ["baseKeyVersion"] : []),
     ]) as unknown as RecoveryBundle;
     sameScope(b, envelope);
     assertDecimal64(b.registryVersion, true);
     assertBase64Url(b.authoritySignSeed, 32);
     if (
-      b.formatVersion !== 1 ||
+      (b.formatVersion === 2 ? b.baseKeyVersion : 1) !==
+        baseKeyVersion(device.profile.pin) ||
       b.recoveryVersion !== envelope.recoveryVersion ||
       b.authorityPublicKey !== device.profile.pin.authorityPublicKey
     )
-      throw new Error('invalid_recovery_bundle');
-    validateDataKeys(b.dataKeys, b.activeKeyVersion);
+      throw new Error("invalid_recovery_bundle");
+    validateEpochDataKeys(
+      b.dataKeys,
+      b.formatVersion === 2 ? b.baseKeyVersion : 1,
+      b.activeKeyVersion,
+    );
     const seed = device.crypto.decode(b.authoritySignSeed);
     let pair;
     try {
@@ -459,10 +454,42 @@ export function openRecovery(
     }
     device.crypto.erase(pair.privateKey);
     if (device.crypto.encode(pair.publicKey) !== b.authorityPublicKey)
-      throw new Error('key_mismatch');
+      throw new Error("key_mismatch");
     return b;
   } finally {
     if (bytes) device.crypto.erase(bytes);
     device.crypto.erase(key);
   }
+}
+
+export function verifySignedRecovery(
+  recovery: SignedRecovery,
+  pin: TrustPin,
+  crypto: DeviceProvisioning["crypto"],
+) {
+  exactObject(recovery, ["envelope", "signature"]);
+  assertBase64Url(recovery.signature, 64);
+  const { envelope, signature } = recovery;
+  exactObject(envelope, [
+    "formatVersion",
+    "cryptoSuite",
+    "serverId",
+    "serverEpoch",
+    "vaultId",
+    "recoveryVersion",
+    "kdf",
+    "nonce",
+    "ciphertext",
+  ]);
+  sameScope(envelope, pin);
+  assertDecimal64(envelope.recoveryVersion, true);
+  assertBase64Url(envelope.nonce, 24);
+  assertBase64Url(envelope.ciphertext, undefined, 16);
+  if (
+    envelope.formatVersion !== 1 ||
+    envelope.cryptoSuite !== "lp-sodium-v1" ||
+    envelope.kdf !== "sodium-kdf-blake2b-LPRECOV1-1" ||
+    !crypto.verify(signature, recoveryInput(envelope), pin.authorityPublicKey)
+  )
+    throw new Error("invalid_recovery_envelope");
 }

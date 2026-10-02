@@ -101,8 +101,8 @@ export async function vaultControl(
     if (checkpoint.registryVersion !== registry.checkpoint.version)
       throw new Error("registry_order");
     await tx.query(
-      "UPDATE sync_vaults SET key_checkpoints=$2,rotation_required=false WHERE vault_id=$1",
-      [pin.vaultId, JSON.stringify([...current, checkpoint])],
+      "UPDATE sync_vaults SET key_checkpoints=$2,active_key_version=$3,rotation_required=false WHERE vault_id=$1",
+      [pin.vaultId, JSON.stringify([...current, checkpoint]), checkpoint.keyVersion],
     );
   } else if (action === "recovery-store") {
     const r = exactObject(value, [

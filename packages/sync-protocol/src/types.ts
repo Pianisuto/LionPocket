@@ -138,9 +138,15 @@ export interface RecoveryEnvelope {
   recoveryVersion: Decimal64; kdf: 'sodium-kdf-blake2b-LPRECOV1-1';
   nonce: Base64Url; ciphertext: Base64Url;
 }
-export interface RecoveryBundle {
+export interface RecoveryBundleV1 {
   formatVersion: 1; serverId: GlobalId; serverEpoch: GlobalId; vaultId: GlobalId;
   recoveryVersion: Decimal64; registryVersion: Decimal64;
   authoritySignSeed: Base64Url; authorityPublicKey: Base64Url;
   activeKeyVersion: number; dataKeys: Array<{ keyVersion: number; vaultKey: Base64Url }>;
 }
+/** Version only the encrypted bundle. The signed E2EE envelope and financial wire remain v1. */
+export interface RecoveryBundleV2 extends Omit<RecoveryBundleV1, 'formatVersion'> {
+  formatVersion: 2;
+  baseKeyVersion: number;
+}
+export type RecoveryBundle = RecoveryBundleV1 | RecoveryBundleV2;

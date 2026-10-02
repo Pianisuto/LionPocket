@@ -378,6 +378,11 @@ function* cancelAnchorPlanWorkflow(restoreId: string): SqlWorkflow {
   assertUuid(restoreId, '4');
   const [journal] = yield sql('SELECT * FROM recovery_journal WHERE restore_id=?', [restoreId]);
   if (!journal) throw new Error('recovery_attempt_missing');
+  if ((yield sql("SELECT name FROM sqlite_master WHERE name='recovery_b_saga'")).length) {
+    const [saga] = yield sql('SELECT remote_started FROM recovery_b_saga WHERE restore_id=?', [restoreId]);
+    if (saga?.remote_started === 1) throw new Error('remote_staging_requires_resume');
+    if (saga) yield sql("UPDATE recovery_b_saga SET phase='cancelled' WHERE restore_id=?", [restoreId]);
+  }
   yield sql("UPDATE recovery_journal SET phase='cancelled' WHERE restore_id=?", [restoreId]);
 }
 

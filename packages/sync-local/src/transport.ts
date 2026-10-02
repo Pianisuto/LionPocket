@@ -568,7 +568,7 @@ export class ManualSync {
       this.device.acceptRegistry(response);
       if (localState.mode==='financial') await acceptKeyCheckpoints(this.device,response);
       await this.db.run(updateRegistry(this.device.profile));
-      if (localState.mode==='financial') { await this.pull(token);await this.db.run(reissueForKeyVersion(this.device.profile.activeKeyVersion??1,()=>this.device.crypto.uuid())); }
+      if (localState.mode==='financial') { await this.pull(token);await this.db.run(reissueForKeyVersion(this.device.profile.activeKeyVersion??this.device.profile.pin.keyVersion,()=>this.device.crypto.uuid())); }
       const bootstrap = localState.mode === 'financial' ? (await this.db.read('SELECT state FROM sync_bootstrap WHERE id=1'))[0] : null;
       const rows = bootstrap?.state === 'joining_review' ? [] : await this.db.read(
         "SELECT commit_id FROM sync_outbox WHERE state!='acknowledged' AND state!='blocked' ORDER BY length(local_seq),local_seq",

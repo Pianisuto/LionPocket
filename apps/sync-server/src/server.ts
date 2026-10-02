@@ -1,4 +1,5 @@
 import { vaultControl, vaultRecoveryRequest } from './vaultControl';
+import { epochStaging } from './epochStaging';
 import { epochRecovery } from './epochRecovery';
 import { acceptCommit, changesPage, CommitRejection } from './commits';
 import { createServer, type IncomingMessage } from 'node:http';
@@ -10,6 +11,8 @@ import {
   assertHttpProof,
   assertKeyDelivery,
   assertTrustPin,
+  assertKeyVersion,
+  stagingLimits,
   canonicalStringify,
   decodeCanonical,
   exactObject,
@@ -62,6 +65,26 @@ async function chain(tx: PoolClient, vaultId: string): Promise<DeviceGrant[]> {
   ).rows.map((row) => row.grant_envelope);
 }
 const knownErrors: Record<string, number> = {
+  recovery_confirmation_required: 409,
+  invalid_key_base: 400,
+  invalid_staging: 400,
+  invalid_staging_batch: 400,
+  staging_missing: 409,
+  staging_closed: 409,
+  staging_order: 409,
+  staging_envelope_mismatch: 409,
+  staging_count_mismatch: 409,
+  staging_heads_mismatch: 409,
+  staging_manifest_mismatch: 409,
+  staging_not_validated: 409,
+  invalid_recovery_envelope: 400,
+  recovery_version_mismatch: 409,
+  key_checkpoint_rollback: 409,
+  invalid_key_checkpoint: 400,
+  invalid_key_recipients: 400,
+  invalid_epoch_manifest: 400,
+  invalid_epoch_transition: 400,
+  epoch_transition_mismatch: 409,
   restore_record_required: 409,
   epoch_recovery_chain_required: 409,
   invalid_epoch_recovery: 400,
@@ -147,14 +170,14 @@ export function controlServer(options: {
           controlVersion: 1,
           protocolVersion: 1,
           domainSchema: 1,
-          epochRecovery: { formatVersion: 1, authorizationAvailable: true, activationAvailable: false },
+          epochRecovery: { formatVersion: 1, authorizationAvailable: true, stagingAvailable: true, activationAvailable: false },
         });
         return;
       }
       // Opt-in controls the only financial routes; every other domain remains absent.
       const create = method === 'POST' && target === '/v1/vaults';
       const match =
-        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|pairing-list|grants|deliveries|registry|commits|changes|recovery-fetch|recover|recovery-store|key-checkpoints|epoch-recovery-challenge|epoch-recovery-authorize)$/.exec(
+        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|pairing-list|grants|deliveries|registry|commits|changes|recovery-fetch|recover|recovery-store|key-checkpoints|epoch-recovery-challenge|epoch-recovery-authorize|epoch-staging-begin|epoch-staging-batch|epoch-staging-validate|epoch-staging-prepare|epoch-staging-status)$/.exec(
           target,
         );
       if (
@@ -188,7 +211,7 @@ export function controlServer(options: {
         throw new Error('forbidden');
       const body = await readBody(
         req,
-        match?.[2] === 'commits' ? 1048576 : 65536,
+        match?.[2].startsWith('epoch-staging-') ? stagingLimits.requestBytes : match?.[2] === 'commits' ? 1048576 : 65536,
       );
       if (method === 'GET' && body.text) throw new Error('invalid_envelope');
       if (
@@ -200,6 +223,14 @@ export function controlServer(options: {
         tx = await pool.connect();
         await tx.query('BEGIN');
         const result = await epochRecovery(tx, match[2], body.value, match[1], account, environment, crypto);
+        await tx.query('COMMIT');
+        respond(200, result);
+        return;
+      }
+      if (match?.[2].startsWith('epoch-staging-')) {
+        tx = await pool.connect();
+        await tx.query('BEGIN');
+        const result = await epochStaging(tx, match[2].slice('epoch-staging-'.length), body.value, match[1], account, environment, crypto);
         await tx.query('COMMIT');
         respond(200, result);
         return;
@@ -276,8 +307,8 @@ export function controlServer(options: {
           throw new Error('invalid_pairing_grant');
         await checkProof(proof, founder.signingPublicKey);
         const inserted = await tx.query(
-          'INSERT INTO sync_vaults(vault_id,owner_issuer,owner_subject,pin) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING vault_id',
-          [pin.vaultId, account.issuer, account.subject, pin],
+          'INSERT INTO sync_vaults(vault_id,owner_issuer,owner_subject,pin,base_key_version,active_key_version) VALUES($1,$2,$3,$4,$5,$5) ON CONFLICT DO NOTHING RETURNING vault_id',
+          [pin.vaultId, account.issuer, account.subject, pin, pin.keyVersion],
         );
         if (!inserted.rowCount) throw new Error('vault_exists');
         await tx.query(
@@ -360,7 +391,7 @@ export function controlServer(options: {
                     grants,
                     proof.deviceId,
                     crypto,
-                    options.financialScope !== 'manual' ? (vault.key_checkpoints.length ? vault.key_checkpoints[vault.key_checkpoints.length-1].keyVersion : 1) : 1,
+                    Number(vault.active_key_version),
                   )
                 : await changesPage(tx, body.value, pin, proof.deviceId);
             await tx.query('COMMIT');
@@ -421,6 +452,11 @@ export function controlServer(options: {
             assertKeyDelivery(delivery);
             if (delivery.authorDeviceId !== proof.deviceId)
               throw new Error('forbidden');
+            const activeKeyVersion = Number(vault.active_key_version);
+            assertKeyVersion(activeKeyVersion);
+            // An immutable, signed delivery can be in flight across a subsequent rotation.
+            // Accept an authenticated historical generation key; normal commits still require the active key.
+            if (delivery.keyVersion > activeKeyVersion) throw new Error('key_version_mismatch');
             validateDelivery(delivery, grants, pin, crypto);
             if (delivery.registryVersion !== registry.checkpoint.version)
               throw new Error('registry_order');

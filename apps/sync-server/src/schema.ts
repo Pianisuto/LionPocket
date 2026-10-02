@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { stagingSchema } from './stagingSchema';
 import { generationSchema } from './generations';
 export const restoreSchema = readFileSync(new URL('./restore-schema.sql', import.meta.url), 'utf8');
 /** Public identities and authorization only. No financial plaintext. */
@@ -15,6 +16,23 @@ CREATE TABLE IF NOT EXISTS sync_vaults (
 ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS key_checkpoints jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS recovery jsonb;
 ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS rotation_required boolean NOT NULL DEFAULT false;
+-- NULL is a migration sentinel: backfill once, without changing legacy pins or signed artifacts.
+ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS base_key_version bigint;
+ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS active_key_version bigint;
+UPDATE sync_vaults SET base_key_version=coalesce((pin->>'keyVersion')::bigint,1) WHERE base_key_version IS NULL;
+UPDATE sync_vaults SET active_key_version=CASE WHEN jsonb_array_length(key_checkpoints)>0
+  THEN (key_checkpoints->-1->>'keyVersion')::bigint ELSE base_key_version END WHERE active_key_version IS NULL;
+ALTER TABLE sync_vaults ALTER COLUMN base_key_version SET DEFAULT 1;
+ALTER TABLE sync_vaults ALTER COLUMN base_key_version SET NOT NULL;
+ALTER TABLE sync_vaults ALTER COLUMN active_key_version SET DEFAULT 1;
+ALTER TABLE sync_vaults ALTER COLUMN active_key_version SET NOT NULL;
+DO $$ BEGIN
+  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='sync_vault_key_range') THEN
+    ALTER TABLE sync_vaults ADD CONSTRAINT sync_vault_key_range CHECK(base_key_version>0
+      AND active_key_version>=base_key_version AND active_key_version<=9007199254740991
+      AND base_key_version=(pin->>'keyVersion')::bigint);
+  END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS sync_grants (
   vault_id uuid NOT NULL REFERENCES sync_vaults(vault_id), registry_version bigint NOT NULL,
   grant_envelope jsonb NOT NULL, PRIMARY KEY(vault_id, registry_version)
@@ -56,4 +74,4 @@ CREATE TABLE IF NOT EXISTS sync_remote_bindings (
   binding_id uuid PRIMARY KEY, vault_id uuid NOT NULL REFERENCES sync_vaults(vault_id),
   server_epoch uuid NOT NULL, device_id uuid NOT NULL
 );
-` + generationSchema;
+` + generationSchema + stagingSchema;

@@ -1,0 +1,73 @@
+{
+  "authoritySeed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "pin": {
+    "serverId": "00000000-0000-4000-8000-000000000001",
+    "serverEpoch": "00000000-0000-4000-8000-000000000002",
+    "vaultId": "00000000-0000-4000-8000-000000000003",
+    "founderDeviceId": "00000000-0000-4000-8000-000000000004",
+    "authorityPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+    "keyVersion": 4
+  },
+  "keyBase": {
+    "formatVersion": 1,
+    "serverId": "00000000-0000-4000-8000-000000000001",
+    "serverEpoch": "00000000-0000-4000-8000-000000000002",
+    "vaultId": "00000000-0000-4000-8000-000000000003",
+    "restoreId": "00000000-0000-4000-8000-000000000005",
+    "fromEpoch": "00000000-0000-4000-8000-000000000006",
+    "baseKeyVersion": 4,
+    "previousActiveKeyVersion": 3,
+    "previousKeyCheckpointsSha256": "T1PNoYwrqgwDVLtfmj7L5e0Sq02OEbqHPC8RFhICuUU",
+    "signature": "t-zjE_Gidd_OAa2p-JLAjDJdAG8mONupK-B-fB0Bcam-DarKO2zVtDGLjYp0UmYw3cicAP62a7UGJf9bpkiPCw"
+  },
+  "keyBaseSigningInput": "{\"context\":\"LionPocket/epoch-key-base/v1\",\"keyBase\":{\"baseKeyVersion\":4,\"formatVersion\":1,\"fromEpoch\":\"00000000-0000-4000-8000-000000000006\",\"previousActiveKeyVersion\":3,\"previousKeyCheckpointsSha256\":\"T1PNoYwrqgwDVLtfmj7L5e0Sq02OEbqHPC8RFhICuUU\",\"restoreId\":\"00000000-0000-4000-8000-000000000005\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
+  "scope": {
+    "restoreId": "00000000-0000-4000-8000-000000000005",
+    "vaultId": "00000000-0000-4000-8000-000000000003",
+    "fromEpoch": "00000000-0000-4000-8000-000000000006",
+    "toEpoch": "00000000-0000-4000-8000-000000000002"
+  },
+  "initialEnvelopes": "I4Qjb43ZCrt3XT8KZB-LofMXIf0BUUQIe--J9vePrRA",
+  "envelopeText": "{\"ciphertext\":\"vector exact bytes\"}",
+  "envelopeCommitId": "00000000-0000-4000-8000-000000000007",
+  "envelopeDigest": "kyMvcMe3Oj_vEb05W5UZ2eJ621mzX_YjyDdYp8a4n2o",
+  "initialHeads": "m2srsZ9t_eJH_cWipfbC7jjAq_O8_XMucqYAuEb5XTA",
+  "head": {
+    "objectId": "00000000-0000-4000-8000-000000000008",
+    "revisionId": "00000000-0000-4000-8000-000000000009"
+  },
+  "headsDigest": "znLOPTj3QWnxcULYd4BiKro9hJ0RM8faLajUsSgSFFQ",
+  "recovery": {
+    "envelope": {
+      "formatVersion": 1,
+      "cryptoSuite": "lp-sodium-v1",
+      "serverId": "00000000-0000-4000-8000-000000000001",
+      "serverEpoch": "00000000-0000-4000-8000-000000000002",
+      "vaultId": "00000000-0000-4000-8000-000000000003",
+      "recoveryVersion": "9007199254740993",
+      "kdf": "sodium-kdf-blake2b-LPRECOV1-1",
+      "nonce": "Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3",
+      "ciphertext": "SBax-Di56Pci0rqxuaafk72Mv_urJmepiH-mw9n1G17EB20ga89eJnZn2_5XEG9AImeVwIIf6nPMJD9rF1Fplvfwubo3oeAwmR_tZiWW1pPcSFGyCmX6R_eL7ySrVPUvqHyV-fktf6wsD9ysYnrM-Cw66S_Z1yKStPSF8NBWQC_ZKWkCqUPZLII1rLPiOFGYJedFktqhTbcqpeR2CPz2QAFFuO7-H_4G2YGuC5JPR3NgutdimUBU9lvWBkHTOqwx3Ka4CHAALBWD03gZfkKML3_2_ScPH8xL5pXwVC76XzWojCgdTpR2ghU2Ao5hj00JFGAE1WA_ZBu2X0fntv2x7ZQQTHLuCXQ5vhTcX1lKXyFu1QEZOmAS8j92wj_woxmBvBG_ly58_DePPhcTV5-0QFhaxKfVtt1yph6nZCScIMvdrNlZhq6AmSUg2pVMlhsTNC5MavPQNUlge93ZDtk4laucSDN8T3virid7MpjaFetnh6s_cYqnIfRfsdzjP-riIMaUkXwYj3RBSp_r8f5EU4LQQMRXScOvngKtBrC9WXS9DMfJ0PdtxFsHU3Fw3k9F1qxzT7uMh7g1CBRSEcVEnm-bEKgkO24RzW2uB3_CWY0_n9rNhAPuGgi97vnVPIkf6pf8SJRi-gOcBGuPHDRSIvjzG3zDkeTENhw"
+    },
+    "signature": "pdrx6YFCXoU5k06lvTL85iBHC76QvS2xEyhe-WzYp6cDSJn5sDaVcUmYtA6MDu4sG6XBZt9bKv6WXQ_rgjHwAA"
+  },
+  "bundle": {
+    "formatVersion": 2,
+    "serverId": "00000000-0000-4000-8000-000000000001",
+    "serverEpoch": "00000000-0000-4000-8000-000000000002",
+    "vaultId": "00000000-0000-4000-8000-000000000003",
+    "recoveryVersion": "9007199254740993",
+    "registryVersion": "1",
+    "authoritySignSeed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "authorityPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+    "baseKeyVersion": 4,
+    "activeKeyVersion": 4,
+    "dataKeys": [
+      {
+        "keyVersion": 4,
+        "vaultKey": "TU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU0"
+      }
+    ]
+  },
+  "code": "LP1.ISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISE"
+}
