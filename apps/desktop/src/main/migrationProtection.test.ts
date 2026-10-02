@@ -97,7 +97,7 @@ describe('proteção de migrations desktop', () => {
     expect(() => initializeLocalSchema(db, join(directory, 'inexistente/db'), () => { called = true; })).toThrow('proteger');
     expect(called).toBe(false);
     expect(captureDatabaseManifest(db)).toEqual(before);
-  });
+  }, 30000); // SQLite may exhaust its native busy timeout on the deliberate invalid backup path.
   it('rejeita versão futura sem tocar registros, índices ou marcadores', () => {
     const { path, db, directory } = legacy();
     db.exec("INSERT INTO migrations VALUES(99,'futuro')");

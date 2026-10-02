@@ -16,6 +16,7 @@ import {
   type SqlWorkflow,
 } from './manual';
 import { mergeFinancialGroups } from './merge';
+import { causalCommonBase } from './causal-graph';
 import { projectFinancial, resolveFinancial } from './financial-projection';
 import type { ProvisionedProfile } from './provisioning';
 export const sql = (
@@ -196,6 +197,7 @@ export function* applyCommit(
   operations: DecodedOperation[],
   dialect: ProjectionDialect,
   uuid: () => string,
+  projectionTime?: string,
 ): SqlWorkflow {
   const [state] = yield sql('SELECT * FROM sync_local_state WHERE id=1');
   if (!['synthetic_manual', 'financial'].includes(String(state.mode)))
@@ -310,7 +312,7 @@ export function* applyCommit(
     touched.add(op.objectId);
   }
   yield sql('UPDATE sync_local_state SET local_seq=? WHERE id=1', [sequence]);
-  for (const id of touched) yield* projectObject(id, dialect, uuid);
+  for (const id of touched) yield* projectObject(id, dialect, uuid, projectionTime);
   if (state.mode === 'financial')
     yield sql('UPDATE sync_control SET applying=0 WHERE id=1');
   yield sql(
@@ -325,33 +327,14 @@ function commonBase(rows: SqlRow[], heads: string[]): string | null {
       JSON.parse(String(r.parents_json)) as string[],
     ]),
   );
-  const ancestors = (id: string) => {
-    const seen = new Set<string>();
-    const stack = [id];
-    while (stack.length) {
-      const item = stack.pop() as string;
-      if (seen.has(item)) continue;
-      seen.add(item);
-      stack.push(...(graph.get(item) ?? []));
-    }
-    return seen;
-  };
-  const sets = heads.map(ancestors);
-  const common = [...sets[0]].filter((id) => sets.every((s) => s.has(id)));
-  const maximal = common.filter(
-    (id) => !common.some((other) => other !== id && ancestors(other).has(id)),
-  );
-  return maximal.length === 1 ? maximal[0] : null;
+  return causalCommonBase(new Map([...graph].map(([id, parents]) => [id, { parents }])), heads);
 }
 export function* projectObject(
   objectId: string,
   dialect: ProjectionDialect,
   uuid: () => string,
+  projectionTime?: string,
 ): SqlWorkflow {
-  const rows = yield sql(
-    'SELECT * FROM sync_revisions WHERE object_id=? AND revision_id NOT IN (SELECT revision_id FROM sync_rejected)',
-    [objectId],
-  );
   const headRows = yield sql(
     'SELECT revision_id FROM sync_heads WHERE object_id=? ORDER BY revision_id',
     [objectId],
@@ -365,6 +348,12 @@ export function* projectObject(
     'SELECT revision_id FROM sync_tombstones WHERE object_id=?',
     [objectId],
   );
+  // A linear live object needs only its head payload, not repeated scans of its history.
+  // Conflicts and tombstones still use the complete parent graph / historical delete rows.
+  const rows = yield sql(heads.length <= 1 && !tombstones.length
+    ? 'SELECT * FROM sync_revisions WHERE object_id=? AND revision_id=? AND revision_id NOT IN (SELECT revision_id FROM sync_rejected)'
+    : 'SELECT * FROM sync_revisions WHERE object_id=? AND revision_id NOT IN (SELECT revision_id FROM sync_rejected)',
+    heads.length <= 1 && !tombstones.length ? [objectId, heads[0] ?? ''] : [objectId]);
   const [conflict] = yield sql(
     'SELECT * FROM sync_conflicts WHERE object_id=? AND resolution_id IS NULL',
     [objectId],
@@ -401,10 +390,11 @@ export function* projectObject(
             String(rows.find((r) => r.revision_id === h)?.payload_json),
           ) as RevisionPlaintext,
       );
-      const merged = mergeFinancialGroups(
+      const restoring = branches.some(branch => branch.provenance.origin === 'restore');
+      const merged = restoring ? null : mergeFinancialGroups(
         revision,
         branches,
-        new Date().toISOString(),
+        projectionTime ?? new Date().toISOString(),
       );
       if (merged) {
         const [origin] = yield sql(
@@ -416,7 +406,7 @@ export function* projectObject(
         );
         if (!origin || origin.device_id === state.device_id) {
           yield* resolveFinancial(objectId, heads, merged, dialect, uuid);
-          yield* projectObject(objectId, dialect, uuid);
+          yield* projectObject(objectId, dialect, uuid, projectionTime);
           return;
         }
       }
@@ -440,7 +430,7 @@ export function* projectObject(
         goal: 'goals',
       }[String(identity.entity_type) as 'transaction'];
       yield sql(`UPDATE ${table} SET deleted_at=? WHERE id=?`, [
-        new Date().toISOString(),
+        projectionTime ?? new Date().toISOString(),
         localId,
       ]);
     }

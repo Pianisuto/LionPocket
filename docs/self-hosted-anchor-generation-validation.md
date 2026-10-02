@@ -1,54 +1,78 @@
-# Evidência do draft de gerações e planejamento do anchor
+# Evidência do rebase causal do anchor
 
-Execução local em 2026-10-02, branch `codex/anchor-generation-recovery`, base main `cfaf1ea99f56af2fa9c1ac23b429bd21f33320dc`, após PR #9. Todos os dados/contas/SQLite/servidores são sintéticos e descartáveis. Não foi aberto banco pessoal nem instalada atualização sobre aplicativos pessoais.
+Execução local em 2026-10-02, branch `codex/causal-anchor-rebase`, base main `eb215897286845f0b632def359b4a4b9f848a2dd`, após PR #10. Bancos, contas, autorizações, devices e servidores são sintéticos e descartáveis. Não foi aberto banco pessoal nem instalada atualização em aparelho pessoal.
 
-**Resultado: recorte seguro em draft; recuperação financeira B não concluída.** Discovery mantém `activationAvailable:false`. O [modelo e o bloqueio de projeção/fechamento do grafo](self-hosted-epoch-recovery.md) delimitam exatamente a implementação.
+**Resultado: o plano v2 conserva o DAG sincronizável necessário e passa pelo replay financeiro normal antes de `planned`. Ainda não existe geração B ativa.** Discovery mantém `activationAvailable:false`; não foram criados signing/box seeds, data key, recovery, registry operacional ou binding B, staging, upload, manifesto remoto ou ativação.
+
+O [modelo de fechamento, mapping, replay e reviews](self-hosted-epoch-recovery.md) descreve o recorte. A autorização/archives/backup do PR #10 continuam válidos; seu planner de heads como raízes foi substituído.
 
 | Verificação | Resultado local |
 | --- | --- |
-| `npm test` | 372 passaram; 33 condicionais de integração não executados nessa chamada |
-| `npm run typecheck` | Passou em todos os workspaces/harnesses |
-| `npm run lint` | Passou, zero erros; warnings de regras existentes, incluindo non-null assertions em fixtures |
+| `npm test` | 407 passaram; 33 condicionais de integração separados |
+| Desktop private beta, timeout/hookTimeout de 30s | 153 passaram |
+| `npm run typecheck` | Todos os workspaces/harnesses passaram |
+| `npm run lint` | Zero erros; warnings de non-null assertions/regras existentes |
 | `git diff --check` | Passou |
-| `npm run release:validate` | Passou: 0.3.10 / Android versionCode 3 |
-| `npm run sync:dev:test` | PostgreSQL/Keycloak reais: 61 passaram, 1 condicional de cliente anterior não executado nessa chamada |
-| `node tools/release/version-skew.cjs` | 3 passaram; engine/controller anterior de `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` compilados sem alteração |
-| `npm run sync:self-hosted:unit` | 21 passaram, incluindo geração legacy/parcial, digest paginado, envelope adulterado e validação read-only |
-| `npm run sync:self-hosted:validate` | Compose Caddy, proxy próprio e CA com secrets externos sintéticos passaram |
-| `npm run sync:self-hosted:test` | Clean-install, TLS/PKCE, SQLite desktop/mobile, normal sync, restart/offline, canários e backup/verify/restore oficial passaram |
-| Linux normal/beta | `npm run package` nos dois canais passou |
-| Android debug/normal/beta | `assembleDebug`, `assembleRelease -PdevelopmentSigning=true`, `assembleRelease -PprivateBeta=true`, x86_64: passaram |
+| `npm run release:validate` | 0.3.10 / Android versionCode 3 |
+| `npm run sync:dev:test` | PostgreSQL/Keycloak: 61 passaram; cliente anterior executado separadamente |
+| `node tools/release/version-skew.cjs` | 3 passaram, engine/controller anterior de `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` sem alteração |
+| `npm run sync:self-hosted:validate` | Compose/TLS/CA/proxy com fixtures externos passaram |
+| `npm run sync:self-hosted:test` | 21 unitários; clean install/normal sync/backup/verify/restore/TLS/offline/canários passaram |
 
-O primeiro build Android falhou por ausência de `javac` no JDK 21 do host. Retry utilizou o JDK 17 de teste já disponível no cache Gradle e passou nos três canais. Não houve instalação de JDK no sistema nem alteração de signing de produção. Os APKs são de desenvolvimento/teste; não foram instalados num dispositivo pessoal.
+A execução padrão encontrou o timeout de 5s do teste preexistente de falha deliberada de backup de migration: SQLite pode esgotar seu busy timeout nativo nesse caminho inválido. O deadline desse teste foi aumentado para 30s, preservando todas as assertions. Depois disso a suíte completa passou. Não foi alterada a implementação de migrations financeiras.
 
-## Evidência de preservação e planejamento
+## Regressão obrigatória e conflitos
 
-O teste PostgreSQL/Keycloak com adapters SQLite reais estabelece desktop proprietário e Android pareado, aceita C1, captura snapshot do servidor, aceita C2 no desktop depois do snapshot e conserva C3 no Android offline. O restore sintético perde C2 remoto e muda o epoch. A autorização é aceita, o servidor congela seus envelopes restaurados em arquivos tipados imutáveis, o desktop cria backup SQLite aberto e hashado, arquiva seus sidecars e prepara mapping contendo **C1+C2**. Os op/commit IDs de B são novos. Tabelas/grafo/outbox/binding A e Android continuam iguais. Não há envio de baseline B, instalação B ou retomada do sync.
+O teste que demonstrava X/Y roots perdendo Z agora exige ZB com `restoredFrom=Z`, XB/YB com parent ZB, exatamente dois heads, common base ZB, transação presente e conflito aberto na projeção SQLite normal. Usa banco de destino descartável e `applyCommit` existente, sem criptografia ou servidor B.
 
-Os oito testes de arquivo/planejamento usam SQLite nativo desktop e o adapter mobile real de teste. Conferem cópia das colunas de todos os sidecars, bytes dos envelopes preparados, inspeção do backup, retry com os mesmos IDs, tombstones e duas branches edit/edit e delete/edit, dependencies entre heads topológicas, review desconhecido/histórico e paginação de um grafo com 107 heads. JSON export completo falha explicitamente quando não consegue preservar a extensão; cancelamento mantém toda a evidência.
+Os 43 testes de archive/planner cobrem:
 
-O teste específico da projeção comprova o **bloqueio arquitetural novo**: X/Y com uma base comum em A mantêm uma transação disponível; reemitir apenas essas duas branches como raízes e passá-las pela projeção normal B mantém dois heads/conflito mas deixa a transação ausente. Esse resultado é deliberadamente documentado, não convertido em ativação supostamente segura.
+- cadeia linear completa e exclusão de história desconectada não necessária;
+- edit/edit, delete/edit, três heads e branches com dois níveis;
+- common base histórico A1; ausência de base única em raízes independentes e criss-cross com duas bases maximais;
+- branches com devices diferentes A; heads B restaurados pelo mesmo anchor;
+- automerge de grupos que seria possível no anchor, mas permanece aberto com heads restore;
+- resolução explícita; automerge normal volta a funcionar com novos heads locais e ancestors restore;
+- dependency em head, C1 histórico não-head com C2 atual, e dependency transitiva C1→D1;
+- rejeição de head, parent necessário e dependency necessária, sem desrejeitar;
+- delete head, delete ancestor e preservação de tombstones/conflicts;
+- tombstone desconectado, ressurreição proibida e authoredAt ambíguo entre deletes necessários mantidos em review;
+- ciclos de parent, dependency e combinado; edges ausentes/estrangeiras e payload inválido;
+- dirty uncaptured, inbox pendente/quarantine, identity unresolved e review desconhecido;
+- colisão com revision/op A, commit A e colisão entre IDs novos;
+- páginas de 100+7 revisões e stress de **4.000 revisões**, cadeia causal de 3.999 revisões mais um objeto independente;
+- alteração do grafo local após archive bloqueada, sem substituir archive;
+- retry sem substituir mapping durável; mesmo archive e UUID source determinístico gerando bytes/digests iguais;
+- crash antes do selo, durante reserva e após todos os inserts do mapping, antes de `planned`, com rollback completo;
+- schema PR #10 real de sete colunas, migração idempotente, recusa de formato 1, descarte/replanejamento sem alterar archive A;
+- digest alterado por parent B; headsSha256 separado dos ancestors;
+- backup SQLite que inclui o novo mapping e passa por inspeção/validação;
+- metas, cards, séries, prioridades recorrentes/mensais, installment slots e aliases preservados no replay.
 
-O vetor final OpenSSL cobre domínio `LionPocket/epoch-transition/v1`, commits de artifacts/manifesto/pin, alteração de campos, substituição da assinatura pela autorização de preparação, contagens int64 e encadeamento contratual A→B→C. Os artifacts do vetor são compromissos sintéticos, não proteção B de produção.
+O stress é executado pelo planner completo, incluindo os dois replays commit a commit, sem recursão. A ordenação Kahn/min-heap usa causalidade, com UUID somente como desempate. A projeção linear consulta apenas o head, eliminando o scan repetido de toda a cadeia. O common-base puro usa parent ancestry linear por head; não usa dependencies como parents.
 
-## Fault injection e privacidade
+## Oracle semântico no próprio planner
 
-Coberto nesta preparação:
+A closure é lida do archive local selado por revision ID. Ambos os DAGs são reproduzidos em schemas TEMP vazios com definições financeiras/sidecars SQLite reais e o mesmo contexto de identities/series/slots/aliases. O importer e a projeção são os existentes. O replay B usa um único anchor, sem permissão de automerge para heads restore. O contexto A não concede nova permissão local de automerge às branches arquivadas.
 
-- falha do backup/hash/pin antes de qualquer tabela de recovery;
-- rollback durante cópia local, antes de selo, com A intacta;
-- interrupção durante mapping: nenhum mapping parcial fica utilizável; retry converge;
-- fault PostgreSQL durante autorização e durante cópia do archive: consumo/challenge/autorização/cópias revertem juntos;
-- perda de resposta/restart/retry da autorização depois da expiração;
-- imutabilidade de archive, selo, journal identity e mapping;
-- tentativa de registrar duas gerações selecionadas simultaneamente;
-- cadeia operacional após restores oficiais E1→E2→E3 continua bloqueando salto de um cofre A pendente;
-- canários financeiros/recovery ausentes de PostgreSQL e logs, incluindo archives remotos.
+As duas avaliações compartilham um clock de projeção fixo para timestamps auxiliares de cache, sem usá-lo para causalidade/vencedor; os authoredAt/audit dos payloads permanecem originais. A representação normalizada compara tabelas financeiras completas, heads, conflitos/base comum, tombstones, parent/dependency graph e sidecars de identidade/série/slot/alias/import. Revision IDs B voltam a A pelo mapping para comparação; IDs auxiliares de transporte/conflito não representam conteúdo financeiro. Nada é instalado nas tabelas financeiras principais. Savepoint rollback elimina a simulação inclusive em erro.
 
-`verify-backup` v3 foi executado com instalação ativa A e senha administrativa do backup B diferentes. Dumps/config/secrets/CA/identidade/serviços permaneceram iguais; bancos temporários foram removidos. Backup adulterado foi recusado. Isso é read-only para a instalação ativa.
+O cenário de prioridades encontrou uma identity de slot existente sem transação no cache vazio. A projeção normal agora materializa esse mesmo slot antes de inserir a prioridade, conservando local/global IDs e FK. O teste cobre a situação sem prepopular finanças do destino.
 
-**Não implementados/testados:** secrets/profile/registry/key/recovery B; abertura de recovery B em instalação limpa; staging/upload/manifesto remoto completo; activation transaction/replay/concorrência; crash após ativação e saga de instalação B; sync normal B; integração financeira do anchor E1→E2→E3. As contagens/nomes de testes acima não certificam esses cenários. Segundo aparelho e recovery sem SQLite antigo permanecem pendentes.
+Failure de replay, novos heads auxiliares ou mismatch semântico deixam `review-required` com motivo explícito e sem mapping utilizável. Não se força projeção nem transforma blockers em warnings. Os helpers de recovery marcam seus workflows para impedir captura financeira incidental de dirty A no COMMIT desktop; workflows normais mantêm seu comportamento anterior.
 
-Windows normal/beta, packaged/installed Electron smoke e upgrade Android de aplicativo instalado são responsabilidade dos workflows de readiness acionados pelo PR. O resultado remoto deve ser consultado no PR; a evidência local não afirma sucesso desses jobs. Nenhuma decisão do Vault/Visão e Decisões foi alterada.
+## C1+C2 e Android offline C3
 
-A primeira execução Windows do PR encontrou `EPERM` no flush do arquivo de backup aberto com `r`. A correção usa `r+`, sem truncar ou escrever bytes, pois `FlushFileBuffers` exige acesso de escrita. A inspeção SQLite/hash posterior continua read-only. Os oito testes locais de archive passaram novamente; os checks do HEAD atualizado são a evidência da validação Windows.
+O cenário real PostgreSQL/Keycloak aceita C1, captura backup remoto, aceita C2 no desktop depois e mantém C3 no Android offline. Restore perde C2 remoto. Owner autoriza, cria backup/arquivo local e planeja v2: C1+C2 aparecem no mapping, com IDs novos e replay aprovado. O archive remoto não é usado para descobrir C2.
+
+Snapshots de todos os sidecars/outbox/binding e perfil A permanecem iguais. Android continua no binding A, com C3/outbox A/SQLite financeiro intactos. Não há novo endpoint nem recuperação no foreground. Discovery e tentativa de activation continuam indisponíveis. O teste exige `phase='planned',plan_format=2` e preservação exata de A.
+
+## Compatibilidade, CI e limites
+
+`protocolVersion=1`, `domainSchema=1`, commits/changes v1 e backup self-hosted v3 permanecem iguais. Backup servidor não contém mapping local do cliente; backup SQLite contém e verifica a extensão. Plano antigo/incompleto nunca significa geração ativa.
+
+`EpochBaselineManifest.mappingSha256` já compromete o novo digest causal v2. Manifesto, EpochTransition e vetor determinístico não mudaram; testes A→B→C e rejeição de A→C continuam passando. Nenhuma decisão do Vault/Visão e Decisões precisou mudar.
+
+Os workflows do PR verificam Windows/Linux normal/private beta, packaged/installed Electron e Android debug/normal/private beta/upgrade. A tabela acima é evidência local; resultado remoto deve ser consultado no PR, sem alegação antecipada de sucesso.
+
+Limites explícitos: tombstone desconectado, ressurreição e audit de deletes sem interpretação inequívoca permanecem em review. Grafos cujo cache/referências não podem ser materializados normalmente também bloqueiam. Review v2 ainda requer desenho futuro de nova tentativa/snapshot; somente planos v1 incompatíveis possuem descarte/replanejamento nesta implementação. Não há proteção operacional B, staging/activation, recuperação multi-device, instalação B nem saga pós-ativação. O futuro uploader deverá consumir o mapping causal e as mesmas identities/slots, sem compactação ou redefinição dos heads.

@@ -444,11 +444,19 @@ function* priorityReference(
     'SELECT local_id FROM sync_identity WHERE object_id=?',
     [objectId],
   );
-  if (known) return yield* localReference(objectId);
+  if (known) {
+    const reference = yield* localReference(objectId);
+    if (reference === null) return null;
+    const [present] = yield sql('SELECT id FROM transactions WHERE id=?', [known.local_id]);
+    if (present) return reference;
+    // An archived/generated identity can exist before its disposable financial cache.
+    // Materialize the same slot below instead of inserting a priority with a dangling FK.
+  }
   const [slot] = yield sql('SELECT * FROM sync_slots WHERE object_id=?', [
     objectId,
   ]);
   if (!slot) throw new Error('missing_dependencies');
+  if (known && known.local_id !== slot.local_id) throw new Error('slot_identity_collision');
   const [present] = yield sql('SELECT id FROM transactions WHERE id=?', [
     slot.local_id,
   ]);
@@ -509,7 +517,7 @@ function* priorityReference(
     };
     yield* projectFinancial(String(slot.local_id), tx, dialect);
   }
-  yield sql("INSERT INTO sync_identity VALUES('transaction',?,?)", [
+  yield sql("INSERT INTO sync_identity VALUES('transaction',?,?) ON CONFLICT(object_id) DO NOTHING", [
     slot.local_id,
     objectId,
   ]);

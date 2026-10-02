@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { chmod, open } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { dirname } from 'node:path';
-import type { AnchorBackupInspection, VerifiedAnchorBackup } from '@lionpocket/sync-local';
+import { verifyAnchorPlanBackup, type AnchorBackupInspection, type VerifiedAnchorBackup } from '@lionpocket/sync-local';
 
 /** Native SQLite backup, not JSON export. Target must be a new private file chosen by the caller. */
 export async function createEpochAnchorBackup(db: DatabaseSync, target: string): Promise<VerifiedAnchorBackup> {
@@ -26,6 +26,7 @@ export async function inspectEpochAnchorBackup(path: string): Promise<AnchorBack
     const integrity = backup.prepare('PRAGMA integrity_check').all();
     if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok') throw new Error('epoch_backup_invalid');
     if (backup.prepare('PRAGMA foreign_key_check').all().length) throw new Error('epoch_backup_invalid');
+    await verifyAnchorPlanBackup({ read: async (sql, params = []) => backup.prepare(sql).all(...params) as import('@lionpocket/sync-local').SqlRow[] });
     const binding = backup.prepare('SELECT pin_json FROM sync_bindings WHERE binding_id=(SELECT binding_id FROM sync_local_state WHERE id=1)').get();
     if (!binding || typeof binding.pin_json !== 'string') throw new Error('epoch_backup_invalid');
     bindingPinJson = binding.pin_json;

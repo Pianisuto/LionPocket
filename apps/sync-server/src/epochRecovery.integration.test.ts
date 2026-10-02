@@ -237,6 +237,8 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     const planned = bank.db.prepare('SELECT * FROM recovery_revision_mapping ORDER BY ordinal').all();
     expect(planned.map(r => JSON.parse(String(r.revision_b_json)).snapshot.description)).toEqual(expect.arrayContaining([canary, 'DESKTOP_C2_AFTER_BACKUP']));
     expect(planned).toHaveLength(2);
+    expect(planned.every(r => r.is_head === 1 && r.parents_b_json === '[]')).toBe(true);
+    expect(bank.db.prepare('SELECT phase,plan_format FROM recovery_journal').get()).toEqual({ phase: 'planned', plan_format: 2 });
     const newIds = new Set(planned.map(r => r.revision_b));
     for (const old of before.desktop.sync_revisions) expect(newIds.has(old.revision_id)).toBe(false);
     expect(snapshotLocal()).toEqual(before);

@@ -11,7 +11,10 @@ export interface SqlRequest {
   sql: string;
   params?: (string | number | null)[];
 }
-export type SqlWorkflow = Generator<SqlRequest, void, SqlRow[]>;
+export type SqlWorkflow = Generator<SqlRequest, void, SqlRow[]> & {
+  /** Recovery inspection/planning must not capture incidental pending financial writes on commit. */
+  preserveUncapturedWrites?: true;
+};
 const query = (
   sql: string,
   params?: (string | number | null)[],
