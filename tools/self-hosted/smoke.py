@@ -81,6 +81,10 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
             raise RuntimeError('Fixture CA missing')
         with env.open('a') as stream: stream.write('HOMELAB_CA_FILE=' + str(root) + '\n')
         cfg = lp.config()
+        # Node loads NODE_EXTRA_CA_CERTS only at process startup. On a cold runner
+        # API can start before Caddy creates the fixture CA; recreate it now that
+        # the trusted root exists, exercising the official CA addon as well.
+        lp.compose(cfg, 'up', '-d', '--force-recreate', '--wait', '--wait-timeout', '300', 'api', capture=True)
         # Exercise the official public-CA addon, not just the fixture mount.
         lp.compose(cfg, 'run', '--rm', '-T', '--no-deps', '-e', 'NODE_EXTRA_CA_CERTS=/opt/lionpocket/trusted-ca.pem', 'operator', data=b'{"action":"status"}', capture=True)
         ctl('status')
