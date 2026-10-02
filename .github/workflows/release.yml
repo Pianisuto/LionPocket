@@ -120,7 +120,7 @@ jobs:
       - run: npm run build:core
       - name: Debug (no private credentials)
         working-directory: apps/mobile/android
-        run: ./gradlew assembleDebug -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
       - name: Missing public signing must fail clearly
         run: node tools/release/android-signing-check.cjs
       - name: Disposable development-signed normal release

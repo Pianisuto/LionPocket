@@ -2,13 +2,13 @@
 
 ## Estado desta implementação
 
-**Preparação operacional B em draft; B continua sem ativação.**
+**Preparação operacional B retomável até prepared; B continua sem ativação.**
 
 Este incremento parte exatamente de `cbd7067644c63e6c09802b208731b43d239c0031` (main após PR #11). O plano causal v2 anterior agora pode produzir identidade, registry, chave, recovery, staging, manifesto e transition B reais. O staging é isolado das tabelas ativas. Nenhum binding/profile ativo, financeiro, outbox A ou coordinator é substituído.
 
-Há um bloqueio explícito para cumprir todo o critério de crash/retry: o SecretStore atual fornece somente load/store/remove de um secret por vez. Se o processo morrer depois da reserva pública dos artifacts e antes de persistir todos os secrets aleatórios, não há como reconstruir exatamente os bytes ausentes. A helper retorna `secret_reservation_incomplete`, preserva a tentativa e não substitui chaves nem publica B. **Este PR deve permanecer draft** até existir uma solução de durabilidade de secrets que respeite o journal antes das writes e o armazenamento exclusivamente no SecretStore. Não foram introduzidos seeds derivados da authority, DEK derivada de A, capsules privadas em SQLite ou uma confirmação automática de código novo.
+O material aleatório irreproduzível é persistido como um único `EpochPreparationSecretBundle` privado no SecretStore, relido e verificado **antes** da reserva pública no SQLite. Secrets operacionais são materializações idempotentes desse bundle; crash após sua durabilidade retoma exatamente a mesma B. Não há transação multi-secret, derivação de chaves a partir de A ou secrets no journal público. Sagas do draft anterior sem bundle são marcadas como `legacy_preparation_blocked`, sem inventar material perdido.
 
-O caminho após a persistência completa dos secrets possui retry durável testado até `prepared`. Discovery informa staging disponível e mantém `activationAvailable:false`. Helpers continuam ações explícitas, sem UX nova ou foreground automático. A permanece a geração selecionada e bloqueada pelo epoch mismatch. Segundo aparelho/C3 permanece intocado. As evidências usam fixtures descartáveis; não são alegação de recuperação operacional E1→E2 completa.
+O caminho desde o preparation bundle durável possui retry testado até `prepared`, inclusive com fechamento/reabertura do SQLite e novos adapters. Discovery informa staging disponível e mantém `activationAvailable:false`. Helpers continuam ações explícitas, sem UX nova ou foreground automático. A permanece a geração selecionada e bloqueada pelo epoch mismatch. Segundo aparelho/C3 permanece intocado. As evidências usam fixtures descartáveis; não são alegação de recuperação operacional E1→E2 completa.
 
 ## Fronteira de segurança
 
@@ -165,7 +165,7 @@ A rota `epoch-staging-prepare` persiste a transition assinada em `sync_epoch_tra
 
 Cria novo deviceId, signing seed/public key e box seed/public key. Preserva installationId do aplicativo físico: ele não é fronteira criptográfica; deviceId, profile, epoch e SecretScope são. O pin B preserva serverId/vaultId/authority, muda epoch para `authorization.toEpoch` e founder para o novo anchor. Registry B é uma cadeia nova com somente o grant approved do anchor, versão textual `1`, assinado pela authority A. Não copia grants/revogações A.
 
-Antes de qualquer write no SecretStore B, `recovery_b_saga` reserva profile público, registry/key-base públicos, restore/plan commitments e hashes dos secrets esperados. Esses hashes usam `LionPocket/epoch-secret-reservation/v1` sobre scope e material; nenhum material privado é persistido em SQLite. Signing/box/authority são também comparados por derivação de public key em todo retry. A authority é conferida contra A e B. Colisões são `secret_reservation_mismatch`, nunca overwrite.
+A ordem é: validar A/archive/plano; determinar scope estável; carregar ou gerar/persistir/reler/verificar o bundle; construir identidade pública B; inserir saga formato 2 com hash do bundle e digests dos secrets; materializar os secrets B individualmente; avançar a `secrets_prepared`. Falha ambígua de store exige load e comparação exata antes do INSERT. Um bundle ausente depois da reserva é erro duro, nunca regeneração.
 
 SecretScopes preservam installation/server/vault e distinguem device B, epoch B, purpose e keyVersion. Seeds/authority/master usam purpose version 1; a data key usa sua versão operacional. A scope e profile continuam preservados. A DEK B é CSPRNG nova de 32 bytes; não deriva nem reutiliza DEK A. O material da authority é copiado para o scope B, sem trocar/remover a authority A.
 
@@ -187,17 +187,29 @@ Se master A confirmado está no SecretStore, o recovery A assinado é aberto e s
 
 Se master A não está disponível, gera master B novo e retorna código LP1 **somente ao caller**, sem persisti-lo em SQLite/logs. A fase fica `recovery_pending_confirmation`. `confirmOperationalBRecovery` exige redigitação, verifica assinatura/AEAD/scope/authority/registry/base/ativa e todas as DEKs B contra SecretStore, e persiste apenas a flag pública. Código novo nunca é auto-confirmado. O begin assinado pelo anchor inclui `recoveryConfirmed:true`, uma declaração do cliente; o servidor não consegue verificar a redigitação nem decryptar recovery.
 
+### Preparation secret bundle e scope
+
+`EpochPreparationSecretScope` é um tipo específico, localizado sem depender do deviceId B: formatVersion 1, purpose `epochPreparation`, installationId, anchorDeviceId A, serverId, vaultId, fromEpoch, toEpoch e restoreId. Wrapping usa domínio `LionPocket/epoch-preparation-wrap/v1`, distinto de `LionPocket/local-wrap/v1` dos secrets operacionais.
+
+O bundle privado formatVersion 1 guarda deviceId B; signingSeed, boxSeed e dataKey B CSPRNG independentes; cópia da authority necessária; master confirmado A ou master B novo; nonce recovery B; public keys derivadas/baseKeyVersion; recovery A assinado quando aplicável; hashes do profile A/autorização e compromissos do plano. Guarda bytes do master, sem código textual LP1. O nonce durável também reproduz ciphertext/signature do recovery se ocorrer crash antes do INSERT desse artifact. Não cria uma KDF nova.
+
+Parsing exige JSON canônico/exact object, UUIDs, comprimentos exatos, scope/plano/profile A confiáveis. Recalcula public keys signing/box/authority e valida recovery A/master/DEKs antes de aceitar. Toda reserva pública precisa coincidir exatamente com o bundle, sem reparo de um lado pelo outro. Mensagens de parsing são fixas e não citam conteúdo privado. O bundle tem limite de 128 KiB.
+
+Desktop usa safeStorage seguro, tempfile fsynced e publicação create-if-absent por hard link; uma reserva existente diferente é recusada. Linux basic_text/unavailable continua recusado. Android usa AES-GCM AndroidKeyStore + AtomicFile no noBackupFilesDir, alias/diretório exclusivos da preparação, wrapper versão 2; wrappers operacionais versão 1/32 bytes permanecem compatíveis. TestSecrets aplica a mesma imutabilidade. Os três adapters aceitam bytes variáveis somente nesse scope específico.
+
 ### Saga local e crash recovery
 
 Extensão instalada explicitamente após o archive, sem bump da migration financeira normal:
 
-- `recovery_b_saga`: identity_reserved → secrets_prepared → recovery_pending_confirmation → recovery_confirmed → staging → staged → prepared; cancelled antes de publicação.
-- `recovery_b_envelopes`: ciphertext canônico, digest, ordinal/commit imutáveis.
-- `recovery_b_batches`: bytes/digest do batch imutáveis.
+- `recovery_b_saga`: identity_reserved → secrets_prepared → recovery_pending_confirmation → recovery_confirmed → staging → staged → prepared.
+- `preparation_format=2` e `preparation_sha256` imutáveis vinculam o artifact privado. Migration aditiva atribui formato 1 a rows antigos, bloqueados explicitamente.
+- `recovery_b_envelopes` e `recovery_b_batches`: bytes/digests/identidades imutáveis.
 
-Profile, commitments, recovery, manifesto e transition são públicos ou ciphertext; seeds/keys/master/code ficam exclusivamente no SecretStore. Retry reutiliza bytes e IDs persistidos. `last_device_seq` conserva o contador baseline para uma futura ativação; não altera o contador ativo A. `remote_started` é marcado conservadoramente antes de begin, pois resposta perdida não prova ausência remota. Cancelamento não apaga artifacts, archive, backup ou secrets; após possível publicação exige resume. `cancelAnchorPlan` também respeita esse bloqueio.
+SQLite guarda somente artifacts públicos/ciphertext, compromissos e digests; bundle/seeds/DEK/master/LP1 não entram no SQLite, PostgreSQL, backup público, staging begin, manifest ou transition. Antes de existir bundle durável, não existe reserva pública e retry pode gerar material. Depois, retry somente carrega o bundle original: secret ausente é gravado com aqueles bytes; presente diferente falha duramente. Faults cobrem todas as fronteiras e releitura. `last_device_seq` preserva o contador baseline para futura ativação, sem mudar o contador ativo A.
 
-**Limitação bloqueante do draft:** reserva pública seguida de persistência parcial de secrets aleatórios não pode convergir automaticamente com a API atual. A tentativa permanece identificável e falha fechada; não há regeneração silenciosa ou orphan sem journal. Depois que todos os secrets existem, falhas em recovery, begin, envelope/batch, manifesto, validate, transition e save local após remote prepared convergem na mesma tentativa. Uma solução futura precisa garantir durabilidade do material reservado sem violar os escopos e sem guardar secrets em SQLite. As decisões do Vault não foram alteradas para escolher uma solução.
+Antes de `remote_started=1`, `cancelOperationalB` significa pausar: `phase='cancelled'` preserva a fase anterior em `resume_phase`, archive/plano/bundle/identidade/secrets/artifacts. `resumeOperationalB` é ação explícita, valida novamente a reserva e restaura a fase original; foreground não retoma. `cancelAnchorPlan` delega essa semântica quando há saga B formato 2, mantendo o plano `planned`. Atualizações de preparação/confirmation verificam a pausa na mesma transação e não a sobrescrevem por corrida. Depois que `remote_started=1` é marcado conservadoramente antes do begin, cancelamento continua recusado; retry continua a mesma B.
+
+**Lifetime:** o bundle permanece durável durante preparação e staging, inclusive em `prepared` ou pausa. Este PR não implementa cleanup. Condição futura segura: ativação B e instalação local (binding/profile, secrets e dados selecionados) totalmente finalizadas e verificadas de forma durável, incluindo a recuperação de crashes nessa fronteira. Somente o próximo fluxo poderá definir e executar sua remoção; `prepared` não é essa condição.
 
 ## Staging remoto
 
@@ -247,6 +259,6 @@ Manifestos v1/v2/v3 continuam aceitos com seus contratos/digests anteriores. A n
 
 Veja [evidência da preparação operacional B](self-hosted-operational-b-validation.md), [evidência do planner PR #11](self-hosted-anchor-generation-validation.md) e [evidência PR #9](self-hosted-epoch-recovery-validation.md), que permanecem históricas.
 
-O recorte inclui preparação real até prepared após persistência dos secrets, encrypted replay C1+C2, conflitos/tombstones, pairing/rotation base N, retry de bytes, autenticação/tampering, PostgreSQL/Keycloak, backup v4 e ensaios isolados. O critério completo de crash/retry pré-secrets **não foi atendido**; PR draft. Não há ativação, instalação de binding B, segundo aparelho recuperado, integração nativa de UX/backup Android ou E1→E2 operacional completo.
+O recorte inclui preparação real até prepared após persistência dos secrets, encrypted replay C1+C2, conflitos/tombstones, pairing/rotation base N, retry de bytes, autenticação/tampering, PostgreSQL/Keycloak, backup v4 e ensaios isolados. O bloqueio pré-secrets foi removido pelo bundle durável; faults de todas as escritas convergem sem regenerar B. Não há ativação, instalação de binding B, segundo aparelho recuperado, integração nativa de UX/backup Android ou E1→E2 operacional completo.
 
 `protocolVersion=1`, `domainSchema=1` e wire financeiro permanecem. Discovery é `epochRecovery:{formatVersion:1,authorizationAvailable:true,stagingAvailable:true,activationAvailable:false}`. As decisões do Vault/Visão e Decisões não foram alteradas.

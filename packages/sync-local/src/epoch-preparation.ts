@@ -1,9 +1,9 @@
 import {
-  assertKeyVersion,
   assertDecimal64,
   exactObject,
   canonicalStringify,
   commitSigningInput,
+  deviceGrantSigningInput,
   decodeCommit,
   encodeUtf8,
   epochBaselineManifestInput,
@@ -30,16 +30,19 @@ import {
   plannedAnchorOperations,
 } from "./epoch-archive";
 import { DeviceProvisioning, type ProvisionedProfile } from "./provisioning";
-import {
-  makeRecovery,
-  openRecovery,
-  validateKeyCheckpoints,
-  verifySignedRecovery,
-  type SignedRecovery,
-} from "./security";
+import { makeRecovery, openRecovery, type SignedRecovery } from "./security";
 import { sql, type LocalSyncDatabase } from "./transport-state";
 import type { SqlRow, SqlWorkflow } from "./manual";
 import type { SecretScope } from "./secrets";
+import {
+  createEpochPreparationSecretBundle,
+  decodeEpochPreparationSecretBundle,
+  epochPreparationSecretScope,
+  preparationSecretDigest,
+  preparationSecretPurposes,
+  type EpochPreparationSecretBundle,
+  type PreparationSecretOptions,
+} from "./epoch-preparation-secrets";
 import type { TransportSodium } from "./transport";
 
 export const operationalBSchema = [
@@ -49,7 +52,9 @@ export const operationalBSchema = [
   phase TEXT NOT NULL CHECK(phase IN ('identity_reserved','secrets_prepared','recovery_pending_confirmation','recovery_confirmed','staging','staged','prepared','cancelled')),
   recovery_json TEXT,recovery_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(recovery_confirmed IN (0,1)),
   remote_started INTEGER NOT NULL DEFAULT 0 CHECK(remote_started IN (0,1)),
-  last_device_seq TEXT NOT NULL DEFAULT '0',manifest_json TEXT,transition_json TEXT)`,
+  last_device_seq TEXT NOT NULL DEFAULT '0',manifest_json TEXT,transition_json TEXT,
+  preparation_format INTEGER NOT NULL DEFAULT 1 CHECK(preparation_format IN (1,2)),
+  preparation_sha256 TEXT, resume_phase TEXT)`,
   `CREATE TRIGGER IF NOT EXISTS recovery_b_identity BEFORE UPDATE OF restore_id,profile_b_json,begin_public_json,expected_secrets_json,recovery_source ON recovery_b_saga
   BEGIN SELECT RAISE(ABORT,'B reservation is immutable'); END`,
   ...["recovery_json", "manifest_json", "transition_json"].map(
@@ -95,13 +100,66 @@ interface BaseOptions {
   restoreId: string;
   fault?: PreparationFault;
 }
+async function installPreparationSchema(db: LocalSyncDatabase) {
+  await write(
+    db,
+    operationalBSchema.map((sql) => ({ sql })),
+  );
+  const columns = new Set(
+    (await db.read("PRAGMA table_info(recovery_b_saga)")).map((c) => c.name),
+  );
+  for (const [name, definition] of [
+    [
+      "preparation_format",
+      "INTEGER NOT NULL DEFAULT 1 CHECK(preparation_format IN (1,2))",
+    ],
+    ["preparation_sha256", "TEXT"],
+    ["resume_phase", "TEXT"],
+  ])
+    if (!columns.has(name))
+      await write(db, [
+        { sql: `ALTER TABLE recovery_b_saga ADD COLUMN ${name} ${definition}` },
+      ]);
+  await write(db, [
+    {
+      sql: `CREATE TRIGGER IF NOT EXISTS recovery_b_preparation_identity
+    BEFORE UPDATE OF preparation_format,preparation_sha256 ON recovery_b_saga
+    BEGIN SELECT RAISE(ABORT,'B preparation reservation is immutable'); END`,
+    },
+  ]);
+}
+async function writeLive(
+  o: BaseOptions,
+  items: Array<{ sql: string; params?: (string | number | null)[] }>,
+) {
+  await o.db.run(
+    recoveryRun(
+      (function* (): SqlWorkflow {
+        const [current] = yield sql(
+          "SELECT * FROM recovery_b_saga WHERE restore_id=?",
+          [o.restoreId],
+        );
+        if (!current) throw new Error("recovery_attempt_missing");
+        assertPreparationFormat(current);
+        if (current.phase === "cancelled")
+          throw new Error("recovery_attempt_paused");
+        yield* statements(items);
+      })(),
+    ),
+  );
+}
+function assertPreparationFormat(row: SqlRow) {
+  if (row.preparation_format !== 2)
+    throw new Error("legacy_preparation_blocked");
+}
 async function attempt(o: BaseOptions) {
   const [row] = await o.db.read(
     "SELECT * FROM recovery_b_saga WHERE restore_id=?",
     [o.restoreId],
   );
-  if (!row || row.phase === "cancelled")
-    throw new Error("recovery_attempt_missing");
+  if (!row) throw new Error("recovery_attempt_missing");
+  assertPreparationFormat(row);
+  if (row.phase === "cancelled") throw new Error("recovery_attempt_paused");
   return row;
 }
 function deviceB(o: BaseOptions, row: SqlRow) {
@@ -161,300 +219,373 @@ function secretDigest(
     }),
   );
 }
+function preparationOptions(
+  o: BaseOptions,
+  plan: Awaited<ReturnType<typeof currentPlan>>,
+): PreparationSecretOptions {
+  return {
+    deviceA: o.deviceA,
+    sodium: o.sodium,
+    scope: epochPreparationSecretScope(
+      o.deviceA.profile,
+      o.restoreId,
+      String(plan.journal.to_epoch),
+    ),
+    authorizationSha256: o.deviceA.crypto.hash(
+      String(plan.journal.authorization_json),
+    ),
+    commitments: plan.commitments,
+  };
+}
+async function loadPreparation(
+  o: BaseOptions,
+  plan: Awaited<ReturnType<typeof currentPlan>>,
+  row?: SqlRow,
+  previousRecovery?: SignedRecovery | null,
+) {
+  const options = preparationOptions(o, plan),
+    store = o.deviceA.secrets;
+  let bytes = await store.load(options.scope);
+  try {
+    if (!bytes) {
+      if (row) throw new Error("preparation_secret_bundle_unavailable");
+      await o.fault?.("before_preparation_bundle");
+      const proposed = await createEpochPreparationSecretBundle(
+        options,
+        previousRecovery ?? null,
+      );
+      try {
+        // A failed acknowledgment may still have published the one durable encrypted file.
+        try {
+          await store.store(options.scope, proposed);
+        } catch {
+          /* Load below determines whether the durable write actually exists. */
+        }
+        await o.fault?.("preparation_bundle_stored");
+        bytes = await store.load(options.scope);
+        if (!bytes) throw new Error("preparation_secret_bundle_unavailable");
+        if (
+          bytes.length !== proposed.length ||
+          !bytes.every((b, i) => b === proposed[i])
+        )
+          throw new Error("preparation_secret_bundle_mismatch");
+      } finally {
+        o.deviceA.crypto.erase(proposed);
+      }
+    }
+    const bundle = await decodeEpochPreparationSecretBundle(bytes, options),
+      digest = preparationSecretDigest(o.deviceA, bytes);
+    if (row && row.preparation_sha256 !== digest)
+      throw new Error("secret_reservation_mismatch");
+    await o.fault?.("preparation_bundle_verified");
+    return { bundle, digest };
+  } finally {
+    if (bytes) o.deviceA.crypto.erase(bytes);
+  }
+}
+function publicReservation(
+  o: BaseOptions,
+  plan: Awaited<ReturnType<typeof currentPlan>>,
+  bundle: EpochPreparationSecretBundle,
+  material: Map<SecretScope["purpose"], Uint8Array>,
+) {
+  const a = o.deviceA,
+    deviceId = bundle.deviceId,
+    authority = material.get("authoritySeed")!;
+  const profile: ProvisionedProfile = {
+    formatVersion: 1,
+    installationId: a.profile.installationId,
+    deviceId,
+    pin: {
+      ...a.profile.pin,
+      serverEpoch: bundle.scope.toEpoch,
+      founderDeviceId: deviceId,
+      keyVersion: bundle.baseKeyVersion,
+    },
+    signingPublicKey: bundle.signingPublicKey,
+    boxPublicKey: bundle.boxPublicKey,
+    grants: [],
+    activeKeyVersion: bundle.baseKeyVersion,
+    keyCheckpoints: [],
+  };
+  const grant = {
+    formatVersion: 1 as const,
+    serverId: profile.pin.serverId,
+    serverEpoch: profile.pin.serverEpoch,
+    vaultId: profile.pin.vaultId,
+    registryVersion: "1",
+    previousRegistrySha256: null,
+    deviceId,
+    signingPublicKey: profile.signingPublicKey,
+    boxPublicKey: profile.boxPublicKey,
+    status: "approved" as const,
+  };
+  profile.grants = [
+    {
+      ...grant,
+      signature: a.crypto.sign(deviceGrantSigningInput(grant), authority),
+    },
+  ];
+  profile.checkpoint = validateGrantChain(
+    profile.grants,
+    profile.pin,
+    a.crypto,
+  ).checkpoint;
+  const base = {
+    formatVersion: 1 as const,
+    serverId: profile.pin.serverId,
+    serverEpoch: profile.pin.serverEpoch,
+    vaultId: profile.pin.vaultId,
+    restoreId: o.restoreId,
+    fromEpoch: a.profile.pin.serverEpoch,
+    baseKeyVersion: bundle.baseKeyVersion,
+    previousActiveKeyVersion: bundle.baseKeyVersion - 1,
+    previousKeyCheckpointsSha256: a.crypto.hash(
+      canonicalStringify(a.profile.keyCheckpoints ?? []),
+    ),
+  };
+  const begin = {
+    authorization: JSON.parse(String(plan.journal.authorization_json)),
+    pin: profile.pin,
+    registry: profile.grants,
+    keyBase: {
+      ...base,
+      signature: a.crypto.sign(epochKeyBaseSigningInput(base), authority),
+    },
+    knownKeyCheckpoints: a.profile.keyCheckpoints ?? [],
+    previousRecovery: bundle.previousRecovery,
+    ...plan.commitments,
+  };
+  const b = new DeviceProvisioning(profile, a.secrets, a.crypto);
+  return {
+    profile,
+    begin,
+    expected: Object.fromEntries(
+      [...material].map(([kind, secret]) => [
+        kind,
+        secretDigest(b, kind, secret),
+      ]),
+    ),
+  };
+}
+async function withPreparation<T>(
+  o: BaseOptions,
+  row: SqlRow,
+  plan: Awaited<ReturnType<typeof currentPlan>>,
+  action: (
+    b: DeviceProvisioning,
+    bundle: EpochPreparationSecretBundle,
+    material: Map<SecretScope["purpose"], Uint8Array>,
+  ) => Promise<T>,
+) {
+  const { bundle } = await loadPreparation(o, plan, row);
+  const material = new Map(
+    preparationSecretPurposes.map((p) => [
+      p,
+      o.deviceA.crypto.decode(bundle[p]),
+    ]),
+  );
+  try {
+    const expected = publicReservation(o, plan, bundle, material);
+    if (
+      canonicalStringify(expected.profile) !== row.profile_b_json ||
+      canonicalStringify(expected.begin) !== row.begin_public_json ||
+      canonicalStringify(expected.expected) !== row.expected_secrets_json ||
+      bundle.recoverySource !== row.recovery_source
+    )
+      throw new Error("secret_reservation_mismatch");
+    const b = deviceB(o, row),
+      result = await action(b, bundle, material);
+    if (row.recovery_json) {
+      const nonce = b.crypto.decode(bundle.recoveryNonce);
+      try {
+        const version = (
+          BigInt(bundle.previousRecovery?.envelope.recoveryVersion ?? "0") + 1n
+        ).toString();
+        const recovered = await makeRecovery(
+          b,
+          o.sodium,
+          version,
+          material.get("recoveryMaster")!,
+          nonce,
+        );
+        if (canonicalStringify(recovered.recovery) !== row.recovery_json)
+          throw new Error("secret_reservation_mismatch");
+      } finally {
+        b.crypto.erase(nonce);
+      }
+    }
+    return result;
+  } finally {
+    for (const secret of material.values()) o.deviceA.crypto.erase(secret);
+  }
+}
 async function verifySecrets(
   d: DeviceProvisioning,
   row: SqlRow,
-  candidates?: Map<SecretScope["purpose"], Uint8Array>,
+  candidates: Map<SecretScope["purpose"], Uint8Array>,
   fault?: PreparationFault,
 ) {
-  const expected = JSON.parse(String(row.expected_secrets_json)) as Record<
-    SecretScope["purpose"],
-    string
-  >;
-  // Check the complete reservation before performing any write. Missing random material after process death is a blocker.
-  for (const [purpose, digest] of Object.entries(expected)) {
-    const p = purpose as SecretScope["purpose"],
-      existing = await d.secrets.load(d.scope(p)),
-      secret = existing ?? candidates?.get(p);
+  let expected: Record<SecretScope["purpose"], string>;
+  try {
+    expected = exactObject(JSON.parse(String(row.expected_secrets_json)), [
+      ...preparationSecretPurposes,
+    ]) as Record<SecretScope["purpose"], string>;
+  } catch {
+    throw new Error("secret_reservation_mismatch");
+  }
+  // Check every present value and the complete private bundle before materializing any absent secret.
+  for (const p of preparationSecretPurposes) {
+    const secret = candidates.get(p)!;
+    if (secretDigest(d, p, secret) !== expected[p])
+      throw new Error("secret_reservation_mismatch");
+    const existing = await d.secrets.load(d.scope(p));
     try {
-      if (!secret) throw new Error("secret_reservation_incomplete");
-      if (secretDigest(d, p, secret) !== digest)
+      if (
+        existing &&
+        (existing.length !== secret.length ||
+          !existing.every((b, i) => b === secret[i]))
+      )
         throw new Error("secret_reservation_mismatch");
-      if (p === "signingSeed" || p === "authoritySeed" || p === "boxSeed") {
-        const pair =
-          p === "boxSeed"
-            ? d.crypto.sodium.crypto_box_seed_keypair(secret)
-            : d.crypto.sodium.crypto_sign_seed_keypair(secret);
-        d.crypto.erase(pair.privateKey);
-        const publicKey =
-          p === "signingSeed"
-            ? d.profile.signingPublicKey
-            : p === "boxSeed"
-              ? d.profile.boxPublicKey
-              : d.profile.pin.authorityPublicKey;
-        if (d.crypto.encode(pair.publicKey) !== publicKey)
-          throw new Error("secret_reservation_mismatch");
-      }
     } finally {
       if (existing) d.crypto.erase(existing);
     }
   }
-  for (const purpose of [
-    "signingSeed",
-    "boxSeed",
-    "dataKey",
-    "authoritySeed",
-    "recoveryMaster",
-  ] as const) {
-    const p = purpose as SecretScope["purpose"],
-      existing = await d.secrets.load(d.scope(p));
+  for (const p of preparationSecretPurposes) {
+    const existing = await d.secrets.load(d.scope(p));
+    const secret = candidates.get(p)!;
     if (existing) {
-      d.crypto.erase(existing);
+      try {
+        if (
+          existing.length !== secret.length ||
+          !existing.every((b, i) => b === secret[i])
+        )
+          throw new Error("secret_reservation_mismatch");
+      } finally {
+        d.crypto.erase(existing);
+      }
       continue;
     }
-    const secret = candidates?.get(p);
-    if (!secret) throw new Error("secret_reservation_incomplete");
     await d.secrets.store(d.scope(p), secret);
     await fault?.(`secret:${p}`);
+    const read = await d.secrets.load(d.scope(p));
+    try {
+      if (
+        !read ||
+        read.length !== secret.length ||
+        !read.every((b, i) => b === secret[i])
+      )
+        throw new Error("secret_reservation_mismatch");
+    } finally {
+      if (read) d.crypto.erase(read);
+    }
   }
 }
-/** Explicit preparation only. The active saved profile and financial tables are never written.
- * A reserved-but-missing random secret is intentionally blocked, never silently replaced. See draft evidence. */
+/** Explicit only. Private durability precedes the immutable public reservation; A is never installed or rewritten. */
 export async function prepareOperationalB(
   o: BaseOptions & { previousRecovery: SignedRecovery | null },
 ) {
-  await write(
-    o.db,
-    operationalBSchema.map((sql) => ({ sql })),
-  );
-  const { journal, commitments } = await currentPlan(o);
+  const plan = await currentPlan(o);
+  await installPreparationSchema(o.db);
   let row = (
     await o.db.read("SELECT * FROM recovery_b_saga WHERE restore_id=?", [
       o.restoreId,
     ])
   )[0];
-  let candidates: Map<SecretScope["purpose"], Uint8Array> | undefined;
+  if (row) {
+    assertPreparationFormat(row);
+    if (row.phase === "cancelled") throw new Error("recovery_attempt_paused");
+  }
+  const { bundle, digest } = await loadPreparation(
+    o,
+    plan,
+    row,
+    o.previousRecovery,
+  );
+  const material = new Map(
+    preparationSecretPurposes.map((p) => [
+      p,
+      o.deviceA.crypto.decode(bundle[p]),
+    ]),
+  );
   try {
+    const reservation = publicReservation(o, plan, bundle, material);
     if (!row) {
-      const a = o.deviceA,
-        authority = await a.secrets.load(a.scope("authoritySeed"));
-      if (!authority) throw new Error("authority_secret_unavailable");
-      candidates = new Map([
-        ["authoritySeed", authority],
-        ["signingSeed", o.sodium.randombytes_buf(32)],
-        ["boxSeed", o.sodium.randombytes_buf(32)],
-        ["dataKey", o.sodium.randombytes_buf(32)],
-      ]);
-      const pair = o.sodium.crypto_sign_seed_keypair(authority);
-      a.crypto.erase(pair.privateKey);
-      if (a.crypto.encode(pair.publicKey) !== a.profile.pin.authorityPublicKey)
-        throw new Error("key_mismatch");
-      const active = validateKeyCheckpoints(
-        a.profile.keyCheckpoints ?? [],
-        a.profile.pin,
-        a.profile.grants,
-        a,
-      );
-      if (active !== (a.profile.activeKeyVersion ?? a.profile.pin.keyVersion))
-        throw new Error("key_version_mismatch");
-      assertKeyVersion(active + 1);
-      let master = await a.secrets.load(a.scope("recoveryMaster"));
-      const reused = master !== null;
-      if (o.previousRecovery)
-        verifySignedRecovery(o.previousRecovery, a.profile.pin, a.crypto);
-      if (master) {
-        candidates.set("recoveryMaster", master);
-        if (!o.previousRecovery) throw new Error("recovery_unavailable");
-        const old = openRecovery(
-          a,
-          o.sodium,
-          o.previousRecovery,
-          "LP1." + a.crypto.encode(master),
-        );
-        if (
-          old.activeKeyVersion > active ||
-          BigInt(old.registryVersion) > BigInt(a.profile.checkpoint!.version)
-        )
-          throw new Error("invalid_recovery_bundle");
-        // Every key and the authority opened from the old recovery must match the local trusted secrets.
-        const oldAuthority = a.crypto.decode(old.authoritySignSeed);
-        try {
-          if (a.crypto.encode(oldAuthority) !== a.crypto.encode(authority))
-            throw new Error("key_mismatch");
-        } finally {
-          a.crypto.erase(oldAuthority);
-        }
-        for (const k of old.dataKeys) {
-          const key = await a.secrets.load(a.scope("dataKey", k.keyVersion));
-          try {
-            if (!key || a.crypto.encode(key) !== k.vaultKey)
-              throw new Error("key_mismatch");
-          } finally {
-            if (key) a.crypto.erase(key);
-          }
-        }
-      } else {
-        master = o.sodium.randombytes_buf(32);
-        candidates.set("recoveryMaster", master);
-      }
-      const deviceId = a.crypto.uuid(),
-        sign = o.sodium.crypto_sign_seed_keypair(
-          candidates.get("signingSeed")!,
-        ),
-        box = o.sodium.crypto_box_seed_keypair(candidates.get("boxSeed")!);
-      a.crypto.erase(sign.privateKey);
-      a.crypto.erase(box.privateKey);
-      const profile: ProvisionedProfile = {
-        formatVersion: 1,
-        installationId: a.profile.installationId,
-        deviceId,
-        pin: {
-          ...a.profile.pin,
-          serverEpoch: String(journal.to_epoch),
-          founderDeviceId: deviceId,
-          keyVersion: active + 1,
-        },
-        signingPublicKey: a.crypto.encode(sign.publicKey),
-        boxPublicKey: a.crypto.encode(box.publicKey),
-        grants: [],
-        activeKeyVersion: active + 1,
-        keyCheckpoints: [],
-      };
-      const b = new DeviceProvisioning(profile, a.secrets, a.crypto);
-      // Produce the initial registry using the standard signed grant primitive, without bootstrap or network.
-      const { deviceGrantSigningInput } =
-        await import("@lionpocket/sync-protocol");
-      const grant = {
-        formatVersion: 1 as const,
-        serverId: profile.pin.serverId,
-        serverEpoch: profile.pin.serverEpoch,
-        vaultId: profile.pin.vaultId,
-        registryVersion: "1",
-        previousRegistrySha256: null,
-        deviceId,
-        signingPublicKey: profile.signingPublicKey,
-        boxPublicKey: profile.boxPublicKey,
-        status: "approved" as const,
-      };
-      profile.grants = [
-        {
-          ...grant,
-          signature: a.crypto.sign(deviceGrantSigningInput(grant), authority),
-        },
-      ];
-      profile.checkpoint = validateGrantChain(
-        profile.grants,
-        profile.pin,
-        a.crypto,
-      ).checkpoint;
-      const base = {
-        formatVersion: 1 as const,
-        serverId: profile.pin.serverId,
-        serverEpoch: profile.pin.serverEpoch,
-        vaultId: profile.pin.vaultId,
-        restoreId: o.restoreId,
-        fromEpoch: a.profile.pin.serverEpoch,
-        baseKeyVersion: active + 1,
-        previousActiveKeyVersion: active,
-        previousKeyCheckpointsSha256: a.crypto.hash(
-          canonicalStringify(a.profile.keyCheckpoints ?? []),
-        ),
-      };
-      const publicBegin = {
-        authorization: JSON.parse(String(journal.authorization_json)),
-        pin: profile.pin,
-        registry: profile.grants,
-        keyBase: {
-          ...base,
-          signature: a.crypto.sign(epochKeyBaseSigningInput(base), authority),
-        },
-        knownKeyCheckpoints: a.profile.keyCheckpoints ?? [],
-        previousRecovery: o.previousRecovery,
-        archiveSha256: commitments.archiveSha256,
-        mappingSha256: commitments.mappingSha256,
-        operationCount: commitments.operationCount,
-        headsSha256: commitments.headsSha256,
-      };
-      const expected = Object.fromEntries(
-        [...candidates].map(([p, s]) => [p, secretDigest(b, p, s)]),
-      );
       await write(o.db, [
         {
-          sql: `INSERT INTO recovery_b_saga(restore_id,profile_b_json,begin_public_json,expected_secrets_json,recovery_source,phase)
-    VALUES(?,?,?,?,?,'identity_reserved')`,
+          sql: `INSERT INTO recovery_b_saga(restore_id,profile_b_json,begin_public_json,expected_secrets_json,recovery_source,phase,preparation_format,preparation_sha256)
+        VALUES(?,?,?,?,?,'identity_reserved',2,?)`,
           params: [
             o.restoreId,
-            canonicalStringify(profile),
-            canonicalStringify(publicBegin),
-            canonicalStringify(expected),
-            reused ? "reused" : "new",
+            canonicalStringify(reservation.profile),
+            canonicalStringify(reservation.begin),
+            canonicalStringify(reservation.expected),
+            bundle.recoverySource,
+            digest,
           ],
         },
       ]);
       await o.fault?.("identity_reserved");
       row = await attempt(o);
     }
+    if (
+      row.preparation_sha256 !== digest ||
+      row.profile_b_json !== canonicalStringify(reservation.profile) ||
+      row.begin_public_json !== canonicalStringify(reservation.begin) ||
+      row.expected_secrets_json !== canonicalStringify(reservation.expected) ||
+      row.recovery_source !== bundle.recoverySource
+    )
+      throw new Error("secret_reservation_mismatch");
     const b = deviceB(o, row);
-    await verifySecrets(b, row, candidates, o.fault);
-    if (row.phase === "identity_reserved")
-      await write(o.db, [
+    await verifySecrets(b, row, material, o.fault);
+    if (row.phase === "identity_reserved") {
+      await writeLive(o, [
         {
-          sql: "UPDATE recovery_b_saga SET phase='secrets_prepared' WHERE restore_id=?",
+          sql: "UPDATE recovery_b_saga SET phase='secrets_prepared' WHERE restore_id=? AND phase='identity_reserved'",
           params: [o.restoreId],
         },
       ]);
+      await o.fault?.("secrets_prepared");
+    }
     row = await attempt(o);
-    if (!row.recovery_json) {
-      const master = await b.secrets.load(b.scope("recoveryMaster"));
-      if (!master) throw new Error("secret_unavailable");
-      try {
-        const begin = JSON.parse(String(row.begin_public_json));
-        const version = (
-          BigInt(begin.previousRecovery?.envelope.recoveryVersion ?? "0") + 1n
-        ).toString();
-        const recovery = await makeRecovery(b, o.sodium, version, master);
-        await write(o.db, [
+    const master = material.get("recoveryMaster")!,
+      nonce = b.crypto.decode(bundle.recoveryNonce);
+    try {
+      const version = (
+        BigInt(bundle.previousRecovery?.envelope.recoveryVersion ?? "0") + 1n
+      ).toString();
+      const recovery = await makeRecovery(b, o.sodium, version, master, nonce),
+        text = canonicalStringify(recovery.recovery);
+      if (row.recovery_json && row.recovery_json !== text)
+        throw new Error("secret_reservation_mismatch");
+      if (!row.recovery_json) {
+        await o.fault?.("recovery_before_save");
+        await writeLive(o, [
           {
-            sql: "UPDATE recovery_b_saga SET recovery_json=?,phase='recovery_pending_confirmation' WHERE restore_id=?",
-            params: [canonicalStringify(recovery.recovery), o.restoreId],
+            sql: "UPDATE recovery_b_saga SET recovery_json=?,phase='recovery_pending_confirmation' WHERE restore_id=? AND recovery_json IS NULL",
+            params: [text, o.restoreId],
           },
         ]);
-      } finally {
-        b.crypto.erase(master);
+        await o.fault?.("recovery_created");
       }
-      await o.fault?.("recovery_created");
+    } finally {
+      b.crypto.erase(nonce);
     }
     row = await attempt(o);
-    if (row.recovery_source === "reused" && !row.recovery_confirmed) {
-      const master = await b.secrets.load(b.scope("recoveryMaster"));
-      if (!master) throw new Error("secret_unavailable");
-      try {
-        await confirmOperationalBRecovery(o, "LP1." + b.crypto.encode(master));
-      } finally {
-        b.crypto.erase(master);
-      }
-    }
+    if (row.recovery_source === "reused" && !row.recovery_confirmed)
+      await confirmOperationalBRecovery(o, "LP1." + b.crypto.encode(master));
     row = await attempt(o);
-    let code: string | undefined;
-    if (row.recovery_source === "new" && !row.recovery_confirmed) {
-      const master = await b.secrets.load(b.scope("recoveryMaster"));
-      if (!master) throw new Error("secret_unavailable");
-      try {
-        code = "LP1." + b.crypto.encode(master);
-      } finally {
-        b.crypto.erase(master);
-      }
-    }
     return {
       profile: b.profile,
       recovery: JSON.parse(String(row.recovery_json)) as SignedRecovery,
       phase: String(row.phase),
-      ...(code ? { code } : {}),
+      ...(row.recovery_source === "new" && !row.recovery_confirmed
+        ? { code: "LP1." + b.crypto.encode(master) }
+        : {}),
       activationAvailable: false as const,
     };
   } finally {
-    if (candidates)
-      for (const s of candidates.values()) o.deviceA.crypto.erase(s);
+    for (const value of material.values()) o.deviceA.crypto.erase(value);
   }
 }
 export async function confirmOperationalBRecovery(
@@ -463,7 +594,12 @@ export async function confirmOperationalBRecovery(
 ) {
   const row = await attempt(o),
     b = deviceB(o, row);
-  await verifySecrets(b, row);
+  await withPreparation(
+    o,
+    row,
+    await currentPlan(o),
+    async (device, _bundle, material) => verifySecrets(device, row, material),
+  );
   if (!row.recovery_json) throw new Error("recovery_unavailable");
   const bundle = openRecovery(
     b,
@@ -495,9 +631,9 @@ export async function confirmOperationalBRecovery(
     if (master) b.crypto.erase(master);
   }
   if (!row.recovery_confirmed)
-    await write(o.db, [
+    await writeLive(o, [
       {
-        sql: "UPDATE recovery_b_saga SET recovery_confirmed=1,phase='recovery_confirmed' WHERE restore_id=?",
+        sql: "UPDATE recovery_b_saga SET recovery_confirmed=1,phase='recovery_confirmed' WHERE restore_id=? AND recovery_confirmed=0",
         params: [o.restoreId],
       },
     ]);
@@ -519,7 +655,12 @@ export async function stageOperationalB(
     throw new Error("recovery_confirmation_required");
   const { commitments } = await currentPlan(o),
     b = deviceB(o, row);
-  await verifySecrets(b, row);
+  await withPreparation(
+    o,
+    row,
+    await currentPlan(o),
+    async (device, _bundle, material) => verifySecrets(device, row, material),
+  );
   const begin = {
     recoveryConfirmed: true,
     ...JSON.parse(String(row.begin_public_json)),
@@ -571,13 +712,23 @@ export async function stageOperationalB(
       b.crypto.erase(seed);
     }
   };
-  if (!row.remote_started)
-    await write(o.db, [
-      {
-        sql: "UPDATE recovery_b_saga SET remote_started=1,phase='staging' WHERE restore_id=?",
-        params: [o.restoreId],
-      },
-    ]);
+  await o.db.run(
+    recoveryRun(
+      (function* (): SqlWorkflow {
+        const [current] = yield sql(
+          "SELECT phase,remote_started FROM recovery_b_saga WHERE restore_id=?",
+          [o.restoreId],
+        );
+        if (!current || current.phase === "cancelled")
+          throw new Error("recovery_attempt_paused");
+        if (!current.remote_started)
+          yield sql(
+            "UPDATE recovery_b_saga SET remote_started=1,phase='staging' WHERE restore_id=?",
+            [o.restoreId],
+          );
+      })(),
+    ),
+  );
   await send("begin", begin);
   await o.fault?.("begin");
   const page = await plannedAnchorOperations(o.db, o.restoreId);
@@ -849,13 +1000,84 @@ export async function stageOperationalB(
   ]);
   return { manifest, transition, activationAvailable: false as const };
 }
+/** Local cancel is an explicit pause. It preserves the preparation bundle, artifacts, A and the reviewed plan. */
 export async function cancelOperationalB(o: BaseOptions) {
-  const row = await attempt(o);
-  if (row.remote_started) throw new Error("remote_staging_requires_resume");
-  await write(o.db, [
-    {
-      sql: "UPDATE recovery_b_saga SET phase='cancelled' WHERE restore_id=?",
-      params: [o.restoreId],
-    },
-  ]);
+  await o.db.run(
+    recoveryRun(
+      (function* (): SqlWorkflow {
+        const [row] = yield sql(
+          "SELECT * FROM recovery_b_saga WHERE restore_id=?",
+          [o.restoreId],
+        );
+        if (!row) throw new Error("recovery_attempt_missing");
+        assertPreparationFormat(row);
+        if (row.remote_started)
+          throw new Error("remote_staging_requires_resume");
+        if (row.phase !== "cancelled")
+          yield sql(
+            "UPDATE recovery_b_saga SET resume_phase=phase,phase='cancelled' WHERE restore_id=?",
+            [o.restoreId],
+          );
+      })(),
+    ),
+  );
+}
+/** Never called by foreground sync. Resume validates the exact original private/public reservation before restoring its phase. */
+export async function resumeOperationalB(o: BaseOptions) {
+  const [row] = await o.db.read(
+    "SELECT * FROM recovery_b_saga WHERE restore_id=?",
+    [o.restoreId],
+  );
+  if (!row) throw new Error("recovery_attempt_missing");
+  assertPreparationFormat(row);
+  if (row.phase !== "cancelled") {
+    await withPreparation(
+      o,
+      row,
+      await currentPlan(o),
+      async (device, _bundle, material) => verifySecrets(device, row, material),
+    );
+    return { phase: String(row.phase), activationAvailable: false as const };
+  }
+  if (
+    row.remote_started ||
+    ![
+      "identity_reserved",
+      "secrets_prepared",
+      "recovery_pending_confirmation",
+      "recovery_confirmed",
+    ].includes(String(row.resume_phase))
+  )
+    throw new Error("invalid_recovery_resume_phase");
+  await withPreparation(
+    o,
+    row,
+    await currentPlan(o),
+    async (device, _bundle, material) => verifySecrets(device, row, material),
+  );
+  await o.db.run(
+    recoveryRun(
+      (function* (): SqlWorkflow {
+        const [current] = yield sql(
+          "SELECT * FROM recovery_b_saga WHERE restore_id=?",
+          [o.restoreId],
+        );
+        if (
+          !current ||
+          current.phase !== "cancelled" ||
+          current.remote_started ||
+          current.resume_phase !== row.resume_phase
+        )
+          throw new Error("recovery_resume_state_changed");
+        yield sql(
+          "UPDATE recovery_b_saga SET phase=resume_phase,resume_phase=NULL WHERE restore_id=?",
+          [o.restoreId],
+        );
+      })(),
+    ),
+  );
+  return {
+    phase: String(row.resume_phase),
+    activationAvailable: false as const,
+  };
 }

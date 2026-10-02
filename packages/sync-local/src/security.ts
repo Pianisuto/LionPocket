@@ -318,12 +318,14 @@ export async function makeRecovery(
   sodium: TransportSodium,
   recoveryVersion: string,
   existingMaster?: Uint8Array,
+  existingNonce?: Uint8Array,
 ) {
   const master = existingMaster?.slice() ?? sodium.randombytes_buf(32);
   let key: Uint8Array | null = null,
     authority: Uint8Array | null = null,
     bytes: Uint8Array | null = null;
   try {
+    if (existingNonce && existingNonce.length !== 24) throw new Error('invalid_recovery_nonce');
     const code = "LP1." + device.crypto.encode(master);
     key = (sodium as RecoverySodium).crypto_kdf_derive_from_key(
       32,
@@ -342,7 +344,7 @@ export async function makeRecovery(
       vaultId,
       recoveryVersion,
       kdf: "sodium-kdf-blake2b-LPRECOV1-1" as const,
-      nonce: device.crypto.encode(sodium.randombytes_buf(24)),
+      nonce: device.crypto.encode(existingNonce ?? sodium.randombytes_buf(24)),
     };
     const fields = {
       serverId,

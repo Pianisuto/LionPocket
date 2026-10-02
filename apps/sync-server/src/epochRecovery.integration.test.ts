@@ -13,9 +13,9 @@ import sodium from 'libsodium-wrappers-sumo';
 import {
   authorizeEpochRecovery, authorizeEpochRecoveryWithCode, DeviceProvisioning, ProvisioningCrypto,
   SyncController, syncTables, type SyncSaved, type SyncSession, type SignedRecovery,
-  financialTableTypes, prepareAnchorArchive, planAnchorBaseline, prepareOperationalB, stageOperationalB, makeRecovery, openRecovery,
+  financialTableTypes, prepareAnchorArchive, planAnchorBaseline, prepareOperationalB, stageOperationalB, makeRecovery, openRecovery, epochPreparationSecretScope,
 } from '@lionpocket/sync-local';
-import { canonicalStringify, epochRecoverySigningInput, type EpochRecoveryChallenge, type EpochRecoveryAuthorization, type EpochStagingRequest, epochStagingSigningInput, commitSigningInput, decodeCommit, encodeUtf8 } from '@lionpocket/sync-protocol';
+import { canonicalStringify, decodeCanonical, epochRecoverySigningInput, type EpochRecoveryChallenge, type EpochRecoveryAuthorization, type EpochStagingRequest, epochStagingSigningInput, commitSigningInput, decodeCommit, encodeUtf8 } from '@lionpocket/sync-protocol';
 import { LionPocketDatabase } from '../../desktop/src/main/database';
 import { loginDevelopmentOidc } from '../../desktop/src/main/sync/oidc';
 import { sqliteTestConnection } from '../../mobile/src/db/sqliteTestConnection';
@@ -303,6 +303,10 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     const options={db:bank.syncDatabase(),deviceA:a,sodium,restoreId};
     const prepared=await prepareOperationalB({...options,previousRecovery});
     expect(prepared.phase).toBe('recovery_confirmed');
+    const preparationBytes=(await secrets.load(epochPreparationSecretScope(a.profile,restoreId,environment.serverEpoch)))!;
+    const preparation=decodeCanonical(preparationBytes) as Record<string,string>;
+    const secretCanaries=['signingSeed','boxSeed','dataKey','authoritySeed','recoveryMaster'].map(p=>preparation[p]);
+    secretCanaries.push(new TextDecoder().decode(preparationBytes)); preparationBytes.fill(0);
     const b=new DeviceProvisioning(prepared.profile,secrets,crypto);
     expect(openRecovery(b,sodium,prepared.recovery,code).dataKeys.map(k=>k.keyVersion)).toEqual([a.profile.activeKeyVersion!+1]);
     let lost=true;let beginRequest:EpochStagingRequest|undefined,batchRequest:EpochStagingRequest|undefined;
@@ -360,9 +364,10 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
       await expect(pool.query(`DELETE FROM ${table}`)).rejects.toThrow('immutable');
     for(const table of ['sync_epoch_staging','sync_epoch_staging_batches','sync_epoch_staging_commits','sync_epoch_staging_operations','sync_epoch_staging_heads','sync_epoch_transitions']) {
       const text=JSON.stringify((await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t`)).rows);
-      for(const privateText of [canary,'DESKTOP_C2_AFTER_BACKUP',code])expect(text).not.toContain(privateText);
+      for(const privateText of [canary,'DESKTOP_C2_AFTER_BACKUP',code,...secretCanaries])expect(text.includes(privateText)).toBe(false);
     }
     expect(beginRequest).toBeDefined();expect(batchRequest).toBeDefined();
+    for(const privateText of secretCanaries) expect(canonicalStringify([beginRequest,result]).includes(privateText)).toBe(false);
     for(const field of ['commitCount','operationCount','batchCount','headsSha256','envelopesSha256','registrySha256','keyCheckpointSha256','recoverySha256','archiveSha256','mappingSha256']) {
       const changed={...result.manifest,[field]:field.endsWith('Count')?'3':crypto.nonce()};
       const unsigned={formatVersion:1 as const,vaultId:oldVault(),restoreId,action:'validate' as const,payload:changed};

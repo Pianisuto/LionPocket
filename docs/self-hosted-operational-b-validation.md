@@ -1,14 +1,12 @@
-# Evidência: preparação operacional B (draft)
+# Evidência: preparação operacional B crash-safe
 
 Base exata: `cbd7067644c63e6c09802b208731b43d239c0031`. Fixtures sintéticas; nenhum dado/cofre de usuário, Vault ou geração ativa foi migrado.
 
-## Limitação que impede ready-for-review
+## Durabilidade e cancelamento
 
-A API SecretStore atual não oferece uma reserva atômica recuperável de múltiplos secrets. O journal público é persistido antes das writes e compromete os artifacts/material esperado. Crash antes de persistir todos os seeds/DEK/master aleatórios deixa material reservado ausente, impossível de reconstruir sem derivar chaves ou guardar material privado fora do SecretStore. O domínio bloqueia com `secret_reservation_incomplete` e preserva A/tentativa. Esses faults **não convergem** automaticamente; foram testados como bloqueio seguro. Não se anuncia que o critério completo de término do pedido foi atendido.
+Follow-up sobre `f8bc3bb97407fe040314334b3af7dc7dba219fa3`, na mesma branch/PR #12. O único artifact aleatório irreproduzível agora é o preparation bundle formatVersion 1, privado e imutável no SecretStore. Releitura/validação precedem a reserva SQLite `preparation_format=2`. Não exige transação multi-secret; materializações parciais convergem nos bytes originais. Bundle ausente/inválido, mismatch privado/público ou secrets presentes diferentes falham duramente. Rows do draft anterior migram como formato 1/legacy blocked.
 
-Uma write atômica de múltiplos secrets, sozinha, também não resolve crash entre reserva pública fixa e primeira persistência. Resolver essa janela exige um contrato de durabilidade/protocolo que torne os bytes aleatórios reservados recuperáveis; não afirmamos que adicionar apenas um método batch ao SecretStore basta.
-
-O recorte não escolhe uma nova decisão do Vault nem tenta corrigir a limitação com seeds derivados da authority, DEK derivada de A, secret em SQLite, reset de keyVersion ou nova identidade durante retry. PR deve permanecer draft.
+Cancelamento antes de publicação significa pausa da mesma tentativa, com fase de retomada preservada e `resumeOperationalB` explícito. Mantém archive, plano, bundle, identidade e recovery. Depois de remote_started recusa cancelamento. Não há ativação nem cleanup do bundle: este só poderá ser removido após futura ativação/instalação local completamente finalizada e crash-safe.
 
 ## Casos comprovados
 
@@ -19,8 +17,13 @@ O recorte não escolhe uma nova decisão do Vault nem tenta corrigir a limitaç�
 | Genesis separado e digest chains determinísticos, Ed25519 independente | `packages/sync-protocol/src/epoch-staging.test.ts` |
 | Identidade B nova, installation preservada, mesma authority, DEK nova/scopes distintos | `epochPreparation.test.ts` (desktop e adapter SQLite Android) |
 | Master confirmado A reutilizado, mesmo LP1, ciphertext novo; master novo/redigitação; instalação limpa | mesma suíte |
-| Reserva antes de secrets, faults parciais bloqueados, todos os secrets duráveis permitem resume | mesma suíte, faults identity/signing/box/data/authority/master/recovery |
-| Envelopes persistidos uma vez, retries após begin/envelope/batch/manifest/validate/transition/remote prepared | mesma suíte |
+| Bundle antes da reserva; restart real SQLite/adapters conserva deviceId, keys, DEK/master/code, pin/registry/key-base | `epochPreparation.test.ts`: before bundle, ambiguous store não durável/durável, after store/read, identity, signing/box/data/authority/master, secrets prepared, recovery before/save/confirmation |
+| Parsing privado estrito, canários em erros, digest/reserva/present-secret mismatch, legacy blocked e metadata imutável | mesma suíte |
+| LP1/artifact estáveis após restart; pausa explícita em identity/pending/confirmed; plano reutilizável | mesma suíte |
+| Desktop safeStorage real empacotado, scope privado variável/releitura/immutability/plaintext canary ou basic_text refusal | `releaseSmoke.ts` nos jobs Linux/Windows |
+| Android JS adapter variável/domínio/erros, AndroidKeyStore real/AtomicFile, novas instâncias, tamper/key loss, operação v1 preservada | `secretStore.test.ts`, `SyncSecretStorageTest.kt` (4 testes no emulador readiness) |
+| TestSecrets reserva imutável e scope exato | `apps/sync-server/src/testSupport.test.ts` |
+| Envelopes persistidos uma vez, restart SQLite/adapters após begin/envelope/batch/manifest/validate/transition/remote prepared | mesma suíte |
 | 107 operações em batches 100+7, decrypt → importer/projeção normal | mesma suíte |
 | C1+C2, Z→X/Y/common base/conflito, delete/edit/tombstone, sem automerge/ressurreição | mesma suíte usa oracle normal `verifyBaselineReplay` após decrypt |
 | Owner OIDC real, B signing proof, concorrência begin, perda após commit PG, rollback no meio do batch, payload oversized, mismatch, parents/key/registry/signature inválidos | `apps/sync-server/src/epochRecovery.integration.test.ts` |
@@ -33,7 +36,7 @@ O recorte não escolhe uma nova decisão do Vault nem tenta corrigir a limitaç�
 
 ## Verificações locais
 
-Resultados finais e CI são registrados no PR. A evidência não antecipa verde remoto. Foram executadas suítes de protocolo/local/server/desktop/mobile, typecheck/lint, integrações PostgreSQL/Keycloak, cliente anterior, self-hosted e diff check. Windows/Android readiness dependem dos workflows, sem alegação de execução nativa local nessas plataformas.
+Resultados finais e CI são registrados no PR. A evidência não antecipa verde remoto. Foram executadas suítes de protocolo/local/server/desktop/mobile, typecheck/lint, integrações PostgreSQL/Keycloak, cliente anterior, self-hosted e diff check. Windows readiness e Android nativo dependem dos workflows; compilação Kotlin/Android instrumentation também verificada localmente. Resultados finais referem-se ao novo HEAD informado no PR.
 
 ## Limites adicionais
 

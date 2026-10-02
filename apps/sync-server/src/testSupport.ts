@@ -1,20 +1,25 @@
 import { DeviceProvisioning, ProvisioningCrypto } from '@lionpocket/sync-local';
-import type { SecretScope, SecretStore } from '@lionpocket/sync-local';
+import { assertSecretBytes, secretContext, type StoredSecretScope, type SecretStore } from '@lionpocket/sync-local';
 import type { TrustPin } from '@lionpocket/sync-protocol';
 /** Test-only volatile cofre double. Never selected by server, apps or development client. */
 export class TestSecrets implements SecretStore {
-  readonly values = new Map<string, Uint8Array>();
+  constructor(readonly values = new Map<string, Uint8Array>()) {}
   unavailable = false;
-  async load(scope: SecretScope) {
+  async load(scope: StoredSecretScope) {
     if (this.unavailable) throw new Error('cofre_unavailable');
-    return this.values.get(JSON.stringify(scope))?.slice() ?? null;
+    return this.values.get(secretContext(scope))?.slice() ?? null;
   }
-  async store(scope: SecretScope, bytes: Uint8Array) {
+  async store(scope: StoredSecretScope, bytes: Uint8Array) {
     if (this.unavailable) throw new Error('cofre_unavailable');
-    this.values.set(JSON.stringify(scope), bytes.slice());
+    assertSecretBytes(scope, bytes);
+    const context = secretContext(scope), existing = this.values.get(context);
+    if (scope.purpose === 'epochPreparation' && existing &&
+      (existing.length !== bytes.length || !existing.every((b, i) => b === bytes[i])))
+      throw new Error('Preparation secret is immutable.');
+    this.values.set(context, bytes.slice());
   }
-  async remove(scope: SecretScope) {
-    this.values.delete(JSON.stringify(scope));
+  async remove(scope: StoredSecretScope) {
+    this.values.delete(secretContext(scope));
   }
 }
 export async function founder(

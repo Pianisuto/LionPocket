@@ -4,6 +4,8 @@ import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { secretContext, type EpochPreparationSecretScope } from '@lionpocket/sync-local';
+import { createHash } from 'node:crypto';
 import { savePublicProfile } from './sync/publicProfile';
 import { DesktopSecretStore } from './sync/secretStore';
 import { LionPocketDatabase } from './database';
@@ -35,20 +37,37 @@ export async function verifyReleaseSmoke(bank: LionPocketDatabase, directory: st
   if (JSON.parse(readFileSync(metadata, 'utf8')).endpoint !== 'https://fixture-updated.invalid') throw new Error('Public profile persistence failed.');
   const store = new DesktopSecretStore(join(profile, 'sync', 'smoke-wrappers'));
   const scope = { installationId: randomUUID(), deviceId: randomUUID(), serverId: randomUUID(), serverEpoch: randomUUID(), vaultId: randomUUID(), purpose: 'dataKey' as const, keyVersion: 1 };
-  const secret = randomBytes(32);
+  const secret = randomBytes(32), preparation = Buffer.concat([Buffer.from('PRIVATE_PREPARATION_CANARY_'), randomBytes(4096)]);
+  const preparationScope: EpochPreparationSecretScope = {
+    formatVersion: 1, purpose: 'epochPreparation', installationId: scope.installationId,
+    anchorDeviceId: scope.deviceId, serverId: scope.serverId, vaultId: scope.vaultId,
+    fromEpoch: scope.serverEpoch, toEpoch: randomUUID(), restoreId: randomUUID(),
+  };
   let vault: string;
   if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
     try { await store.store(scope, secret); throw new Error('Insecure vault accepted.'); }
+    catch (error) { if (!(error instanceof Error) || error.message !== 'System secret vault unavailable.') throw error; }
+    try { await store.store(preparationScope, preparation); throw new Error('Insecure preparation vault accepted.'); }
     catch (error) { if (!(error instanceof Error) || error.message !== 'System secret vault unavailable.') throw error; }
     vault = 'basic_text refused';
   } else {
     await store.store(scope, secret);
     const loaded = await new DesktopSecretStore(join(profile, 'sync', 'smoke-wrappers')).load(scope);
     if (!loaded || !Buffer.from(loaded).equals(secret)) throw new Error('OS vault roundtrip failed.');
-    loaded.fill(0); await store.remove(scope); vault = 'OS vault roundtrip passed';
+    loaded.fill(0);
+    await store.store(preparationScope, preparation);
+    const fresh = new DesktopSecretStore(join(profile, 'sync', 'smoke-wrappers')), replay = await fresh.load(preparationScope);
+    if (!replay || !Buffer.from(replay).equals(preparation)) throw new Error('OS preparation vault restart failed.');
+    replay.fill(0);
+    const wrapper = readFileSync(join(profile, 'sync', 'smoke-wrappers', createHash('sha256').update(secretContext(preparationScope)).digest('hex') + '.bin'));
+    if (wrapper.includes(Buffer.from('PRIVATE_PREPARATION_CANARY_'))) throw new Error('Preparation wrapper leaked plaintext.');
+    try { await fresh.store(preparationScope, randomBytes(64)); throw new Error('Preparation overwrite accepted.'); }
+    catch (error) { if (!(error instanceof Error) || error.message !== 'Preparation secret is immutable.') throw error; }
+    // Only this disposable OS-store probe is cleaned up; domain recovery bundles have no cleanup path.
+    await store.remove(scope); await store.remove(preparationScope); vault = 'OS vault roundtrip passed';
   }
-  secret.fill(0);
-  writeFileSync(join(directory, 'result.json'), JSON.stringify({ platform: process.platform, beta, profile: beta ? 'LionPocket Beta' : 'LionPocket', version: app.getVersion(), legacyTables: before.tables.length - 1, integrity: 'ok', foreignKeys: 0, vault, publicProfilePersistence: true, updateFeed, windowLoaded: true }, null, 2));
+  secret.fill(0); preparation.fill(0);
+  writeFileSync(join(directory, 'result.json'), JSON.stringify({ platform: process.platform, beta, profile: beta ? 'LionPocket Beta' : 'LionPocket', version: app.getVersion(), legacyTables: before.tables.length - 1, integrity: 'ok', foreignKeys: 0, vault, publicProfilePersistence: true, preparationSecretStore: true, updateFeed, windowLoaded: true }, null, 2));
   bank.db.close();
   app.quit();
 }

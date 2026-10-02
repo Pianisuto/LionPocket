@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,13 @@ import {
   prepareOperationalB,
   confirmOperationalBRecovery,
   stageOperationalB,
+  cancelOperationalB,
+  resumeOperationalB,
+  cancelAnchorPlan,
+  epochPreparationSecretScope,
+  secretContext,
+  type SecretStore,
+  operationalBSchema,
   makeRecovery,
   openRecovery,
   incrementDecimal64,
@@ -32,7 +39,41 @@ import {
   type EpochRecoveryChallenge,
   type EpochStagingRequest,
 } from "@lionpocket/sync-protocol";
-import { founder } from "../../../../sync-server/src/testSupport";
+import { founder, TestSecrets } from "../../../../sync-server/src/testSupport";
+import { DesktopSecretStore } from "./secretStore";
+vi.mock("electron", async () => {
+  const { createCipheriv, createDecipheriv, randomBytes } =
+    await import("node:crypto");
+  const key = randomBytes(32);
+  return {
+    safeStorage: {
+      isEncryptionAvailable: () => true,
+      getSelectedStorageBackend: () => "gnome_libsecret",
+      encryptString: (text: string) => {
+        const iv = randomBytes(12),
+          cipher = createCipheriv("aes-256-gcm", key, iv);
+        return Buffer.concat([
+          iv,
+          cipher.update(text),
+          cipher.final(),
+          cipher.getAuthTag(),
+        ]);
+      },
+      decryptString: (bytes: Buffer) => {
+        const cipher = createDecipheriv(
+          "aes-256-gcm",
+          key,
+          bytes.subarray(0, 12),
+        );
+        cipher.setAuthTag(bytes.subarray(-16));
+        return Buffer.concat([
+          cipher.update(bytes.subarray(12, -16)),
+          cipher.final(),
+        ]).toString();
+      },
+    },
+  };
+});
 import { LionPocketDatabase } from "../database";
 import {
   createEpochAnchorBackup,
@@ -58,27 +99,37 @@ const input = {
   dueDate: "2026-10-02",
   status: "planned" as const,
 };
-async function fixture(dialect: "desktop" | "android" = "desktop") {
+async function fixture(
+  dialect: "desktop" | "android" = "desktop",
+  durableSecrets = false,
+) {
   const directory = mkdtempSync(join(tmpdir(), "lp-anchor-archive-test-"));
   dispose.push(() => rmSync(directory, { force: true, recursive: true }));
-  const crypto = new ProvisioningCrypto(sodium),
-    { client } = await founder(crypto);
-  const bank =
+  let crypto = new ProvisioningCrypto(sodium);
+  const founded = await founder(
+    crypto,
+    undefined,
+    durableSecrets
+      ? new DesktopSecretStore(join(directory, "secret-wrappers"))
+      : undefined,
+  );
+  let client = founded.client;
+  let bank =
     dialect === "desktop"
       ? new LionPocketDatabase(join(directory, "anchor.sqlite"))
       : null;
-  const mobile =
+  let mobile =
     dialect === "android"
       ? sqliteTestConnection(join(directory, "anchor.sqlite"))
       : null;
   if (mobile) await migrate(mobile.db);
-  const sqlite = bank?.db ?? mobile!.sqlite;
+  let sqlite = bank?.db ?? mobile!.sqlite;
   dispose.push(() => sqlite.close());
   sqlite.exec(
     "DELETE FROM categories; DELETE FROM payment_methods; DELETE FROM cards;",
   );
-  const db = bank?.syncDatabase() ?? mobileSyncDatabase(mobile!.db);
-  const repo = mobile ? new MobileRepository(mobile.db, randomUUID) : null;
+  let db = bank?.syncDatabase() ?? mobileSyncDatabase(mobile!.db);
+  let repo = mobile ? new MobileRepository(mobile.db, randomUUID) : null;
   const save = async (description: string) =>
     bank
       ? bank.saveTransaction({ ...input, description })
@@ -136,9 +187,51 @@ async function fixture(dialect: "desktop" | "android" = "desktop") {
       ]),
     );
   return {
-    client,
-    sqlite,
-    db,
+    get client() {
+      return client;
+    },
+    get sqlite() {
+      return sqlite;
+    },
+    get db() {
+      return db;
+    },
+    restart: async (secrets?: SecretStore) => {
+      const profile = JSON.parse(
+        String(
+          sqlite
+            .prepare(
+              "SELECT profile_a_json FROM recovery_journal WHERE restore_id=?",
+            )
+            .get(acceptedAuthorization.restoreId)!.profile_a_json,
+        ),
+      );
+      sqlite.close();
+      bank =
+        dialect === "desktop"
+          ? new LionPocketDatabase(join(directory, "anchor.sqlite"))
+          : null;
+      mobile =
+        dialect === "android"
+          ? sqliteTestConnection(join(directory, "anchor.sqlite"))
+          : null;
+      if (mobile) await migrate(mobile.db);
+      sqlite = bank?.db ?? mobile!.sqlite;
+      db = bank?.syncDatabase() ?? mobileSyncDatabase(mobile!.db);
+      repo = mobile ? new MobileRepository(mobile.db, randomUUID) : null;
+      crypto = new ProvisioningCrypto(sodium);
+      client = new DeviceProvisioning(
+        profile,
+        secrets ?? new DesktopSecretStore(join(directory, "secret-wrappers")),
+        crypto,
+      );
+      return {
+        db,
+        deviceA: client,
+        sodium,
+        restoreId: acceptedAuthorization.restoreId,
+      };
+    },
     directory,
     prepare,
     snapshot,
@@ -146,7 +239,9 @@ async function fixture(dialect: "desktop" | "android" = "desktop") {
     save,
     bank,
     mobile,
-    crypto,
+    get crypto() {
+      return crypto;
+    },
   };
 }
 
@@ -325,9 +420,35 @@ describe("operational B preparation remains isolated", () => {
       ].map((t) => f.sqlite.prepare(`SELECT * FROM ${t}`).all());
       expect(JSON.stringify(publicRows)).not.toContain(input.description);
       expect(JSON.stringify(publicRows)).not.toContain(old.code);
+      const preparationBytes = (await f.client.secrets.load(
+        epochPreparationSecretScope(
+          f.client.profile,
+          o.restoreId,
+          f.acceptedAuthorization.toEpoch,
+        ),
+      ))!;
+      const preparation = decodeCanonical(preparationBytes) as Record<
+        string,
+        string
+      >;
+      const publicText = JSON.stringify([publicRows, requests]);
+      for (const purpose of [
+        "signingSeed",
+        "boxSeed",
+        "dataKey",
+        "authoritySeed",
+        "recoveryMaster",
+      ])
+        expect(publicText.includes(preparation[purpose])).toBe(false);
+      expect(
+        publicText.includes(new TextDecoder().decode(preparationBytes)),
+      ).toBe(false);
+      preparationBytes.fill(0);
       const akey = await f.client.secrets.load(f.client.scope("dataKey")),
         bkey = await b.secrets.load(b.scope("dataKey"));
-      expect(akey).not.toEqual(bkey);
+      expect(akey !== null && bkey !== null && !sodium.memcmp(akey, bkey)).toBe(
+        true,
+      );
       akey?.fill(0);
       bkey?.fill(0);
       expect(
@@ -411,61 +532,556 @@ describe("operational B preparation remains isolated", () => {
     ).rejects.toThrow("epoch_archive_stale");
   });
   it.each([
+    "preparation_bundle_stored",
+    "preparation_bundle_verified",
     "identity_reserved",
     "secret:signingSeed",
     "secret:boxSeed",
     "secret:dataKey",
     "secret:authoritySeed",
+    "secret:recoveryMaster",
+    "secrets_prepared",
+    "recovery_before_save",
+    "recovery_created",
+    "recovery_confirmed",
   ])(
-    "draft blocker: crash at %s preserves A and refuses missing reserved secrets",
+    "real SQLite/store adapter restart converges on the identical B after %s",
     async (fault) => {
-      const f = await fixture(),
+      const f = await fixture("desktop", true),
+        old = await oldRecovery(f),
         o = await plan(f),
         before = f.snapshot();
       await expect(
         prepareOperationalB({
           ...o,
-          previousRecovery: null,
-          fault: (s) => {
-            if (s === fault) throw new Error("crash");
+          previousRecovery: old.recovery,
+          fault: (point) => {
+            if (point === fault) throw new Error("crash");
           },
         }),
       ).rejects.toThrow("crash");
-      await expect(
-        prepareOperationalB({ ...o, previousRecovery: null }),
-      ).rejects.toThrow("secret_reservation_incomplete");
-      expect(f.snapshot()).toEqual(before);
+      const scope = epochPreparationSecretScope(
+        f.client.profile,
+        o.restoreId,
+        f.acceptedAuthorization.toEpoch,
+      );
+      const bytes = await f.client.secrets.load(scope);
+      expect(bytes !== null).toBe(true);
+      const privateBundle = decodeCanonical(bytes!) as Record<string, string>;
+      const proposedProfile = {
+        pin: {
+          ...f.client.profile.pin,
+          founderDeviceId: privateBundle.deviceId,
+          serverEpoch: scope.toEpoch,
+          keyVersion: privateBundle.baseKeyVersion,
+        },
+        deviceId: privateBundle.deviceId,
+        signingPublicKey: privateBundle.signingPublicKey,
+        boxPublicKey: privateBundle.boxPublicKey,
+      };
+      const independentGrant = {
+        formatVersion: 1,
+        serverId: scope.serverId,
+        serverEpoch: scope.toEpoch,
+        vaultId: scope.vaultId,
+        registryVersion: "1",
+        previousRegistrySha256: null,
+        deviceId: privateBundle.deviceId,
+        signingPublicKey: privateBundle.signingPublicKey,
+        boxPublicKey: privateBundle.boxPublicKey,
+        status: "approved",
+      };
+      const originalPublic = f.sqlite
+        .prepare(
+          "SELECT profile_b_json,begin_public_json,recovery_json FROM recovery_b_saga",
+        )
+        .get();
+      const retry = await f.restart();
+      const uuid = vi.spyOn(f.crypto, "uuid").mockImplementation(() => {
+        throw new Error("Second random identity is forbidden");
+      });
+      const random = vi.spyOn(sodium, "randombytes_buf");
+      let prepared: Awaited<ReturnType<typeof prepareOperationalB>>;
+      try {
+        prepared = await prepareOperationalB({
+          ...retry,
+          previousRecovery: null,
+        }); // Bundle carries verified Recovery A.
+        expect(random).not.toHaveBeenCalled();
+      } finally {
+        random.mockRestore();
+      }
+      expect(prepared.profile.deviceId === privateBundle.deviceId).toBe(true);
       expect(
-        f.sqlite.prepare("SELECT remote_started FROM recovery_b_saga").get()!
-          .remote_started,
-      ).toBe(0);
+        prepared.profile.signingPublicKey === privateBundle.signingPublicKey,
+      ).toBe(true);
+      expect(prepared.profile.boxPublicKey === privateBundle.boxPublicKey).toBe(
+        true,
+      );
+      expect(prepared.phase).toBe("recovery_confirmed");
+      expect(uuid).not.toHaveBeenCalled();
+      expect(prepared.profile.pin).toEqual(proposedProfile.pin);
+      const { signature, ...grant } = prepared.profile.grants[0];
+      expect(grant).toEqual(independentGrant);
+      expect(signature).toBeDefined();
+      const beginAfter = JSON.parse(
+        String(
+          f.sqlite
+            .prepare("SELECT begin_public_json FROM recovery_b_saga")
+            .get()!.begin_public_json,
+        ),
+      );
+      expect(beginAfter.keyBase.baseKeyVersion).toBe(
+        privateBundle.baseKeyVersion,
+      );
+      expect(beginAfter.keyBase.previousActiveKeyVersion).toBe(
+        f.client.profile.activeKeyVersion ?? f.client.profile.pin.keyVersion,
+      );
+      expect(beginAfter.keyBase.fromEpoch).toBe(scope.fromEpoch);
+      expect(beginAfter.keyBase.serverEpoch).toBe(scope.toEpoch);
+      const b = new DeviceProvisioning(
+        prepared.profile,
+        f.client.secrets,
+        f.crypto,
+      );
+      for (const purpose of [
+        "signingSeed",
+        "boxSeed",
+        "dataKey",
+        "authoritySeed",
+        "recoveryMaster",
+      ] as const) {
+        const key = await b.secrets.load(b.scope(purpose));
+        expect(
+          key !== null && f.crypto.encode(key) === privateBundle[purpose],
+        ).toBe(true);
+        key?.fill(0);
+      }
+      expect(f.snapshot()).toEqual(before);
+      const after = f.sqlite
+        .prepare(
+          "SELECT profile_b_json,begin_public_json,recovery_json,preparation_format FROM recovery_b_saga",
+        )
+        .get()!;
+      expect(after.preparation_format).toBe(2);
+      if (originalPublic) {
+        expect(after.profile_b_json).toBe(originalPublic.profile_b_json);
+        expect(after.begin_public_json).toBe(originalPublic.begin_public_json);
+        if (originalPublic.recovery_json)
+          expect(after.recovery_json).toBe(originalPublic.recovery_json);
+      }
+      const publicRows = canonicalStringify(
+        f.sqlite.prepare("SELECT * FROM recovery_b_saga").all(),
+      );
+      for (const purpose of [
+        "signingSeed",
+        "boxSeed",
+        "dataKey",
+        "authoritySeed",
+        "recoveryMaster",
+      ])
+        expect(publicRows.includes(privateBundle[purpose])).toBe(false);
+      expect(publicRows.includes(new TextDecoder().decode(bytes!))).toBe(false);
+      expect(prepared.activationAvailable).toBe(false);
+      const persisted = await f.client.secrets.load(scope);
+      expect(persisted !== null && sodium.memcmp(persisted, bytes!)).toBe(true);
+      persisted?.fill(0);
+      bytes!.fill(0);
     },
   );
-  it.each(["secret:recoveryMaster", "recovery_created", "recovery_confirmed"])(
-    "resumes after all secrets exist: %s",
-    async (fault) => {
-      const f = await fixture(),
-        old = await oldRecovery(f),
-        o = await plan(f);
-      let once = true;
+  it("crash before the preparation bundle leaves no public reservation and retry can start", async () => {
+    const f = await fixture("desktop", true),
+      o = await plan(f),
+      before = f.snapshot();
+    await expect(
+      prepareOperationalB({
+        ...o,
+        previousRecovery: null,
+        fault: (point) => {
+          if (point === "before_preparation_bundle") throw new Error("crash");
+        },
+      }),
+    ).rejects.toThrow("crash");
+    expect(f.sqlite.prepare("SELECT * FROM recovery_b_saga").all()).toEqual([]);
+    const retry = await f.restart();
+    expect(
+      (await prepareOperationalB({ ...retry, previousRecovery: null })).phase,
+    ).toBe("recovery_pending_confirmation");
+    expect(f.snapshot()).toEqual(before);
+  });
+  it.each([false, true])(
+    "ambiguous bundle store (durable=%s) never freezes missing random material",
+    async (durable) => {
+      const f = await fixture("desktop", true),
+        o = await plan(f),
+        original = f.client.secrets;
+      let stored = false;
+      const adapter: SecretStore = {
+        load: async (scope) => {
+          if (scope.purpose === "epochPreparation" && stored)
+            throw new Error("process died before reread");
+          return original.load(scope);
+        },
+        store: async (scope, bytes) => {
+          if (scope.purpose !== "epochPreparation")
+            return original.store(scope, bytes);
+          if (durable) await original.store(scope, bytes);
+          stored = true;
+          throw new Error("ambiguous store acknowledgement");
+        },
+        remove: (scope) => original.remove(scope),
+      };
+      const interrupted = {
+        ...o,
+        deviceA: new DeviceProvisioning(f.client.profile, adapter, f.crypto),
+      };
+      await expect(
+        prepareOperationalB({ ...interrupted, previousRecovery: null }),
+      ).rejects.toThrow("process died");
+      expect(f.sqlite.prepare("SELECT * FROM recovery_b_saga").all()).toEqual(
+        [],
+      );
+      const scope = epochPreparationSecretScope(
+          f.client.profile,
+          o.restoreId,
+          f.acceptedAuthorization.toEpoch,
+        ),
+        bytes = await original.load(scope);
+      expect(bytes !== null).toBe(durable);
+      const retry = await f.restart();
+      if (durable)
+        vi.spyOn(f.crypto, "uuid").mockImplementation(() => {
+          throw new Error("Second identity forbidden");
+        });
+      const prepared = await prepareOperationalB({
+        ...retry,
+        previousRecovery: null,
+      });
+      if (bytes) {
+        expect(
+          prepared.profile.deviceId ===
+            (decodeCanonical(bytes) as Record<string, string>).deviceId,
+        ).toBe(true);
+        bytes.fill(0);
+      }
+      expect(prepared.activationAvailable).toBe(false);
+    },
+  );
+  it("restart before redigitation presents the same LP1 and recovery artifact; wrong code remains refused", async () => {
+    const f = await fixture("desktop", true),
+      o = await plan(f);
+    const first = await prepareOperationalB({ ...o, previousRecovery: null });
+    const retry = await f.restart();
+    const second = await prepareOperationalB({
+      ...retry,
+      previousRecovery: null,
+    });
+    expect(second.code === first.code).toBe(true);
+    expect(second.recovery).toEqual(first.recovery);
+    await expect(
+      confirmOperationalBRecovery(
+        retry,
+        "LP1." + f.crypto.encode(sodium.randombytes_buf(32)),
+      ),
+    ).rejects.toThrow();
+    await confirmOperationalBRecovery(retry, second.code!);
+    expect(
+      (await prepareOperationalB({ ...retry, previousRecovery: null })).phase,
+    ).toBe("recovery_confirmed");
+  });
+  it.each([
+    "identity_reserved",
+    "recovery_pending_confirmation",
+    "recovery_confirmed",
+  ])("pause and explicit resume preserve the same B from %s", async (phase) => {
+    const f = await fixture("desktop", true),
+      o = await plan(f),
+      before = f.snapshot();
+    if (phase === "identity_reserved")
       await expect(
         prepareOperationalB({
           ...o,
-          previousRecovery: old.recovery,
-          fault: (s) => {
-            if (once && s === fault) {
-              once = false;
-              throw new Error("crash");
-            }
+          previousRecovery: null,
+          fault: (point) => {
+            if (point === phase) throw new Error("crash");
           },
         }),
       ).rejects.toThrow("crash");
+    else {
+      const first = await prepareOperationalB({ ...o, previousRecovery: null });
+      if (phase === "recovery_confirmed")
+        await confirmOperationalBRecovery(o, first.code!);
+    }
+    const original = f.sqlite.prepare("SELECT * FROM recovery_b_saga").get()!;
+    await cancelOperationalB(o);
+    await cancelOperationalB(o);
+    await f.db.run(cancelAnchorPlan(o.restoreId));
+    expect(
+      f.sqlite.prepare("SELECT phase FROM recovery_journal").get()!.phase,
+    ).toBe("planned");
+    const retry = await f.restart();
+    await expect(
+      prepareOperationalB({ ...retry, previousRecovery: null }),
+    ).rejects.toThrow("recovery_attempt_paused");
+    expect((await resumeOperationalB(retry)).phase).toBe(phase);
+    const after = await prepareOperationalB({
+      ...retry,
+      previousRecovery: null,
+    });
+    expect(canonicalStringify(after.profile)).toBe(original.profile_b_json);
+    if (original.recovery_json)
+      expect(canonicalStringify(after.recovery)).toBe(original.recovery_json);
+    expect(f.snapshot()).toEqual(before);
+    expect(after.activationAvailable).toBe(false);
+  });
+  it.each(["secret:signingSeed", "recovery_before_save", "confirmation"])(
+    "concurrent pause is never overwritten by %s",
+    async (point) => {
+      const f = await fixture(),
+        o = await plan(f);
+      if (point === "confirmation") {
+        const prepared = await prepareOperationalB({
+          ...o,
+          previousRecovery: null,
+        });
+        const original = f.client.secrets;
+        let once = true;
+        const adapter: SecretStore = {
+          store: (scope, bytes) => original.store(scope, bytes),
+          remove: (scope) => original.remove(scope),
+          load: async (scope) => {
+            if (once && scope.purpose === "epochPreparation") {
+              once = false;
+              await cancelOperationalB(o);
+            }
+            return original.load(scope);
+          },
+        };
+        await expect(
+          confirmOperationalBRecovery(
+            {
+              ...o,
+              deviceA: new DeviceProvisioning(
+                f.client.profile,
+                adapter,
+                f.crypto,
+              ),
+            },
+            prepared.code!,
+          ),
+        ).rejects.toThrow("recovery_attempt_paused");
+      } else
+        await expect(
+          prepareOperationalB({
+            ...o,
+            previousRecovery: null,
+            fault: async (step) => {
+              if (step === point) await cancelOperationalB(o);
+            },
+          }),
+        ).rejects.toThrow("recovery_attempt_paused");
+      const row = f.sqlite
+        .prepare("SELECT phase,recovery_confirmed FROM recovery_b_saga")
+        .get()!;
+      expect(row.phase).toBe("cancelled");
+      expect(row.recovery_confirmed).toBe(0);
+      await resumeOperationalB(o);
       expect(
-        (await prepareOperationalB({ ...o, previousRecovery: old.recovery }))
-          .phase,
-      ).toBe("recovery_confirmed");
+        (await prepareOperationalB({ ...o, previousRecovery: null }))
+          .activationAvailable,
+      ).toBe(false);
     },
   );
+  it.each([
+    "extra",
+    "format",
+    "scope",
+    "uuid",
+    "signingSeed",
+    "boxSeed",
+    "dataKey",
+    "authoritySeed",
+    "recoveryMaster",
+    "nonce",
+    "signingPublicKey",
+    "boxPublicKey",
+    "authorityPublicKey",
+    "base",
+    "commitments",
+    "malformed",
+  ])(
+    "strict private parsing fails closed without leaking canaries: %s",
+    async (mutation) => {
+      const f = await fixture(),
+        o = await plan(f);
+      await expect(
+        prepareOperationalB({
+          ...o,
+          previousRecovery: null,
+          fault: (point) => {
+            if (point === "preparation_bundle_stored") throw new Error("crash");
+          },
+        }),
+      ).rejects.toThrow("crash");
+      const scope = epochPreparationSecretScope(
+        f.client.profile,
+        o.restoreId,
+        f.acceptedAuthorization.toEpoch,
+      );
+      const bytes = await f.client.secrets.load(scope),
+        bundle = decodeCanonical(bytes!) as Record<string, unknown>;
+      if (mutation === "extra")
+        bundle.PRIVATE_BUNDLE_CANARY = "PRIVATE_BUNDLE_CANARY";
+      else if (mutation === "format") bundle.formatVersion = 2;
+      else if (mutation === "scope")
+        (bundle.scope as Record<string, unknown>).restoreId = randomUUID();
+      else if (mutation === "uuid") bundle.deviceId = "PRIVATE_BUNDLE_CANARY";
+      else if (mutation === "nonce")
+        bundle.recoveryNonce = f.crypto.encode(new Uint8Array(23));
+      else if (mutation === "base") bundle.baseKeyVersion = 1;
+      else if (mutation === "commitments")
+        (bundle.commitments as Record<string, unknown>).operationCount = "99";
+      else if (mutation.endsWith("PublicKey"))
+        bundle[mutation] = f.crypto.encode(new Uint8Array(32));
+      else bundle[mutation] = f.crypto.encode(new Uint8Array(31));
+      const corrupt =
+        mutation === "malformed"
+          ? encodeUtf8('{"PRIVATE_BUNDLE_CANARY')
+          : encodeUtf8(canonicalStringify(bundle));
+      // Test-only corruption of storage, not an overwrite path offered by the real adapters.
+      (f.client.secrets as TestSecrets).values.set(
+        secretContext(scope),
+        corrupt,
+      );
+      await expect(
+        prepareOperationalB({ ...o, previousRecovery: null }),
+      ).rejects.toThrow(/^invalid_preparation_secret_bundle$/);
+      expect(f.sqlite.prepare("SELECT * FROM recovery_b_saga").all()).toEqual(
+        [],
+      );
+      bytes!.fill(0);
+    },
+  );
+  it("private digest and public reservation mismatches are hard failures, never repaired", async () => {
+    const f = await fixture(),
+      o = await plan(f),
+      prepared = await prepareOperationalB({ ...o, previousRecovery: null });
+    const scope = epochPreparationSecretScope(
+        f.client.profile,
+        o.restoreId,
+        f.acceptedAuthorization.toEpoch,
+      ),
+      store = f.client.secrets as TestSecrets;
+    const original = (await store.load(scope))!,
+      bundle = decodeCanonical(original) as Record<string, unknown>;
+    bundle.deviceId = randomUUID();
+    store.values.set(
+      secretContext(scope),
+      encodeUtf8(canonicalStringify(bundle)),
+    );
+    await expect(
+      prepareOperationalB({ ...o, previousRecovery: null }),
+    ).rejects.toThrow("secret_reservation_mismatch");
+    store.values.delete(secretContext(scope));
+    await expect(
+      prepareOperationalB({ ...o, previousRecovery: null }),
+    ).rejects.toThrow("preparation_secret_bundle_unavailable");
+    store.values.set(secretContext(scope), original);
+    f.sqlite.exec("DROP TRIGGER recovery_b_identity");
+    f.sqlite
+      .prepare("UPDATE recovery_b_saga SET profile_b_json=?")
+      .run(canonicalStringify({ ...prepared.profile, deviceId: randomUUID() }));
+    await expect(
+      prepareOperationalB({ ...o, previousRecovery: null }),
+    ).rejects.toThrow("secret_reservation_mismatch");
+  });
+  it("a different valid recovery artifact cannot replace the bundle-reserved ciphertext during resume/staging", async () => {
+    const f = await fixture(),
+      old = await oldRecovery(f),
+      o = await plan(f),
+      before = f.snapshot();
+    const prepared = await prepareOperationalB({
+      ...o,
+      previousRecovery: old.recovery,
+    });
+    const b = new DeviceProvisioning(
+        prepared.profile,
+        f.client.secrets,
+        f.crypto,
+      ),
+      master = (await b.secrets.load(b.scope("recoveryMaster")))!;
+    let changed;
+    try {
+      changed = (
+        await makeRecovery(
+          b,
+          sodium,
+          prepared.recovery.envelope.recoveryVersion,
+          master,
+        )
+      ).recovery;
+    } finally {
+      master.fill(0);
+    }
+    f.sqlite.exec("DROP TRIGGER recovery_b_recovery_json");
+    f.sqlite
+      .prepare("UPDATE recovery_b_saga SET recovery_json=?")
+      .run(canonicalStringify(changed));
+    await expect(confirmOperationalBRecovery(o, old.code)).rejects.toThrow(
+      "secret_reservation_mismatch",
+    );
+    await expect(
+      stageOperationalB({
+        ...o,
+        previousTrustedTransition: null,
+        transport: async () => {
+          throw new Error("Must not publish");
+        },
+      }),
+    ).rejects.toThrow("secret_reservation_mismatch");
+    expect(f.snapshot()).toEqual(before);
+  });
+  it("migrates old draft saga metadata as legacy blocked without inventing lost secrets", async () => {
+    const f = await fixture(),
+      o = await plan(f);
+    const legacySchema = operationalBSchema[0].replace(
+      /,\n {2}preparation_format[\s\S]*resume_phase TEXT/,
+      "",
+    );
+    f.sqlite.exec(legacySchema);
+    f.sqlite
+      .prepare(
+        "INSERT INTO recovery_b_saga(restore_id,profile_b_json,begin_public_json,expected_secrets_json,recovery_source,phase) VALUES(?,'{}','{}','{}','new','identity_reserved')",
+      )
+      .run(o.restoreId);
+    await expect(
+      prepareOperationalB({ ...o, previousRecovery: null }),
+    ).rejects.toThrow("legacy_preparation_blocked");
+    expect(
+      f.sqlite.prepare("SELECT preparation_format FROM recovery_b_saga").get()!
+        .preparation_format,
+    ).toBe(1);
+    expect(
+      await f.client.secrets.load(
+        epochPreparationSecretScope(
+          f.client.profile,
+          o.restoreId,
+          f.acceptedAuthorization.toEpoch,
+        ),
+      ),
+    ).toBeNull();
+  });
+  it("formats and private commitments are immutable after the new reservation", async () => {
+    const f = await fixture(),
+      o = await plan(f);
+    await prepareOperationalB({ ...o, previousRecovery: null });
+    expect(() =>
+      f.sqlite.exec("UPDATE recovery_b_saga SET preparation_format=1"),
+    ).toThrow("immutable");
+    expect(() =>
+      f.sqlite.exec("UPDATE recovery_b_saga SET preparation_sha256='changed'"),
+    ).toThrow("immutable");
+  });
   it.each([
     "begin",
     "envelope",
@@ -475,7 +1091,7 @@ describe("operational B preparation remains isolated", () => {
     "transition",
     "remote_prepared",
   ])("reuses byte-identical envelopes after %s", async (fault) => {
-    const f = await fixture(),
+    const f = await fixture("desktop", true),
       old = await oldRecovery(f),
       o = await plan(f);
     await prepareOperationalB({ ...o, previousRecovery: old.recovery });
@@ -506,8 +1122,12 @@ describe("operational B preparation remains isolated", () => {
         },
       }),
     ).rejects.toThrow("crash");
+    await expect(cancelOperationalB(o)).rejects.toThrow(
+      "remote_staging_requires_resume",
+    );
+    const retry = await f.restart();
     await stageOperationalB({
-      ...o,
+      ...retry,
       previousTrustedTransition: null,
       transport,
     });
