@@ -141,8 +141,10 @@ describe.skipIf(!enabled)(
         await pool.query('UPDATE sync_environment SET server_epoch=$1', [environment.serverEpoch]);
         await pool.query('INSERT INTO sync_restores(restore_id,server_id,from_epoch,to_epoch,displaced_epoch,backup_manifest_sha256) VALUES($1,$2,$3,$4,$3,$5)',
           [restoreId, environment.serverId, oldEpoch, environment.serverEpoch, 'a'.repeat(64)]);
+        const oldProfile = old.profile()?.profile;
+        if (!oldProfile) throw new Error('fixture_previous_profile_unavailable');
         await pool.query('INSERT INTO sync_restore_vaults(restore_id,vault_id,source_epoch) VALUES($1,$2,$3)',
-          [restoreId, old.profile()!.profile!.pin.vaultId, oldEpoch]);
+          [restoreId, oldProfile.pin.vaultId, oldEpoch]);
         old.sync.setForeground(true);
         await expect(old.sync.sync()).rejects.toThrow('epoch_changed');
         expect(snapshot()).toEqual(before);

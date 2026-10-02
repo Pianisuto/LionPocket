@@ -23,7 +23,13 @@ export async function epochRecovery(
   if (!restored || pin.serverId !== environment.serverId || pin.serverEpoch === environment.serverEpoch ||
       restored.source_epoch !== pin.serverEpoch) throw new Error('restore_record_required');
   // An unrecovered vault from A in a restored backup of B must not skip B to C.
-  if (restored.from_epoch !== pin.serverEpoch) throw new Error('epoch_recovery_chain_required');
+  const priorAuthorization = (await tx.query(
+    `SELECT 1 FROM sync_epoch_authorizations a JOIN sync_restores r USING(restore_id)
+     WHERE a.vault_id=$1 AND r.server_id=$2 AND a.restore_id<>$3
+       AND a.authorization_envelope->>'fromEpoch'=$4 LIMIT 1`,
+    [vaultId, environment.serverId, restored.restore_id, pin.serverEpoch],
+  )).rowCount;
+  if (restored.from_epoch !== pin.serverEpoch || priorAuthorization) throw new Error('epoch_recovery_chain_required');
   const grants: DeviceGrant[] = (await tx.query(
     'SELECT grant_envelope FROM sync_grants WHERE vault_id=$1 ORDER BY registry_version', [vaultId],
   )).rows.map(r => r.grant_envelope);

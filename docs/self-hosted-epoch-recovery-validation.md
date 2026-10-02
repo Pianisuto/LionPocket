@@ -4,12 +4,12 @@ Execução local em 2026-10-01, branch `codex/restore-epoch-continuity`, base `5
 
 | Verificação | Resultado local |
 | --- | --- |
-| `npm test` | 360 testes passaram; 31 testes de integração condicionais não executados nessa chamada |
+| `npm test` | 360 testes passaram; 32 testes de integração condicionais não executados nessa chamada |
 | `npm run typecheck` | Passou |
-| `npm run lint` | Passou; 0 erros, 42 warnings |
+| `npm run lint` | Passou; 0 erros, 17 warnings |
 | `git diff --check` | Passou |
 | `npm run release:validate` | Passou, versão 0.3.10 / Android versionCode 3 |
-| `npm run sync:dev:test` | PostgreSQL/Keycloak: 59 passaram, 1 condicional de cliente anterior não executado |
+| `npm run sync:dev:test` | PostgreSQL/Keycloak: 60 passaram, 1 condicional de cliente anterior não executado |
 | `node tools/release/version-skew.cjs` | 3 passaram; cliente de `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` compilado sem alterar seu engine/controller; interoperabilidade e bloqueio após restore |
 | `npm run sync:self-hosted:unit` | 17 passaram, incluindo rollback operacional e journal após perda do processo/banco |
 | `npm run sync:self-hosted:validate` | Compose Caddy/proxy próprio/CA validados com secrets externos sintéticos |
@@ -18,7 +18,7 @@ Execução local em 2026-10-01, branch `codex/restore-epoch-continuity`, base `5
 | Linux normal/beta | `npm run package` nos dois canais passou |
 | Android debug/normal/beta | Gradle `assembleDebug`, `assembleRelease -PdevelopmentSigning=true` e `assembleRelease -PprivateBeta=true`, x86_64, JDK 21: passaram |
 
-Os seis testes novos de controle usam adapters reais e demonstram C1 no snapshot, C2 local aceito após o backup e C3 offline conservados sem mutações durante `epoch_changed`/preparação. Comprovam owner OIDC, authority existente e recovery code em contexto limpo, rejeição de campos/assinaturas/conta incorretos, ausência de ledger, expiração por tempo do servidor, replay para outro restore, downgrade, rejeição de salto A→C e retenção da revogação conhecida pós-backup.
+Os sete testes novos de controle usam adapters reais e demonstram C1 no snapshot, C2 local aceito após o backup e C3 offline conservados sem mutações durante `epoch_changed`/preparação. Comprovam owner OIDC, authority existente e recovery code em contexto limpo, rejeição de campos/assinaturas/conta incorretos, ausência de ledger, expiração por tempo do servidor, replay para outro restore, downgrade, rejeição de salto A→C e retenção da revogação conhecida pós-backup.
 
 Falhas injetadas: abandono após challenge/assinatura, exceção PostgreSQL entre consumo do challenge e gravação da autorização, resposta perdida com restart/retry após expiração, journal de restore após perda do processo/banco. Há uma única autorização durável; SQLite/outbox/binding permanecem intactos. Canários financeiros e código de recuperação não aparecem nas tabelas do PostgreSQL; implantação self-hosted também verifica ambos os bancos e logs.
 

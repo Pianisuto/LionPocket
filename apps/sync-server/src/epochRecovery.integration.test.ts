@@ -34,8 +34,16 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
   const canary = 'LP_EPOCH_PRIVATE_DESCRIPTION_729134';
   const tables = ['sync_vaults', 'sync_grants', 'sync_pairings', 'sync_deliveries', 'sync_http_nonces', 'sync_commits', 'sync_operations', 'sync_remote_heads', 'sync_remote_bindings'];
   const input = { kind: 'expense' as const, description: canary, plannedAmount: 12.34, dueDate: '2026-10-02', status: 'planned' as const };
-  const device = () => new DeviceProvisioning(structuredClone(saved!.profile!), secrets, crypto);
-  const oldVault = () => saved!.profile!.pin.vaultId;
+  const ownerProfile = () => {
+    if (!saved?.profile) throw new Error('fixture_owner_unavailable');
+    return saved.profile;
+  };
+  const secondaryProfile = () => {
+    if (!paired?.profile) throw new Error('fixture_secondary_unavailable');
+    return paired.profile;
+  };
+  const device = () => new DeviceProvisioning(structuredClone(ownerProfile()), secrets, crypto);
+  const oldVault = () => ownerProfile().pin.vaultId;
   const snapshotLocal = () => ({
     desktop: Object.fromEntries(syncTables.map(t => [t, bank.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])),
     android: Object.fromEntries(syncTables.map(t => [t, mobile.sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])),
@@ -46,16 +54,17 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     return { status: res.status, body: await res.json() };
   }
   async function challenge() {
-    return request('epoch-recovery-challenge', { fromEpoch: epochA, authorityPublicKey: saved!.profile!.pin.authorityPublicKey });
+    return request('epoch-recovery-challenge', { fromEpoch: epochA, authorityPublicKey: ownerProfile().pin.authorityPublicKey });
   }
   async function grantSigned(challenge: EpochRecoveryChallenge, fields: Partial<EpochRecoveryAuthorization> = {}) {
     const authorization = await authorizeEpochRecovery(device(), challenge, true);
     const { signature, ...unsigned } = { ...authorization, ...fields }; void signature;
     const seed = await secrets.load(device().scope('authoritySeed'));
-    try { return { ...unsigned, signature: crypto.sign(epochRecoverySigningInput(unsigned), seed!) }; }
+    if (!seed) throw new Error('fixture_authority_unavailable');
+    try { return { ...unsigned, signature: crypto.sign(epochRecoverySigningInput(unsigned), seed) }; }
     finally { seed?.fill(0); }
   }
-  const submission = (authorization: EpochRecoveryAuthorization) => ({ authorization, knownGrants: saved!.profile!.grants });
+  const submission = (authorization: EpochRecoveryAuthorization) => ({ authorization, knownGrants: ownerProfile().grants });
   function startServer() {
     server = controlServer({ pool, crypto, environment, origin: endpoint, identity: keycloakIdentity(issuer), financialEnabled: true,
       oidc: { issuer, desktopClientId: 'lionpocket-desktop-dev', androidClientId: 'lionpocket-android-dev',
@@ -97,7 +106,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     for (const t of tables) snapshot.set(t, (await pool.query(`SELECT coalesce(jsonb_agg(t),'[]') AS rows FROM ${t} t`)).rows[0].rows);
     owner.setForeground(true);
     bank.saveTransaction({ ...input, description: 'DESKTOP_C2_AFTER_BACKUP' }); await owner.sync();
-    await owner.revoke(paired!.profile!.deviceId, paired!.profile!.deviceId); owner.setForeground(false);
+    await owner.revoke(secondaryProfile().deviceId, secondaryProfile().deviceId); owner.setForeground(false);
     await repo.save({ ...input, description: 'ANDROID_C3_OFFLINE' });
     const tx = await pool.connect();
     try {
@@ -128,9 +137,9 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
   });
   it('requires owner OIDC, exact vault/authority and a durable restore record, not equal serverId', async () => {
     const before = snapshotLocal();
-    expect((await request('epoch-recovery-challenge', { fromEpoch: epochA, authorityPublicKey: saved!.profile!.pin.authorityPublicKey }, other.accessToken)).status).toBe(403);
+    expect((await request('epoch-recovery-challenge', { fromEpoch: epochA, authorityPublicKey: ownerProfile().pin.authorityPublicKey }, other.accessToken)).status).toBe(403);
     expect((await request('epoch-recovery-challenge', { fromEpoch: epochA, authorityPublicKey: crypto.nonce() })).status).toBe(403);
-    expect((await request('epoch-recovery-challenge', { fromEpoch: epochA, authorityPublicKey: saved!.profile!.pin.authorityPublicKey }, session.accessToken, crypto.uuid())).status).toBe(403);
+    expect((await request('epoch-recovery-challenge', { fromEpoch: epochA, authorityPublicKey: ownerProfile().pin.authorityPublicKey }, session.accessToken, crypto.uuid())).status).toBe(403);
     const actual = environment.serverEpoch; environment.serverEpoch = crypto.uuid();
     expect((await challenge()).body.error).toBe('restore_record_required'); environment.serverEpoch = actual;
     expect(snapshotLocal()).toEqual(before);
@@ -139,11 +148,11 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     const before = snapshotLocal(), { body } = await challenge();
     const d = device();
     await expect(authorizeEpochRecovery(d, body.challenge, false)).rejects.toThrow('confirmation_required');
-    await expect(authorizeEpochRecovery(new DeviceProvisioning(paired!.profile!, secrets, crypto), body.challenge, true)).rejects.toThrow('authority_secret_unavailable');
+    await expect(authorizeEpochRecovery(new DeviceProvisioning(secondaryProfile(), secrets, crypto), body.challenge, true)).rejects.toThrow('authority_secret_unavailable');
     const clean = await DeviceProvisioning.prepare(body.pin, new TestSecrets(), crypto);
     expect(() => authorizeEpochRecoveryWithCode(clean, sodium, body.challenge, body.grants, body.recovery as SignedRecovery, 'LP1.' + crypto.nonce(), true)).toThrow();
     const recovered = authorizeEpochRecoveryWithCode(clean, sodium, body.challenge, body.grants, body.recovery, code, true);
-    expect(recovered.authorityPublicKey).toBe(saved!.profile!.pin.authorityPublicKey);
+    expect(recovered.authorityPublicKey).toBe(ownerProfile().pin.authorityPublicKey);
     expect(await clean.secrets.load(clean.scope('authoritySeed'))).toBe(null);
     expect(snapshotLocal()).toEqual(before);
   });
@@ -154,7 +163,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     for (const field of ['serverId', 'vaultId', 'fromEpoch', 'toEpoch', 'restoreId', 'nonce'])
       cases.push(await grantSigned(body.challenge, { [field]: field === 'nonce' ? crypto.nonce() : crypto.uuid() }));
     const before = snapshotLocal();
-    for (const authorization of cases) expect((await request('epoch-recovery-authorize', { authorization, knownGrants: saved!.profile!.grants })).status).not.toBe(200);
+    for (const authorization of cases) expect((await request('epoch-recovery-authorize', { authorization, knownGrants: ownerProfile().grants })).status).not.toBe(200);
     expect((await request('epoch-recovery-authorize', submission(original), other.accessToken)).status).toBe(403);
     expect((await pool.query('SELECT count(*) FROM sync_epoch_authorizations')).rows[0].count).toBe('0');
     expect(snapshotLocal()).toEqual(before);
@@ -184,7 +193,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     expect((await request('epoch-recovery-authorize', submission(different))).body.error).toBe('epoch_recovery_already_authorized');
     expect((await pool.query('SELECT count(*) FROM sync_epoch_authorizations')).rows[0].count).toBe('1');
     const known = (await pool.query('SELECT known_grants FROM sync_epoch_authorizations')).rows[0].known_grants;
-    expect(known.at(-1)).toMatchObject({ deviceId: paired!.profile!.deviceId, status: 'revoked' });
+    expect(known.at(-1)).toMatchObject({ deviceId: secondaryProfile().deviceId, status: 'revoked' });
     expect(snapshotLocal()).toEqual(before);
     expect((await pool.query('SELECT pin FROM sync_vaults')).rows[0].pin.serverEpoch).toBe(epochA);
     expect((await request('commits', {})).body.error).toBe('invalid_http_proof');
@@ -206,6 +215,17 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     const epochC = environment.serverEpoch; environment.serverEpoch = epochA;
     expect((await challenge()).body.error).toBe('restore_record_required'); environment.serverEpoch = epochC;
     expect((await pool.query('SELECT count(*) FROM sync_restores')).rows[0].count).toBe('2');
+    expect((await pool.query('SELECT count(*) FROM sync_epoch_authorizations')).rows[0].count).toBe('1');
+    expect(snapshotLocal()).toEqual(before);
+  });
+  it('also refuses skipping a signed preparation when an older A snapshot is restored again', async () => {
+    const displaced = environment.serverEpoch; environment.serverEpoch = crypto.uuid();
+    const restore = crypto.uuid();
+    await pool.query('INSERT INTO sync_restores(restore_id,server_id,from_epoch,to_epoch,displaced_epoch,backup_manifest_sha256) VALUES($1,$2,$3,$4,$5,$6)',
+      [restore, environment.serverId, epochA, environment.serverEpoch, displaced, 'c'.repeat(64)]);
+    await pool.query('INSERT INTO sync_restore_vaults(restore_id,vault_id,source_epoch) VALUES($1,$2,$3)', [restore, oldVault(), epochA]);
+    const before = snapshotLocal();
+    expect((await challenge()).body.error).toBe('epoch_recovery_chain_required');
     expect((await pool.query('SELECT count(*) FROM sync_epoch_authorizations')).rows[0].count).toBe('1');
     expect(snapshotLocal()).toEqual(before);
   });
