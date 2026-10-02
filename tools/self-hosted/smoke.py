@@ -149,6 +149,25 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
         fixture('epoch')
         ctl('user', 'create', 'fixture-after-restore', data=b'fixture-only-password-78931\n')
         ctl('status')
+        epoch_b = lp.sql(cfg, 'SELECT server_epoch::text FROM sync_environment;')
+        history_b = lp.ledger.snapshot(lp.sql, cfg)
+        assert len(history_b['sync_restores']) == 1
+        assert all(v['state'] == 'awaiting_authority' for v in history_b['sync_restore_vaults'])
+        backup_b = directory / 'operational-backup-epoch-b'
+        ctl('backup', str(backup_b))
+        before_b_verify = active_snapshot()
+        ctl('verify-backup', str(backup_b))
+        assert active_snapshot() == before_b_verify, 'Epoch B verify modified active state'
+        ctl('restore', str(backup_b), '--confirm-new-epoch')
+        history_c = lp.ledger.snapshot(lp.sql, cfg)
+        epoch_c = lp.sql(cfg, 'SELECT server_epoch::text FROM sync_environment;')
+        assert epoch_c != epoch_b
+        assert len(history_c['sync_restores']) == 2
+        assert any(r['from_epoch'] == epoch_b and r['to_epoch'] == epoch_c for r in history_c['sync_restores'])
+        assert any(r == history_b['sync_restores'][0] for r in history_c['sync_restores'])
+        fixture('epoch')
+        ctl('status')
+        print('Operational E1→E2→E3 ledger and isolated verification: passed (financial migration remains blocked)')
         print('Clean self-host install, normal client E2EE, restart, privacy, offline and backup/restore/epoch: passed')
     except Exception:
         # Only isolated fixture services: preserve useful startup errors before cleanup.

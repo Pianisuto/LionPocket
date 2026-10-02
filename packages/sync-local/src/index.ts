@@ -19,3 +19,4 @@ export * from './oidc-discovery';
 export { syncFetchText, setSyncTextTransport } from './network';
 
 export { revisionSummary } from "./presentation";
+export * from './epoch-recovery';

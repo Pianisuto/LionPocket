@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+export const restoreSchema = readFileSync(new URL('./restore-schema.sql', import.meta.url), 'utf8');
 /** Public identities and authorization only. No financial plaintext. */
 export const controlSchema = `
 CREATE TABLE IF NOT EXISTS sync_disabled_accounts (issuer text NOT NULL, subject text NOT NULL, PRIMARY KEY(issuer, subject));
@@ -29,7 +31,7 @@ CREATE TABLE IF NOT EXISTS sync_http_nonces (
   server_epoch uuid NOT NULL, device_id uuid NOT NULL, nonce text NOT NULL,
   issued_at bigint NOT NULL, PRIMARY KEY(server_epoch, device_id, nonce)
 );
-`;
+` + restoreSchema;
 /** Ciphertext log and public operation graph only. No financial projection or DEK. */
 export const commitSchema = `
 ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS log_position bigint NOT NULL DEFAULT 0 CHECK(log_position>=0);

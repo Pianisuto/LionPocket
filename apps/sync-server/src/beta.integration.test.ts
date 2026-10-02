@@ -9,6 +9,7 @@ import {
   ManualSync,
   ProvisioningCrypto,
   validateSyncBackup,
+  syncTables,
   type BetaSaved,
   type BetaSession,
   type SqlRow,
@@ -30,6 +31,7 @@ describe.skipIf(!enabled)(
       banks: LionPocketDatabase[] = [],
       controllers: BetaSync[] = [];
     let pool: pg.Pool, admin: pg.Pool, server: Server, sessions: BetaSession[];
+    let environment: { serverId: string; serverEpoch: string };
     beforeAll(async () => {
       await sodium.ready;
       admin = new pg.Pool({
@@ -41,10 +43,11 @@ describe.skipIf(!enabled)(
         connectionString: `postgresql://liondev:liondev@127.0.0.1:55432/${database}`,
       });
       await pool.query(controlSchema + commitSchema + bindingSchema);
+      environment = await initialize(pool);
       server = controlServer({
         pool,
         crypto: new ProvisioningCrypto(sodium),
-        environment: await initialize(pool),
+        environment,
         origin: endpoint,
         identity: keycloakIdentity(issuer),
         financialEnabled: true,
@@ -108,7 +111,7 @@ describe.skipIf(!enabled)(
       sync.setForeground(true);
       return { bank, sync, secrets, profile: () => saved };
     }
-    it.skipIf(!process.env.LIONPOCKET_PREVIOUS_CLIENT)("previous client v1 exchanges zero/null in both directions with current client/server", async () => {
+    it.skipIf(!process.env.LIONPOCKET_PREVIOUS_CLIENT)("previous client v1 interoperates and freezes SQLite/outbox after an operational restore", async () => {
       const old = client(0, true), current = client(1);
       await old.sync.configure(endpoint);
       const first = await old.sync.create();
@@ -127,6 +130,27 @@ describe.skipIf(!enabled)(
       expect(old.bank.listTransactions({ month: "2026-10" }).find(t => t.description === "Current client null")).toMatchObject({ plannedAmount: 12.34, actualAmount: null });
       expect((await old.sync.status()).sync?.pending).toBe(0);
       expect((await current.sync.status()).sync?.pending).toBe(0);
+      old.sync.setForeground(false); current.sync.setForeground(false);
+      old.bank.saveTransaction({ kind: 'expense', description: 'Previous client offline after backup', plannedAmount: 1,
+        dueDate: '2026-10-04', status: 'planned' });
+      const snapshot = () => Object.fromEntries(syncTables.map(table => [table, old.bank.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+      const before = snapshot(), oldEpoch = environment.serverEpoch, restoreId = randomUUID();
+      const commits = (await pool.query('SELECT count(*) FROM sync_commits')).rows[0].count;
+      environment.serverEpoch = randomUUID();
+      try {
+        await pool.query('UPDATE sync_environment SET server_epoch=$1', [environment.serverEpoch]);
+        await pool.query('INSERT INTO sync_restores(restore_id,server_id,from_epoch,to_epoch,displaced_epoch,backup_manifest_sha256) VALUES($1,$2,$3,$4,$3,$5)',
+          [restoreId, environment.serverId, oldEpoch, environment.serverEpoch, 'a'.repeat(64)]);
+        await pool.query('INSERT INTO sync_restore_vaults(restore_id,vault_id,source_epoch) VALUES($1,$2,$3)',
+          [restoreId, old.profile()!.profile!.pin.vaultId, oldEpoch]);
+        old.sync.setForeground(true);
+        await expect(old.sync.sync()).rejects.toThrow('epoch_changed');
+        expect(snapshot()).toEqual(before);
+        expect((await pool.query('SELECT count(*) FROM sync_commits')).rows[0].count).toBe(commits);
+      } finally {
+        old.sync.setForeground(false); environment.serverEpoch = oldEpoch;
+        await pool.query('UPDATE sync_environment SET server_epoch=$1', [oldEpoch]);
+      }
     }, 30000);
     it("creates, pairs, reviews, synchronizes, rotates/reemits and recovers through the app commands", async () => {
       const a = client(),

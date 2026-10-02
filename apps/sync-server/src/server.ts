@@ -1,4 +1,5 @@
 import { vaultControl, vaultRecoveryRequest } from './vaultControl';
+import { epochRecovery } from './epochRecovery';
 import { acceptCommit, changesPage, CommitRejection } from './commits';
 import { createServer, type IncomingMessage } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -61,6 +62,13 @@ async function chain(tx: PoolClient, vaultId: string): Promise<DeviceGrant[]> {
   ).rows.map((row) => row.grant_envelope);
 }
 const knownErrors: Record<string, number> = {
+  restore_record_required: 409,
+  epoch_recovery_chain_required: 409,
+  invalid_epoch_recovery: 400,
+  invalid_epoch_challenge: 403,
+  invalid_restored_state: 409,
+  epoch_challenge_expired: 409,
+  epoch_recovery_already_authorized: 409,
   idempotency_mismatch: 409,
   heads_changed: 409,
   missing_parents: 409,
@@ -139,13 +147,14 @@ export function controlServer(options: {
           controlVersion: 1,
           protocolVersion: 1,
           domainSchema: 1,
+          epochRecovery: { formatVersion: 1, authorizationAvailable: true, activationAvailable: false },
         });
         return;
       }
       // Opt-in controls the only financial routes; every other domain remains absent.
       const create = method === 'POST' && target === '/v1/vaults';
       const match =
-        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|pairing-list|grants|deliveries|registry|commits|changes|recovery-fetch|recover|recovery-store|key-checkpoints)$/.exec(
+        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|pairing-list|grants|deliveries|registry|commits|changes|recovery-fetch|recover|recovery-store|key-checkpoints|epoch-recovery-challenge|epoch-recovery-authorize)$/.exec(
           target,
         );
       if (
@@ -187,6 +196,14 @@ export function controlServer(options: {
         req.headers['content-type'] !== 'application/json'
       )
         throw new Error('invalid_envelope');
+      if (match && ['epoch-recovery-challenge', 'epoch-recovery-authorize'].includes(match[2])) {
+        tx = await pool.connect();
+        await tx.query('BEGIN');
+        const result = await epochRecovery(tx, match[2], body.value, match[1], account, environment, crypto);
+        await tx.query('COMMIT');
+        respond(200, result);
+        return;
+      }
       const rawProof = req.headers['x-lionpocket-proof'];
       if (typeof rawProof !== 'string' || rawProof.length > 8192)
         throw new Error('invalid_http_proof');
