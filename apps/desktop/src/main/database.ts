@@ -157,7 +157,7 @@ export class LionPocketDatabase {
       capturing = false;
     const flush = () => {
       if (
-        capturing ||
+        capturing || this.recoveryWorkflowTransaction ||
         prepare('SELECT mode FROM sync_local_state WHERE id=1').get()?.mode !==
           'financial' ||
         prepare('SELECT applying FROM sync_control WHERE id=1').get()?.applying
@@ -190,7 +190,7 @@ export class LionPocketDatabase {
       prepared.run = (...args) => {
         if (
           transaction ||
-          capturing ||
+          capturing || this.recoveryWorkflowTransaction ||
           !/^\s*(INSERT|UPDATE|DELETE)\b/i.test(statement) ||
           prepare('SELECT mode FROM sync_local_state WHERE id=1').get()
             ?.mode !== 'financial'
@@ -220,7 +220,10 @@ export class LionPocketDatabase {
     let step = workflow.next();
     while (!step.done) {
       const { sql, params = [] } = step.value;
-      step = workflow.next(this.db.prepare(sql).all(...params) as SqlRow[]);
+      let rows: SqlRow[];
+      try { rows = this.db.prepare(sql).all(...params) as SqlRow[]; }
+      catch (error) { step = workflow.throw(error); continue; }
+      step = workflow.next(rows);
     }
   }
 
@@ -229,9 +232,16 @@ export class LionPocketDatabase {
     this.atomic(() => this.runSyncWorkflow(activateSyntheticManualPilot(randomUUID)));
   }
 
+  private recoveryWorkflowTransaction = false;
   private syncAdapter?: LocalSyncDatabase;
   syncDatabase(): LocalSyncDatabase {
-    return this.syncAdapter ??= { read: async (sql, params = []) => this.db.prepare(sql).all(...params) as SqlRow[], run: async (workflow) => this.atomic(() => this.runSyncWorkflow(workflow)) };
+    return this.syncAdapter ??= { read: async (sql, params = []) => this.db.prepare(sql).all(...params) as SqlRow[], run: async (workflow) => {
+      // Recovery must keep uncaptured dirty
+      // rows as blockers, never flush or mutate A merely by committing an archive or a plan.
+      this.recoveryWorkflowTransaction = workflow.preserveUncapturedWrites === true;
+      try { this.atomic(() => this.runSyncWorkflow(workflow)); }
+      finally { this.recoveryWorkflowTransaction = false; }
+    } };
   }
 
   private recordManualSync(id: string): void {

@@ -14,9 +14,10 @@ export function mobileSyncDatabase(
         let step = workflow.next();
         while (!step.done) {
           const { sql, params } = step.value;
-          step = workflow.next(
-            (await tx.executeAsync<SqlRow>(sql, params)).rows._array,
-          );
+          let rows: SqlRow[];
+          try { rows = (await tx.executeAsync<SqlRow>(sql, params)).rows._array; }
+          catch (error) { step = workflow.throw(error); continue; }
+          step = workflow.next(rows);
         }
       });
     },

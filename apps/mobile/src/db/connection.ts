@@ -1,7 +1,7 @@
 import { setSyncUuidProvider } from './syncWriters';
 import { androidSyncUuidGenerator } from '../sync/crypto';
 import { open, type NitroSQLiteConnection } from 'react-native-nitro-sqlite';
-import { migrate } from './migrations';
+import { migrate, migrations } from './migrations';
 import { syntheticBankOptIn } from '../sync/syntheticOptIn';
 import { localFiles } from '../files/native';
 
@@ -14,7 +14,8 @@ export function database(): Promise<NitroSQLiteConnection> {
   if (!state.lionPocketDatabase) {
     state.lionPocketDatabase = (async () => {
       // A full JS reload may outlive the native default connection.
-      const db = open({ name: syntheticBankOptIn() ? 'lion-sync-dev-manual.sqlite' : 'lionpocket.sqlite', connection: 'independent' });
+      const name = syntheticBankOptIn() ? 'lion-sync-dev-manual.sqlite' : 'lionpocket.sqlite';
+      const db = open({ name, connection: 'independent' });
       try {
         await db.executeAsync('PRAGMA foreign_keys = ON');
         await migrate(db, async () => {
@@ -22,8 +23,11 @@ export function database(): Promise<NitroSQLiteConnection> {
           await db.executeAsync('VACUUM INTO ?', [file.path]);
         });
         setSyncUuidProvider(androidSyncUuidGenerator);
+        // Emitted only after every migration transaction commits. No financial data or secrets.
+        console.info(`[LionPocket] database ready: ${name} schema=${migrations.length}`);
         return db;
       } catch (error) {
+        console.error(`[LionPocket] database initialization failed: ${name}`, error instanceof Error ? error.message : 'unknown error');
         db.close();
         throw error;
       }

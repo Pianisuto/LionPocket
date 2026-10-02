@@ -21,3 +21,4 @@ export { syncFetchText, setSyncTextTransport } from './network';
 export { revisionSummary } from "./presentation";
 export * from './epoch-recovery';
 export * from './epoch-archive';
+export * from './causal-graph';

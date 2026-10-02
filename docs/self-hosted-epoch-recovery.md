@@ -2,21 +2,13 @@
 
 ## Estado desta implementação
 
-**Draft — preservação de gerações e planejamento do aparelho âncora; ativação permanece indisponível.**
+**Rebase causal verificável do aparelho âncora; ainda não existe geração B ativa.**
 
-A base é `cfaf1ea99f56af2fa9c1ac23b429bd21f33320dc` (main depois do PR #9). O PR #9 entregou ledger e autorização de preparação. Este incremento acrescenta índice de gerações, arquivo remoto imutável, helper de backup SQLite aberto/hashado, arquivo local por tabela, journal de preparação, mapping durável e contratos separados de manifesto/`EpochTransition`.
+Este incremento parte de `eb215897286845f0b632def359b4a4b9f848a2dd` (main após PR #10). PR #9 entregou autorização de preparação; PR #10 entregou generations, archives, backup/journal/mapping e contratos de manifesto/`EpochTransition`. O planner v2 substitui o baseline de heads como raízes pelo fechamento causal completo necessário, com replay financeiro antes de `planned`.
 
-O critério de retomada financeira **ainda não está atendido**. Não existem staging remoto, nova identidade/key/recovery B, ativação, instalação do binding B ou botão nativo de recuperação. Discovery e autorização continuam anunciando `activationAvailable:false`. Foreground não chama os novos helpers. As APIs normais continuam bloqueando A diante de B. Os helpers locais são exercitados exclusivamente com fixtures sintéticos, não instalados automaticamente nos bancos dos usuários.
+O critério de transformação **do grafo local sincronizável** é validado para o recorte descrito abaixo. O critério de retomada operacional ainda não está atendido: não existem staging, nova identidade/key/recovery/registry B, ativação, binding B ou sync B. Discovery mantém `activationAvailable:false`. Foreground não chama os helpers. A continua bloqueada diante do epoch novo. Todas as evidências usam bancos sintéticos descartáveis.
 
-**O fluxo futuro deste PR recupera apenas o aparelho âncora.** Segundo aparelho e recovery sem SQLite antigo permanecem pendentes; nenhuma parte deste draft reconecta qualquer aparelho.
-
-### Bloqueio arquitetural novo, reproduzido em teste
-
-A projeção atual (`projectObject` em `transport-state.ts`) usa a revisão de base comum para apresentar um objeto com conflito. Em A, X/Y podem compartilhar base Z e o objeto permanece disponível. Reemitir somente X/Y como raízes B mantém dois heads, mas retira Z do grafo ativo: a projeção encontra `base_revision_id=null` e oculta o objeto. O teste `demonstrates why normal projection cannot install a root-only conflict baseline yet` reproduz isso usando SQLite real: A possui projeção visível e dois heads; a aplicação normal de raízes equivalentes em B preserva as branches, mas não instala a transação visível.
-
-Há um segundo aspecto do mesmo bloqueio: um head pode depender de uma revisão A histórica que já não é head. Reemitir essa revisão como raiz B adicional faz dela um head ativo; trocar a dependência para o head atual sem prova também altera seu significado. Tombstones históricos fora dos heads têm problema equivalente. Não se pode reutilizar IDs A nem escolher por timestamp.
-
-Antes de habilitar ativação, é preciso definir e implementar um rebase de histórico/projeção que mantenha o contexto desses conflitos, as dependências históricas e os tombstones, sem produzir heads extras ou novas decisões financeiras. Uma possibilidade a avaliar é um checkpoint cifrado de projeção/conflito junto da baseline; outra é uma representação explícita de revisões auxiliares, com prova de fechamento do grafo. **Nenhuma dessas decisões foi improvisada neste draft.** O planner grava review para dependência/tombstone histórico; planos de heads suportados ainda não são instaláveis pelo caminho normal. A fronteira de epoch permanece fechada para todos os casos, inclusive os aparentemente simples.
+Segundo aparelho e recovery sem SQLite antigo continuam pendentes; este PR não reconecta nenhum aparelho. O bloqueio heads-only demonstrado no PR #10 agora possui regressão positiva: ZB e os parents XB/YB conservam a base comum, o registro e o conflito. Dependencies históricas são reemitidas com seus ancestors, sem substituir seu alvo por um head mais recente. Dados sem interpretação segura continuam em review.
 
 ## Fronteira de segurança
 
@@ -111,15 +103,49 @@ Exports JSON de sync v1 não conhecem essa extensão. Desktop/mobile recusam exp
 
 ## Planejamento da baseline e mapping A→B
 
-O planner consulta **heads/revisões do arquivo local**, não varre tabelas visíveis. Para cada head com snapshot válido, reserva novo revision/op ID e commit ID B, mantém object ID, autoria/audit e identidade financeira, define parents B vazios, `provenance.origin='restore'` e `restoredFrom=revision A`. Exclusão continua exclusão; múltiplos heads produzem múltiplas branches, inclusive delete/edit. Não há escolha por timestamp, merge automático ou envelope A reaproveitado.
+### Causal closure
 
-`recovery_revision_mapping` conserva A→B, object, commit B, ordinal e revisão B local. Uma transação reserva e valida tudo; crash durante mapping reverte o plano inteiro antes de qualquer publicação. Retry após plano confirmado reutiliza exatamente os IDs. O resultado é paginado, até 100 operações por página, e ainda não contém envelopes cifrados/transmissíveis.
+Heads-only estava errado: transformar Z→X/Y em duas raízes XB/YB elimina a base comum Z e pode esconder a transação. O planner v2 começa **exclusivamente nos heads atuais do archive local** e visita iterativamente todos os parents e `dependencies[].revisionId`, incluindo parents/dependencies das revisões descobertas, até o fechamento. Não copia história desconectada por conveniência. O archive completo continua intacto.
 
-Dependências que apontam para heads presentes no arquivo são mapeadas e ordenadas topologicamente. Dependência histórica não representável, tombstone histórico fora dos heads, ciclo, snapshot inválido, identity unresolved, inbox não aplicada/quarentenada, dirty write ou qualquer review não informativo produzem `review-required`, sem mapping parcial utilizável. Não se inventa prova. Informações de audit já reconhecidas pelo controller (`active_key_version`, `reemission_provenance`, `legacy_import_review_provenance`, `import_receipt:*`) não bloqueiam sozinhas.
+Parents precisam existir no mesmo objeto; dependencies precisam existir com o object ID declarado. Revisões necessárias rejeitadas, inválidas ou com identidade não resolvida bloqueiam. Parents, dependencies e a união das duas relações são validados separadamente contra ciclos. Dependency não vira parent.
 
-`anchorPlanCommitments` calcula compromissos públicos paginados de archive/mapping/heads e contagem decimal, sem plaintext no resultado. Mapping acumula ordinal, IDs A/B/object/commit e hash da revisão B; heads acumulam pares `(objectId,revisionB)` em ordem lexical. **Esses compromissos não são um manifesto staged completo.** Envelope hash, registry/key/recovery B e completude remota continuam ausentes.
+### Rebase e ordem
 
-No teste integrado, C1 é aceito antes do snapshot PostgreSQL e C2 é aceito depois. Restore perde C2 remoto. Owner conserva C2 local, autoriza, faz backup e arquivo, e o plano novo contém semanticamente C1+C2. Os IDs novos diferem dos op IDs A; os envelopes/outbox A permanecem byte a byte iguais. Android offline conserva inclusive C3 e não envia nada. Isso prova preservação/planejamento, **não ativação nem sync normal B**.
+Kahn com min-heap produz ordem topológica sobre **ambas** as relações. UUID desempata apenas revisões já disponíveis; relógios não decidem ordem ou vencedor. O algoritmo é iterativo, O((V+E) log V), com consultas indexadas por revisão e leitura paginada de IDs reservados. Cada revisão incluída recebe novo op/revision ID e novo commit ID, mantendo object ID, snapshot/action, authoredAt e audit. `provenance.origin='restore'`; `restoredFrom` é a referência de audit explícita para A, não uma edge B.
+
+Parents B são os mappings dos parents A, ordenados como conjunto; dependencies B mantêm o object ID e apontam **à revisão histórica mapeada exata**, nunca ao head mais recente. Nenhuma edge B aponta para A. Commit planning continua um commit por revisão, sem compactação ou batching remoto. Série, slot, alias e prioridade continuam identidades lógicas.
+
+### Schema, compatibilidade e compromissos
+
+`recovery_journal.plan_format=2` distingue o plano causal. `recovery_revision_mapping` agora persiste `parents_b_json` e `is_head`, além de revision A/B, object, commit B, ordinal e payload B. Só os mappings dos heads A têm `is_head=1`; ancestors/dependencies não ganham status de head. Páginas de até 100 operações retornam exatamente esses parents/classificação.
+
+`migrateAnchorPlan()` adiciona as colunas idempotentemente a um archive PR #10, preservando seu plano como formato 1. O planner, o consumidor e os compromissos **recusam formato 1**. `discardLegacyAnchorPlan()` descarta apenas esse mapping antigo e seus reviews, em transação, retorna a `archived` v2 e permite replanejar a mesma evidência. Nunca apaga archive A, backup, autorização ou profile. A imutabilidade do mapping é reinstalada na mesma transação. Um v2 já durável não pode ser convertido em v1. Review v2 ainda exige uma tentativa/snapshot explícito futuro; não se edita archive selado.
+
+`anchorPlanCommitments` usa domínio mapping v2 e compromete ordinal, revision A/B, object, commit, **parents B ordenados, head/non-head** e hash do payload, que inclui dependencies B. Alterar parent muda o digest. `headsSha256` compromete somente heads finais. O contrato `EpochBaselineManifest` já contém `mappingSha256`; manifesto/transition e vetor contratual não precisaram mudar. Nenhum manifesto é persistido ou ativado.
+
+### Conflict preservation e restore provenance
+
+A isomorfia das edges preserva ancestry. `causalCommonBase()` encontra o ancestor comum maximal único somente por parents, em tempo linear por head. Para cada objeto, o planner compara a base A com a base B: deve ser exatamente seu mapping, ou null em ambos. Z→X/Y vira ZB→XB/YB, e branches profundas mantêm o mapping da base histórica. Não se achata branch, inventa base ou escolhe head.
+
+O automerge da projeção agora examina **os heads atuais**: se qualquer branch atual tem `origin='restore'`, mantém o conflito. Reemitir branches de devices distintos pelo mesmo anchor não dá permissão para resolvê-las. A resolução explícita continua funcionando. Novos heads locais normais voltam às regras existentes, mesmo com ancestors restore. O teste cobre ambas as situações.
+
+### Replay semântico e reviews
+
+Antes de `planned`, o planner cria schemas **TEMP descartáveis**, com as definições SQLite reais, e executa `applyCommit`/`projectObject` existentes sem criptografia. Tabelas financeiras principais, binding, profile e outbox A nunca são alvos de replay. Savepoints removem toda a simulação, também em falhas. Os adapters devolvem erros SQL ao workflow para permitir rollback da simulação e persistir um motivo de review.
+
+A e B são reproduzidos com o mesmo contexto de identity/series/slots/aliases do archive. O contexto A mantém branches arquivadas sem conceder nova permissão local de automerge; B usa um único anchor e exercita a proteção restore. O oracle reproduz um commit por revisão, na mesma ordem do plano. Prioridades reconhecem identities de slots cujo cache financeiro ainda está vazio e materializam o mesmo slot pela projeção normal; não inserem uma FK para uma transação ausente. A projeção de objeto linear consulta apenas seu head; conflitos/tombstones continuam consultando o grafo necessário. As duas avaliações usam o mesmo clock de projeção fixo para timestamps auxiliares de cache; esse clock não ordena causalidade nem seleciona vencedor. Um teste adicional reproduz commits B individualmente pela projeção normal, inclusive o conflito que seria mergeável por grupos.
+
+A representação normalizada compara todas as tabelas financeiras projetadas, identity/global IDs, heads, conflitos abertos/common base, tombstones, dependency/parent graph, séries, slots, import provenance e aliases. Somente IDs de transporte/contexto de replay e IDs auxiliares de conflito são excluídos ou normalizados A↔B. Conteúdo financeiro, deleted state, audit projetado e prioridades são comparados. O conjunto de heads resultante precisa coincidir exatamente com o conjunto arquivado mapeado. Mismatch ou falha de projeção produz `review-required`, sem mapping utilizável. Antes do primeiro planejamento, novos heads/payloads ou dirty/inbox/rejeições surgidos no anchor depois do archive também bloqueiam; não se apresenta um snapshot antigo como plano do anchor atualizado.
+
+Continuam bloqueando dirty uncaptured, inbox não aplicada/quarantine, identity unresolved, reviews relevantes, edge ausente/estrangeira, snapshot inválido, revisão necessária rejeitada e ciclos. O adapter desktop não faz captura financeira implícita no COMMIT de workflows marcados de recovery; o comportamento de captura normal permanece igual: arquivar/planejar dirty A conserva esse bloqueio, sem mutar A incidentalmente.
+
+Tombstones necessários participam do DAG, inclusive ancestors delete e conflitos delete/edit. Um tombstone desconectado que ainda afeta `sync_tombstones` exige review; não é descartado como história irrelevante. Put que descende diretamente de delete continua bloqueado pelo invariante normal de não ressurreição. Múltiplos deletes necessários com authoredAt distintos também exigem `ambiguous_tombstone_projection`: a seleção atual de delete da projeção não prova qual audit seria preservado. Não escolhemos por timestamp. Dados legados impossíveis continuam fora do recorte seguro.
+
+Crash antes do commit reverte todas as linhas do mapping; retry após commit reutiliza exatamente os IDs. Com o mesmo archive/authorization/restore e UUID source determinístico, bytes e digests são iguais. Backup SQLite preserva a extensão; inspeção valida mappings v2 quando presentes, mas aceita archives v1 como evidência histórica **não utilizável como plano B**. Backup self-hosted não possui mapping local do cliente.
+
+No teste PostgreSQL/Keycloak, C1 foi aceito antes do backup e C2 depois. Restore perde C2 remoto, mas o archive/fechamento local contém C1+C2 e o replay v2 passa. Android offline conserva C3, binding/outbox/SQLite A, sem chamadas novas nem recuperação no foreground.
+
+**Ainda não existe geração B ativa.** Discovery continua `activationAvailable:false`. Nenhum seed signing/box, data key, recovery, registry operacional, binding B, staging/upload/manifesto remoto, ativação ou sync B foi criado.
 
 ## Manifesto B e prova final separada
 
