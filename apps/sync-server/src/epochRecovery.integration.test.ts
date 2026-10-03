@@ -11,6 +11,7 @@ import type { Server } from 'node:http';
 import pg from 'pg';
 import sodium from 'libsodium-wrappers-sumo';
 import {
+  requestAnchorActivation, resumeAnchorActivation, type AnchorActivationOptions, ManualSync, fetchSyncHttp,
   authorizeEpochRecovery, authorizeEpochRecoveryWithCode, DeviceProvisioning, ProvisioningCrypto,
   SyncController, syncTables, type SyncSaved, type SyncSession, type SignedRecovery,
   financialTableTypes, prepareAnchorArchive, planAnchorBaseline, prepareOperationalB, stageOperationalB, makeRecovery, openRecovery, epochPreparationSecretScope,
@@ -27,7 +28,7 @@ import { controlSchema, commitSchema, bindingSchema } from './schema';
 import { controlServer, initialize } from './server';
 import { keycloakIdentity } from './identity';
 import { generationArchiveKeys } from './generations';
-import { createEpochAnchorBackup, inspectEpochAnchorBackup } from '../../desktop/src/main/sync/epochBackup';
+import { createEpochAnchorBackup, inspectEpochAnchorBackup, inspectEpochActivationCheckpoint } from '../../desktop/src/main/sync/epochBackup';
 
 describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore preparation with real SQLite adapters, PostgreSQL and OIDC', () => {
   const database = 'lion_epoch_' + randomUUID().replaceAll('-', '');
@@ -36,6 +37,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
   const crypto = new ProvisioningCrypto(sodium), secrets = new TestSecrets();
   let admin: pg.Pool, pool: pg.Pool, server: Server, environment: { serverId: string; serverEpoch: string };
   let bank: LionPocketDatabase, mobile: ReturnType<typeof sqliteTestConnection>, repo: MobileRepository;
+  let activationFault: string | undefined;
   let owner: SyncController, secondary: SyncController, saved: SyncSaved | null = null, paired: SyncSaved | null = null;
   let session: SyncSession, other: SyncSession, code: string, restoreId: string, epochA: string;
   const canary = 'LP_EPOCH_PRIVATE_DESCRIPTION_729134';
@@ -73,7 +75,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
   }
   const submission = (authorization: EpochRecoveryAuthorization) => ({ authorization, knownGrants: ownerProfile().grants });
   function startServer() {
-    server = controlServer({ pool, crypto, environment, origin: endpoint, identity: keycloakIdentity(issuer), financialEnabled: true,
+    server = controlServer({ pool, crypto, environment, activationFault: step => { if (activationFault === step) throw new Error('synthetic_activation_fault'); }, origin: endpoint, identity: keycloakIdentity(issuer), financialEnabled: true,
       oidc: { issuer, desktopClientId: 'lionpocket-desktop-dev', androidClientId: 'lionpocket-android-dev',
         desktopRedirect: 'http://127.0.0.1:18761/callback', androidRedirect: 'com.lionpocketmobile.syncdev:/callback' } });
     return new Promise<void>(resolve => server.listen(18779, '127.0.0.1', resolve));
@@ -137,6 +139,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     repo = new MobileRepository(mobile.db, () => crypto.uuid());
     owner = new SyncController({ db: bank.syncDatabase(), secrets, sodium, dialect: 'desktop', allowLocalDevelopment: true,
       storage: { load: async () => structuredClone(saved), save: async s => { saved = structuredClone(s); } },
+      epochBackup:{create:()=>createEpochAnchorBackup(bank.db,join(directory,crypto.uuid()+'.sqlite')),inspect:inspectEpochAnchorBackup,inspectCheckpoint:inspectEpochActivationCheckpoint},
       backup: async () => { const path = join(directory, crypto.uuid()+'.sqlite'); bank.db.prepare('VACUUM INTO ?').run(path); return path; }, login: async () => session });
     secondary = new SyncController({ db: mobileSyncDatabase(mobile.db), secrets, sodium, dialect: 'android', allowLocalDevelopment: true,
       storage: { load: async () => structuredClone(paired), save: async s => { paired = structuredClone(s); } },
@@ -243,7 +246,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
       expect((await pool.query(`SELECT count(*) FROM archive_${table}`)).rows[0].count).toBe('0');
     await pool.query('DROP TRIGGER archive_fault ON archive_sync_commits; DROP FUNCTION archive_fault();');
     const result = await request('epoch-recovery-authorize', submission(accepted));
-    expect(result.body).toMatchObject({ state: 'authorized_awaiting_baseline', activationAvailable: false });
+    expect(result.body).toMatchObject({ state: 'authorized_awaiting_baseline', activationAvailable: true });
     await new Promise<void>(resolve => server.close(() => resolve())); await startServer();
     await pool.query("UPDATE sync_epoch_challenges SET expires_at=clock_timestamp()-interval '1 second' WHERE challenge_id=$1", [active.challengeId]);
     // Exact retry is a read of one durable result, including after expiry, not a new acceptance.
@@ -403,4 +406,495 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     expect((await pool.query('SELECT count(*) FROM sync_epoch_authorizations')).rows[0].count).toBe('1');
     expect(snapshotLocal()).toEqual(before);
   });
+    it("activates atomically, recovers a lost response, installs SQLite/profile B and resumes ordinary C4 sync, then repeats E2→E3", async () => {
+      const staging = (await pool.query("SELECT * FROM sync_epoch_staging"))
+        .rows[0];
+      environment.serverEpoch = staging.to_epoch;
+      await pool.query("UPDATE sync_environment SET server_epoch=$1", [
+        environment.serverEpoch,
+      ]);
+      const secondaryBefore = snapshotLocal().android;
+      const oldProfile = structuredClone(ownerProfile());
+      const saga = bank.db
+        .prepare("SELECT * FROM recovery_b_saga WHERE restore_id=?")
+        .get(restoreId)!;
+      const bProfile = JSON.parse(String(saga.profile_b_json));
+      const transition = JSON.parse(String(saga.transition_json));
+      const financialBefore = Object.fromEntries(
+        Object.keys(financialTableTypes).map((t) => [
+          t,
+          bank.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(),
+        ]),
+      );
+      const archiveBefore: Record<string, unknown> = Object.fromEntries(
+        Object.keys(generationArchiveKeys).map((t) => [t, null]),
+      );
+      for (const t of Object.keys(archiveBefore))
+        archiveBefore[t] = (
+          await pool.query(
+            `SELECT to_jsonb(t) AS row FROM archive_${t} t ORDER BY to_jsonb(t)::text`,
+          )
+        ).rows;
+      const remoteBefore: Record<string, unknown> = {};
+      for (const t of [
+        ...tables,
+        "sync_generations",
+        "sync_epoch_staging",
+        "sync_epoch_transitions",
+        "sync_epoch_activations",
+        "sync_restore_vaults",
+      ])
+        remoteBefore[t] = (
+          await pool.query(
+            `SELECT to_jsonb(t) AS row FROM ${t} t ORDER BY to_jsonb(t)::text`,
+          )
+        ).rows;
+      const makeOptions = (
+        old: DeviceProvisioning,
+        id: string,
+      ): AnchorActivationOptions => ({
+        db: bank.syncDatabase(),
+        deviceA: old,
+        sodium,
+        restoreId: id,
+        dialect: "desktop",
+        endpoint,
+        transport: async (action, r) => {
+          const response = await request(
+            action === "activate"
+              ? "epoch-activation"
+              : "epoch-activation-status",
+            r,
+          );
+          if (response.status !== 200) throw new Error(response.body.error);
+          return response.body;
+        },
+        inspectBackup: inspectEpochAnchorBackup,
+        checkpoint: () =>
+          createEpochAnchorBackup(
+            bank.db,
+            join(directory, crypto.uuid() + ".sqlite"),
+          ),
+        inspectCheckpoint: (path) => inspectEpochActivationCheckpoint(path, id),
+        saveProfile: async (profile) => {
+          saved = {
+            ...saved!,
+            profile,
+            phase: "bound",
+            discovered: {
+              ...saved!.discovered!,
+              serverEpoch: profile.pin.serverEpoch,
+            },
+            recoveryVersion: JSON.parse(
+              String(
+                bank.db
+                  .prepare(
+                    "SELECT recovery_json FROM recovery_b_saga WHERE restore_id=?",
+                  )
+                  .get(id)!.recovery_json,
+              ),
+            ).envelope.recoveryVersion,
+          };
+        },
+        loadProfile: async () => saved!.profile!,
+        firstPull: async (d) =>
+          new ManualSync(
+            bank.syncDatabase(),
+            d,
+            sodium,
+            "desktop",
+            endpoint,
+            fetchSyncHttp(endpoint),
+          ).pull(session.accessToken),
+      });
+      const options = makeOptions(
+        new DeviceProvisioning(oldProfile, secrets, crypto),
+        restoreId,
+      );
+      // Reserve consent but fail before any request. Every retry and status uses these persisted bytes.
+      await expect(
+        requestAnchorActivation(
+          {
+            ...options,
+            fault: (step) => {
+              if (step === "request_persisted") throw new Error("client_crash");
+            },
+          },
+          true,
+        ),
+      ).rejects.toThrow("client_crash");
+      const activationRequest = JSON.parse(
+        String(
+          bank.db
+            .prepare("SELECT request_text FROM recovery_activation_saga")
+            .get()!.request_text,
+        ),
+      );
+      expect(
+        (
+          await request(
+            "epoch-activation",
+            activationRequest,
+            other.accessToken,
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request("epoch-activation", {
+            ...activationRequest,
+            signature: crypto.encode(new Uint8Array(64)),
+          })
+        ).status,
+      ).toBe(403);
+      // Race two distinct signed intentions against a physical copy of the prepared database.
+      // Each connection owns its own transaction; no process mutex participates.
+      const raceName = 'lion_activation_race_' + crypto.uuid().replaceAll('-', '');
+      const raceCompose = fileURLToPath(new URL('../../../tools/sync-dev/compose.yml', import.meta.url));
+      const raceDump = execFileSync('docker', ['compose', '-f', raceCompose, 'exec', '-T', 'postgres', 'pg_dump', '-U', 'liondev', '-Fc', database], { maxBuffer: 32 * 1024 * 1024 });
+      await admin.query(`CREATE DATABASE ${raceName}`);
+      const racePool = new pg.Pool({ connectionString: `postgresql://liondev:liondev@127.0.0.1:55432/${raceName}` });
+      try {
+        execFileSync('docker', ['compose', '-f', raceCompose, 'exec', '-T', 'postgres', 'pg_restore', '--exit-on-error', '-U', 'liondev', '-d', raceName], { input: raceDump });
+        const profile = JSON.parse(String(bank.db.prepare('SELECT profile_b_json FROM recovery_b_saga WHERE restore_id=?').get(restoreId)!.profile_b_json));
+        const seed = await secrets.load(new DeviceProvisioning(profile, secrets, crypto).scope('signingSeed'));
+        if (!seed) throw new Error('fixture');
+        const { signature, ...otherIntent } = { ...activationRequest, activationId: crypto.uuid() }; void signature;
+        const { epochActivationSigningInput } = await import('@lionpocket/sync-protocol');
+        const otherRequest = { ...otherIntent, signature: crypto.sign(epochActivationSigningInput(otherIntent), seed) };
+        seed.fill(0);
+        const { epochActivation } = await import('./epochActivation');
+        const activate = async (intent: unknown) => {
+          const tx = await racePool.connect();
+          try {
+            await tx.query('BEGIN');
+            const result = await epochActivation(tx, true, intent, oldVault(), { issuer: session.issuer, subject: session.subject }, environment, crypto);
+            await tx.query('COMMIT'); return result.state;
+          } catch (e) { await tx.query('ROLLBACK'); return (e as Error).message; }
+          finally { tx.release(); }
+        };
+        expect((await Promise.all([activate(activationRequest), activate(otherRequest)])).sort()).toEqual(['active', 'idempotency_mismatch']);
+        expect((await racePool.query('SELECT count(*) FROM sync_epoch_activations')).rows[0].count).toBe('1');
+        const audit = await racePool.connect();
+        try {
+          const { verifyActivationBackup } = await import('./activationBackup');
+          await audit.query('BEGIN READ ONLY'); await verifyActivationBackup(audit, crypto); await audit.query('COMMIT');
+          for (const corrupt of ["UPDATE sync_commits SET receipt=jsonb_set(receipt,'{logPosition}','\"99\"')", "UPDATE sync_environment SET server_epoch=gen_random_uuid()"] ) {
+            await audit.query('BEGIN'); await audit.query(corrupt);
+            await expect(verifyActivationBackup(audit, crypto)).rejects.toThrow('invalid_activation_backup');
+            await audit.query('ROLLBACK');
+          }
+        } finally { audit.release(); }
+      } finally { await racePool.end(); await admin.query(`DROP DATABASE ${raceName}`); }
+      for (const point of [
+        "before_lock",
+        "after_lock",
+        "after_validate",
+        "after_first_delete",
+        "promoting_commit",
+        "after_vault_update",
+        "after_generation_swap",
+        "before_commit",
+      ]) {
+        activationFault = point;
+        expect(
+          (await request("epoch-activation", activationRequest)).status,
+        ).toBe(503);
+        for (const t of Object.keys(remoteBefore))
+          expect(
+            (
+              await pool.query(
+                `SELECT to_jsonb(t) AS row FROM ${t} t ORDER BY to_jsonb(t)::text`,
+              )
+            ).rows,
+          ).toEqual(remoteBefore[t]);
+      }
+      activationFault = "after_commit";
+      expect(
+        (await request("epoch-activation", activationRequest)).status,
+      ).toBe(503);
+      activationFault = undefined;
+      expect(
+        (await request("epoch-activation-status", activationRequest)).body
+          .state,
+      ).toBe("active");
+      const retries = await Promise.all([
+        request("epoch-activation", activationRequest),
+        request("epoch-activation", activationRequest),
+      ]);
+      expect(retries.map((r) => r.status)).toEqual([200, 200]);
+      const alteredUnsigned = {
+        ...activationRequest,
+        activationId: crypto.uuid(),
+      };
+      delete alteredUnsigned.signature;
+      const seed = await secrets.load(
+        new DeviceProvisioning(bProfile, secrets, crypto).scope("signingSeed"),
+      );
+      if (!seed) throw new Error("fixture");
+      const { epochActivationSigningInput } =
+        await import("@lionpocket/sync-protocol");
+      const altered = {
+        ...alteredUnsigned,
+        signature: crypto.sign(
+          epochActivationSigningInput(alteredUnsigned),
+          seed,
+        ),
+      };
+      seed.fill(0);
+      expect((await request("epoch-activation", altered)).body.error).toBe(
+        "idempotency_mismatch",
+      );
+      expect(
+        (await request("epoch-activation-status", altered)).body.state,
+      ).toBe("mismatch");
+      expect(
+        (await pool.query("SELECT count(*) FROM sync_epoch_activations"))
+          .rows[0].count,
+      ).toBe("1");
+      await resumeAnchorActivation(options);
+      const b = new DeviceProvisioning(ownerProfile(), secrets, crypto);
+      expect(b.profile.deviceId).toBe(bProfile.deviceId);
+      const activeRows = (
+        await pool.query("SELECT * FROM sync_commits ORDER BY log_position")
+      ).rows;
+      const stagedRows = (
+        await pool.query(
+          "SELECT * FROM sync_epoch_staging_commits ORDER BY ordinal",
+        )
+      ).rows;
+      expect(activeRows.map((r) => r.envelope_text)).toEqual(
+        stagedRows.map((r) => r.envelope_text),
+      );
+      expect(activeRows.map((r) => r.log_position)).toEqual(["1", "2"]);
+      const { acceptCommit, changesPage } = await import("./commits");
+      const tx = await pool.connect();
+      try {
+        await tx.query("BEGIN");
+        for (const r of activeRows)
+          expect(
+            await acceptCommit(
+              tx,
+              encodeUtf8(r.envelope_text),
+              b.profile.pin,
+              b.profile.grants,
+              b.profile.deviceId,
+              crypto,
+            ),
+          ).toEqual(r.receipt);
+        const binding = bank.db
+          .prepare("SELECT binding_id FROM sync_local_state")
+          .get()!.binding_id;
+        expect(
+          (
+            await changesPage(
+              tx,
+              {
+                formatVersion: 1,
+                bindingId: binding,
+                serverId: b.profile.pin.serverId,
+                serverEpoch: b.profile.pin.serverEpoch,
+                vaultId: oldVault(),
+                cursor: "2",
+                upperBound: null,
+                limit: 50,
+              },
+              b.profile.pin,
+              b.profile.deviceId,
+            )
+          ).commits,
+        ).toEqual([]);
+        await tx.query("COMMIT");
+      } finally {
+        tx.release();
+      }
+      expect(
+        (await pool.query("SELECT device_id FROM sync_remote_bindings")).rows,
+      ).toEqual([{ device_id: b.profile.deviceId }]);
+      for (const t of Object.keys(archiveBefore))
+        expect(
+          (
+            await pool.query(
+              `SELECT to_jsonb(t) AS row FROM archive_${t} t ORDER BY to_jsonb(t)::text`,
+            )
+          ).rows,
+        ).toEqual(archiveBefore[t]);
+      for (const t of Object.keys(financialBefore))
+        expect(
+          bank.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(),
+        ).toEqual(financialBefore[t]);
+      expect(snapshotLocal().android).toEqual(secondaryBefore);
+      // Offline save does not call API/OIDC/PostgreSQL. The subsequent normal sync acknowledges N+1.
+      bank.saveTransaction({
+        ...input,
+        description: "C4_OPERATIONAL_B_OFFLINE",
+      });
+      expect(
+        bank.db
+          .prepare(
+            "SELECT count(*) AS n FROM sync_outbox WHERE state='pending'",
+          )
+          .get()!.n,
+      ).toBe(1);
+      owner.setForeground(true);
+      await owner.sync();
+      owner.setForeground(false);
+      expect(
+        (await pool.query("SELECT log_position FROM sync_vaults")).rows[0]
+          .log_position,
+      ).toBe("3");
+      expect(
+        (
+          await pool.query(
+            "SELECT device_seq FROM sync_commits ORDER BY log_position",
+          )
+        ).rows.map((r) => r.device_seq),
+      ).toEqual(["1", "2", "3"]);
+      expect(
+        bank.db
+          .prepare(
+            "SELECT count(*) AS n FROM sync_outbox WHERE state!='acknowledged'",
+          )
+          .get()!.n,
+      ).toBe(0);
+      await expect(secondary.sync()).rejects.toThrow("foreground_inactive");
+      secondary.setForeground(true);
+      await expect(secondary.sync()).rejects.toThrow("epoch_changed");
+      secondary.setForeground(false);
+      // More than nine commits and a multi-revision object catch text-ordered PostgreSQL ordinals.
+      const c1 = bank.listTransactions({ month: '2026-10' }).find(t => t.description === canary)!;
+      for (let i = 0; i < 11; i++) bank.saveTransaction({ ...input, id: c1.id, plannedAmount: 20 + i });
+      owner.setForeground(true); await owner.sync(); owner.setForeground(false);
+      const financialE2 = Object.fromEntries(Object.keys(financialTableTypes).map(t => [t, bank.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]));
+      // A physical post-activation backup retains E2 and the chain; restore selects a new operational E3.
+      const copy = "lion_active_backup_" + crypto.uuid().replaceAll("-", "");
+      const compose = fileURLToPath(
+        new URL("../../../tools/sync-dev/compose.yml", import.meta.url),
+      );
+      const dump = execFileSync(
+        "docker",
+        [
+          "compose",
+          "-f",
+          compose,
+          "exec",
+          "-T",
+          "postgres",
+          "pg_dump",
+          "-U",
+          "liondev",
+          "-Fc",
+          database,
+        ],
+        { maxBuffer: 32 * 1024 * 1024 },
+      );
+      await admin.query(`CREATE DATABASE ${copy}`);
+      try {
+        execFileSync(
+          "docker",
+          [
+            "compose",
+            "-f",
+            compose,
+            "exec",
+            "-T",
+            "postgres",
+            "pg_restore",
+            "--exit-on-error",
+            "-U",
+            "liondev",
+            "-d",
+            copy,
+          ],
+          { input: dump },
+        );
+        const restored = new pg.Pool({
+          connectionString: `postgresql://liondev:liondev@127.0.0.1:55432/${copy}`,
+        });
+        const audit = await restored.connect();
+        try {
+          await audit.query("BEGIN READ ONLY");
+          await verifyStagingBackup(audit, crypto);
+          await (
+            await import("./activationBackup")
+          ).verifyActivationBackup(audit, crypto);
+          await audit.query("COMMIT");
+        } finally {
+          audit.release();
+          await restored.end();
+        }
+      } finally {
+        await admin.query(`DROP DATABASE ${copy}`);
+      }
+      const epoch2 = environment.serverEpoch;
+      environment.serverEpoch = crypto.uuid();
+      const restore3 = crypto.uuid();
+      await pool.query("UPDATE sync_environment SET server_epoch=$1", [
+        environment.serverEpoch,
+      ]);
+      await pool.query(
+        "INSERT INTO sync_restores(restore_id,server_id,from_epoch,to_epoch,displaced_epoch,backup_manifest_sha256) VALUES($1,$2,$3,$4,$3,$5)",
+        [
+          restore3,
+          environment.serverId,
+          epoch2,
+          environment.serverEpoch,
+          "e".repeat(64),
+        ],
+      );
+      await pool.query(
+        "INSERT INTO sync_restore_vaults(restore_id,vault_id,source_epoch) VALUES($1,$2,$3)",
+        [restore3, oldVault(), epoch2],
+      );
+      // Exercise the actual controller used by native desktop UI, including explicit staging/activation separation.
+      await owner.prepareServerRecovery(true);
+      expect((await owner.status()).recoveryPhase).toBe("prepared");
+      expect(
+        (await pool.query("SELECT pin FROM sync_vaults")).rows[0].pin
+          .serverEpoch,
+      ).toBe(epoch2);
+      await owner.activateServerRecovery(true);
+      expect((await owner.status()).recoveryPhase).toBe("recovered");
+      const baseline3 = Number((await pool.query("SELECT log_position FROM sync_vaults")).rows[0].log_position);
+      expect(baseline3).toBeGreaterThan(9);
+      for (const [table, rows] of Object.entries(financialE2)) expect(bank.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(rows);
+      const c1Object = bank.db.prepare("SELECT object_id FROM sync_identity WHERE entity_type='transaction' AND local_id=?").get(c1.id)!.object_id;
+      const chain = (await pool.query("SELECT receipt FROM sync_commits WHERE envelope_text::jsonb->'operations'->0->>'objectId'=$1 ORDER BY log_position", [c1Object])).rows;
+      expect(chain).toHaveLength(12);
+      expect(new Set(chain.map(r => canonicalStringify(r.receipt.heads))).size).toBe(12);
+      expect(
+        (
+          await pool.query(
+            "SELECT from_epoch,to_epoch FROM sync_epoch_activations ORDER BY activated_at",
+          )
+        ).rows,
+      ).toEqual([
+        { from_epoch: epochA, to_epoch: epoch2 },
+        { from_epoch: epoch2, to_epoch: environment.serverEpoch },
+      ]);
+      owner.setForeground(true);
+      await owner.sync();
+      bank.saveTransaction({ ...input, description: 'C5_NORMAL_E3' });
+      await owner.sync();
+      owner.setForeground(false);
+      expect((await pool.query("SELECT log_position FROM sync_vaults")).rows[0].log_position).toBe(String(baseline3 + 1));
+      expect(
+        bank.db
+          .prepare("SELECT description FROM transactions")
+          .all()
+          .map((r) => r.description),
+      ).toContain("C4_OPERATIONAL_B_OFFLINE");
+      for (const table of [
+        "sync_epoch_activations",
+        "sync_commits",
+        "sync_vaults",
+        "sync_epoch_transitions",
+      ]) {
+        const text = JSON.stringify(
+          (await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t`)).rows,
+        );
+        for (const privateText of [canary, "C4_OPERATIONAL_B_OFFLINE", code, ...[...secrets.values.values()].map(value => crypto.encode(value)), 'RevisionPlaintext', 'C1_ARCHIVE_PRIVATE_CANARY'])
+          expect(text.includes(privateText)).toBe(false);
+      }
+    }, 60000);
 });

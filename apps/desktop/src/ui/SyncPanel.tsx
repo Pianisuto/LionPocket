@@ -59,6 +59,8 @@ export function SyncPanel({
     setError('');
     try {
       const result = await window.lionPocket.syncCommand!(action, args);
+      if (action === 'server-recovery-prepare' && (result as {code?:string}).code) setRecoveryCode((result as {code:string}).code);
+      if (action === 'server-recovery-confirm') {setRecoveryCode('');setConfirmedCode('');}
       if (action === 'recovery-generate')
         setRecoveryCode((result as { code: string }).code);
       if (action === 'recovery-confirm') {
@@ -95,6 +97,114 @@ export function SyncPanel({
         <strong>{syncActivityLabel[status.activity]}</strong>{!!status.sync?.pending && ` · ${status.sync.pending} alteração(ões) pendente(s)`}
       </p>
       {status.compatibilityMessage && <p role="alert">{status.compatibilityMessage}</p>}
+      {(status.recoveryPhase ||
+        (status.anchorRecoveryAvailable &&
+          status.compatibilityMessage?.includes("histórico"))) && (
+        <div>
+          <h4>
+            {status.recoveryPhase === "recovered"
+              ? "Sincronização recuperada"
+              : status.recoveryPhase === "prepared"
+                ? "Pronto para ativar"
+                : status.recoveryPhase === "activation_requested"
+                  ? "Ativando sincronização"
+                  : [
+                        "remote_active",
+                        "installing_local",
+                        "local_db_installed",
+                        "profile_installed",
+                        "finalizing",
+                      ].includes(status.recoveryPhase ?? "")
+                    ? "Finalizando neste aparelho"
+                    : status.recoveryPhase
+                      ? "Preparando recuperação"
+                      : "Servidor restaurado"}
+          </h4>
+          {!status.recoveryPhase && (
+            <>
+              <p>
+                Revise os dados deste aparelho e mantenha-o aberto durante a
+                recuperação.
+              </p>
+              <button
+                disabled={busy}
+                onClick={() => void run("server-recovery-prepare", [true])}
+              >
+                Preparar recuperação neste aparelho
+              </button>
+            </>
+          )}
+          {status.recoveryPhase &&
+            ![
+              "prepared",
+              "activation_requested",
+              "remote_active",
+              "installing_local",
+              "local_db_installed",
+              "profile_installed",
+              "finalizing",
+              "recovered",
+            ].includes(status.recoveryPhase) && (
+              <button
+                disabled={busy}
+                onClick={() => void run("server-recovery-prepare", [true])}
+              >
+                Continuar preparação
+              </button>
+            )}
+          {status.recoveryPhase === "recovery_pending_confirmation" &&
+            recoveryCode && (
+              <>
+                <p>
+                  Guarde seu código de recuperação: <code>{recoveryCode}</code>
+                </p>
+                <input
+                  aria-label="Confirme o código de recuperação do servidor"
+                  value={confirmedCode}
+                  onChange={(event) => setConfirmedCode(event.target.value)}
+                />
+                <button
+                  disabled={busy || confirmedCode !== recoveryCode}
+                  onClick={() =>
+                    void run("server-recovery-confirm", [confirmedCode])
+                  }
+                >
+                  Guardei e conferi o código
+                </button>
+              </>
+            )}
+          {status.recoveryPhase === "prepared" && (
+            <>
+              <p>
+                Depois desta etapa, o servidor passará a usar os dados
+                reconstruídos deste aparelho como nova base de sincronização.
+              </p>
+              <button
+                className="button button--primary"
+                disabled={busy}
+                onClick={() => void run("server-recovery-activate", [true])}
+              >
+                Ativar sincronização recuperada
+              </button>
+            </>
+          )}
+          {[
+            "activation_requested",
+            "remote_active",
+            "installing_local",
+            "local_db_installed",
+            "profile_installed",
+            "finalizing",
+          ].includes(status.recoveryPhase ?? "") && (
+            <button
+              disabled={busy}
+              onClick={() => void run("server-recovery-activate")}
+            >
+              Continuar finalização
+            </button>
+          )}
+        </div>
+      )}
       {status.lastCompletedAt && <p>Último sync concluído: {new Date(status.lastCompletedAt).toLocaleString('pt-BR')}</p>}
       {status.phase === 'bound' && <p>Seus dados são salvos primeiro neste aparelho. A sincronização acontece enquanto o aplicativo está ativo.</p>}
       {status.phase === 'local' && !setup && <button className="button button--primary" onClick={() => setSetup(true)}>Configurar sincronização</button>}
@@ -233,7 +343,7 @@ export function SyncPanel({
           </button>
         </>
       )}
-      {status.phase === 'bound' && (
+      {status.phase === 'bound' && (!status.recoveryPhase || status.recoveryPhase === 'recovered') && (
         <>
           {status.owner && (
             <>

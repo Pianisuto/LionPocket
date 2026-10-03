@@ -201,4 +201,24 @@ describe('one foreground coordinator per bank', () => {
     await vi.advanceTimersByTimeAsync(60000);
     expect(cycle).not.toHaveBeenCalled();
   });
+  it('recovery waits for an aborted pass to finish its profile write', async () => {
+    const gate = deferred();
+    let profileSaved = false;
+    const { c, cycle } = setup(vi.fn(async () => {
+      await gate.promise;
+      profileSaved = true;
+    }));
+    c.setForeground(true);
+    await vi.advanceTimersByTimeAsync(0);
+    let settled = false;
+    const stopped = c.cancelAndWait().then(() => { settled = true; });
+    expect(cycle.mock.calls[0][1].aborted).toBe(true);
+    expect(settled).toBe(false);
+    gate.resolve();
+    await stopped;
+    expect(profileSaved).toBe(true);
+    expect(c.running).toBe(false);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(cycle).toHaveBeenCalledTimes(1);
+  });
 });

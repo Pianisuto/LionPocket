@@ -130,6 +130,12 @@ class LocalFilesModule(private val context: ReactApplicationContext) : ReactCont
       promise.resolve(result)
     } catch (error: Exception) { promise.reject("LOCAL_FILE", error.message, error) } }
   }
+  @ReactMethod fun fingerprintBackup(name: String, seal: Boolean, promise: Promise) {
+    executor.execute { try {
+      val (source, digest) = DurableBackupFile.fingerprint(directory("backups"), name, seal)
+      val result = descriptor(source, "backups"); result.putString("sha256", digest); promise.resolve(result)
+    } catch (_: Exception) { promise.reject("EPOCH_BACKUP", "epoch_backup_invalid") } }
+  }
   @ReactMethod fun copyBackup(name: String, promise: Promise) {
     executor.execute { try {
       val source = file("backups", name); require(source.isFile)

@@ -4,6 +4,9 @@ import { createRoot } from 'react-dom/client';
 import { SyncPanel } from '../../apps/desktop/src/ui/SyncPanel';
 import '../../apps/desktop/src/index.css';
 let status: { activity: string; phase: string; endpoint: string; discovered: { oidc: { issuer: string } } | null; sync: null; reviews: never[]; quarantine: never[]; devices: never[]; owner: boolean; invitation: string; lastCompletedAt: string | null } = { activity: 'local', phase: 'local', endpoint: '', discovered: null, sync: null, reviews: [], quarantine: [], devices: [], owner: false, invitation: '', lastCompletedAt: null };
+const recovery = new URLSearchParams(window.location.search).get('recovery');
+if (recovery) Object.assign(status, {phase:'bound',activity:recovery==='recovered'?'synced':'paused',owner:true,anchorRecoveryAvailable:true,
+  recoveryPhase:recovery,compatibilityMessage:null,endpoint:'https://sync.fixture.test',discovered:{oidc:{issuer:'https://auth.fixture.test/realms/lionpocket'}}});
 const fixtureRecovery = 'LP1.VISUAL_FIXTURE_ONLY_NEVER_A_REAL_RECOVERY';
 const api = {
   syncStatus: async () => status,

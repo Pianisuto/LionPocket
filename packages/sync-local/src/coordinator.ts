@@ -164,6 +164,16 @@ export class SyncCoordinator {
     this.waiters.forEach((w) => w.reject(new Error('sync_paused')));
     this.waiters = [];
   }
+  /** Recovery excludes even the tail of an aborted pass, including its profile save. */
+  async cancelAndWait() {
+    this.cancel();
+    if (!this.running) return;
+    await new Promise<void>((resolve) => {
+      const unsubscribe = this.subscribe(() => {
+        if (!this.running) { unsubscribe(); resolve(); }
+      });
+    });
+  }
   dispose() {
     this.disposed = true;
     this.active = false;

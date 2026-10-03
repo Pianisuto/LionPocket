@@ -515,7 +515,7 @@ export class ManualSync {
     }
     await this.db.run(appliedCursor());
   }
-  private async pull(token:string):Promise<void>{
+  async pull(token:string):Promise<void>{
     let more = true;
     while (more) {
       const state = await this.state();

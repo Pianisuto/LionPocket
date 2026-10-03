@@ -245,7 +245,7 @@ export function SyncPanel({
           />
         </>
       )}
-      {status.phase === 'bound' && (
+      {status.phase === 'bound' && (!status.recoveryPhase || status.recoveryPhase === 'recovered') && (
         <>
           {status.owner && <Button label="Adicionar dispositivo" onPress={() => setAdding(!adding)} />}
           {status.owner && adding && (
@@ -522,6 +522,29 @@ export function SyncPanel({
           </>}
         </>
       )}
+      {(status.recoveryPhase || (status.anchorRecoveryAvailable && status.compatibilityMessage?.includes('histórico'))) && <View>
+        <Text style={styles.muted}>{status.recoveryPhase === 'recovered' ? 'Sincronização recuperada' : status.recoveryPhase === 'prepared' ? 'Pronto para ativar' :
+          status.recoveryPhase === 'activation_requested' ? 'Ativando sincronização' :
+          ['remote_active','installing_local','local_db_installed','profile_installed','finalizing'].includes(status.recoveryPhase ?? '') ? 'Finalizando neste aparelho' :
+          status.recoveryPhase ? 'Preparando recuperação' : 'Servidor restaurado'}</Text>
+        {(!status.recoveryPhase || ['identity_reserved','secrets_prepared','recovery_pending_confirmation','recovery_confirmed','staging','staged'].includes(status.recoveryPhase)) &&
+          <Button label="Preparar recuperação neste aparelho" disabled={busy} onPress={() => act(async c => {
+            const result = await c.prepareServerRecovery(true); if ('code' in result) setRecoveryCode(result.code);
+          })} />}
+        {status.recoveryPhase === 'recovery_pending_confirmation' && recoveryCode && <>
+          <Text>Guarde seu código de recuperação: {recoveryCode}</Text>
+          <TextInput accessibilityLabel="Confirme o código de recuperação do servidor" value={confirmedCode} onChangeText={setConfirmedCode} />
+          <Button label="Guardei e conferi o código" disabled={busy || confirmedCode !== recoveryCode} onPress={() => act(async c => {
+            await c.confirmServerRecovery(confirmedCode);setRecoveryCode('');setConfirmedCode('');
+          })} />
+        </>}
+        {status.recoveryPhase === 'prepared' && <>
+          <Text>Depois desta etapa, o servidor passará a usar os dados reconstruídos deste aparelho como nova base de sincronização.</Text>
+          <Button label="Ativar sincronização recuperada" tone="primary" disabled={busy} onPress={() => act(c => c.activateServerRecovery(true))} />
+        </>}
+        {['activation_requested','remote_active','installing_local','local_db_installed','profile_installed','finalizing'].includes(status.recoveryPhase ?? '') &&
+          <Button label="Continuar finalização" disabled={busy} onPress={() => act(c => c.activateServerRecovery(false))} />}
+      </View>}
       {status.compatibilityMessage && <Text accessibilityRole="alert">{status.compatibilityMessage}</Text>}
       {!!error && <Text accessibilityRole="alert">{error}</Text>}
     </View>

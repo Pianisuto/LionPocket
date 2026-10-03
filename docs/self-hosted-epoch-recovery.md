@@ -2,13 +2,11 @@
 
 ## Estado desta implementação
 
-**Preparação operacional B retomável até prepared; B continua sem ativação.**
+**O aparelho âncora já pode preparar, ativar e voltar ao sync normal.**
 
-Este incremento parte exatamente de `cbd7067644c63e6c09802b208731b43d239c0031` (main após PR #11). O plano causal v2 anterior agora pode produzir identidade, registry, chave, recovery, staging, manifesto e transition B reais. O staging é isolado das tabelas ativas. Nenhum binding/profile ativo, financeiro, outbox A ou coordinator é substituído.
+O incremento de activation parte exatamente de `a42613567d2748db46b76c6aaef7e1d92cf7c5ba` (main após PR #12). A preparação abaixo continua isolada até uma confirmação explícita do usuário. Depois dessa confirmação, uma intenção assinada e durável seleciona a geração preparada em uma transação PostgreSQL; uma saga separada instala o DAG, binding e profile no anchor e só libera foreground depois do primeiro pull normal. Discovery anuncia `activationAvailable:true` como capacidade do protocolo, sem afirmar que um cofre específico está pronto.
 
-O material aleatório irreproduzível é persistido como um único `EpochPreparationSecretBundle` privado no SecretStore, relido e verificado **antes** da reserva pública no SQLite. Secrets operacionais são materializações idempotentes desse bundle; crash após sua durabilidade retoma exatamente a mesma B. Não há transação multi-secret, derivação de chaves a partir de A ou secrets no journal público. Sagas do draft anterior sem bundle são marcadas como `legacy_preparation_blocked`, sem inventar material perdido.
-
-O caminho desde o preparation bundle durável possui retry testado até `prepared`, inclusive com fechamento/reabertura do SQLite e novos adapters. Discovery informa staging disponível e mantém `activationAvailable:false`. Helpers continuam ações explícitas, sem UX nova ou foreground automático. A permanece a geração selecionada e bloqueada pelo epoch mismatch. Segundo aparelho/C3 permanece intocado. As evidências usam fixtures descartáveis; não são alegação de recuperação operacional E1→E2 completa.
+O preparation bundle privado permanece disponível durante toda a finalização; suas materializações idempotentes e as proteções legacy continuam válidas. Archives antigos, plano/mapping, ciphertext preparado e journal permanecem imutáveis. Não há rollback automático após activation nem migração do segundo aparelho/C3. Veja [contrato, sequência de instalação e evidências de crash](self-hosted-anchor-activation-validation.md). As seções seguintes documentam os contratos da preparação; não autorizam reconectar outros aparelhos.
 
 ## Fronteira de segurança
 

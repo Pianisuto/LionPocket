@@ -555,7 +555,7 @@ export async function epochStaging(
     commitCount: row.commit_count,
     operationCount: row.operation_count,
     batchCount: row.batch_count,
-    activationAvailable: false,
+    activationAvailable: true,
     readyForActivation:
       row.state === "prepared" &&
       permission.to_epoch === environment.serverEpoch,
@@ -582,7 +582,7 @@ export async function stagingManifest(
     const rows = (
       await tx.query(
         `SELECT ordinal::text,batch_ordinal::text,commit_id::text,envelope_text,digest FROM sync_epoch_staging_commits
-      WHERE restore_id=$1 AND vault_id=$2 AND ordinal>$3 ORDER BY ordinal LIMIT 100`,
+      WHERE restore_id=$1 AND vault_id=$2 AND ordinal>$3 ORDER BY sync_epoch_staging_commits.ordinal LIMIT 100`,
         [scope.restoreId, scope.vaultId, cursor],
       )
     ).rows;

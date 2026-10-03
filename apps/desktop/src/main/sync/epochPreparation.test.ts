@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import sodium from "libsodium-wrappers-sumo";
 import {
+  requestAnchorActivation,
+  resumeAnchorActivation,
+  type AnchorActivationOptions,
   DeviceProvisioning,
   ProvisioningCrypto,
   authorizeEpochRecovery,
@@ -76,6 +79,7 @@ vi.mock("electron", async () => {
 });
 import { LionPocketDatabase } from "../database";
 import {
+  inspectEpochActivationCheckpoint,
   createEpochAnchorBackup,
   inspectEpochAnchorBackup,
 } from "./epochBackup";
@@ -357,6 +361,54 @@ function mockStatus(r: EpochStagingRequest) {
     batchCount: counts.batchCount ?? p.batchOrdinal ?? "0",
     activationAvailable: false,
     readyForActivation: r.action === "prepare",
+  };
+}
+async function mockActivationOptions(
+  f: Awaited<ReturnType<typeof fixture>>,
+  o: Awaited<ReturnType<typeof plan>>,
+  dialect: "desktop" | "android" = "desktop",
+): Promise<AnchorActivationOptions> {
+  let profile = structuredClone(f.client.profile),
+    record:
+      import("@lionpocket/sync-protocol").EpochActivationRecord | undefined;
+  return {
+    ...o,
+    dialect,
+    endpoint: "https://fixture.invalid",
+    transport: async (action, r) => {
+      if (action === "status" && !record) return { state: "prepared" };
+      const row = f.sqlite
+        .prepare(
+          "SELECT profile_b_json,manifest_json FROM recovery_b_saga WHERE restore_id=?",
+        )
+        .get(o.restoreId)!;
+      const b = JSON.parse(String(row.profile_b_json)),
+        m = JSON.parse(String(row.manifest_json));
+      const { signature, ...unsigned } = r;
+      void signature;
+      record ??= {
+        ...unsigned,
+        requestSha256: f.crypto.hash(canonicalStringify(r)),
+        trustPinSha256: f.crypto.hash(canonicalStringify(b.pin)),
+        logPosition: m.commitCount,
+        commitCount: m.commitCount,
+        operationCount: m.operationCount,
+      };
+      return { state: "active", activation: record };
+    },
+    inspectBackup: inspectEpochAnchorBackup,
+    checkpoint: () =>
+      createEpochAnchorBackup(
+        f.sqlite,
+        join(f.directory, randomUUID() + ".sqlite"),
+      ),
+    inspectCheckpoint: (path) =>
+      inspectEpochActivationCheckpoint(path, o.restoreId),
+    saveProfile: async (p) => {
+      profile = structuredClone(p);
+    },
+    loadProfile: async () => profile,
+    firstPull: async () => undefined,
   };
 }
 // Recovery fixtures use the production memory-hard KDF while the full suite runs in parallel.
@@ -1226,6 +1278,393 @@ describe("operational B preparation remains isolated", () => {
       expect(
         branches.filter((x) => x.revision.action === "delete"),
       ).toHaveLength(deleted ? 1 : 0);
+      const financialBefore = f.snapshot();
+      await requestAnchorActivation(await mockActivationOptions(f, o), true);
+      const mapped = f.sqlite
+        .prepare(
+          "SELECT revision_b FROM recovery_revision_mapping WHERE revision_a=?",
+        )
+        .get(base.revision_id)!;
+      expect(
+        f.sqlite
+          .prepare(
+            "SELECT base_revision_id FROM sync_conflicts WHERE object_id=? AND resolution_id IS NULL",
+          )
+          .get(base.object_id)!.base_revision_id,
+      ).toBe(mapped.revision_b);
+      expect(
+        f.sqlite
+          .prepare("SELECT count(*) AS n FROM sync_heads WHERE object_id=?")
+          .get(base.object_id)!.n,
+      ).toBe(2);
+      expect(
+        f.sqlite
+          .prepare(
+            "SELECT count(*) AS n FROM sync_tombstones WHERE object_id=?",
+          )
+          .get(base.object_id)!.n,
+      ).toBe(deleted ? 1 : 0);
+      for (const table of Object.keys(financialTableTypes))
+        expect(f.snapshot()[table]).toEqual(financialBefore[table]);
     },
   );
 }, 30000);
+
+describe("anchor activation installation on real adapters", () => {
+  for (const dialect of ["desktop", "android"] as const) {
+    it(`${dialect}: durable activation, exact B graph, stable financial rows and next device sequence`, async () => {
+      const f = await fixture(dialect),
+        old = await oldRecovery(f),
+        o = await plan(f);
+      await prepareOperationalB({ ...o, previousRecovery: old.recovery });
+      await stageOperationalB({
+        ...o,
+        previousTrustedTransition: null,
+        transport: async (_action, request) => mockStatus(request),
+      });
+      const before = f.snapshot();
+      let active:
+        import("@lionpocket/sync-protocol").EpochActivationRecord | undefined;
+      let profile = structuredClone(f.client.profile);
+      const options: AnchorActivationOptions = {
+        ...o,
+        dialect,
+        endpoint: "https://fixture.invalid",
+        transport: async (action, request) => {
+          if (!active && action === "status") return { state: "prepared" };
+          const { signature, ...unsigned } = request;
+          void signature;
+          const row = f.sqlite
+            .prepare("SELECT profile_b_json,manifest_json FROM recovery_b_saga")
+            .get()!;
+          const b = JSON.parse(String(row.profile_b_json)),
+            manifest = JSON.parse(String(row.manifest_json));
+          active ??= {
+            ...unsigned,
+            requestSha256: f.crypto.hash(canonicalStringify(request)),
+            trustPinSha256: f.crypto.hash(canonicalStringify(b.pin)),
+            logPosition: manifest.commitCount,
+            commitCount: manifest.commitCount,
+            operationCount: manifest.operationCount,
+          };
+          return { state: "active", activation: active };
+        },
+        inspectBackup: inspectEpochAnchorBackup,
+        checkpoint: () =>
+          createEpochAnchorBackup(
+            f.sqlite,
+            join(f.directory, randomUUID() + ".sqlite"),
+          ),
+        inspectCheckpoint: (path) =>
+          inspectEpochActivationCheckpoint(path, o.restoreId),
+        saveProfile: async (value) => {
+          profile = structuredClone(value);
+        },
+        loadProfile: async () => profile,
+        firstPull: async () => undefined,
+      };
+      await expect(requestAnchorActivation(options, false)).rejects.toThrow(
+        "confirmation_required",
+      );
+      await requestAnchorActivation(options, true);
+      expect(
+        f.sqlite.prepare("SELECT phase FROM recovery_activation_saga").get()!
+          .phase,
+      ).toBe("recovered");
+      expect(profile.pin.serverEpoch).toBe(f.acceptedAuthorization.toEpoch);
+      const after = f.snapshot();
+      for (const table of [
+        ...Object.keys(financialTableTypes),
+        "sync_identity",
+        "sync_series",
+        "sync_slots",
+        "sync_import_provenance",
+        "sync_aliases",
+      ])
+        expect(after[table]).toEqual(before[table]);
+      expect(after.sync_inbox).toHaveLength(2);
+      expect(after.sync_inbox.every((row) => row.state === "applied")).toBe(
+        true,
+      );
+      expect(after.sync_outbox).toEqual([]);
+      expect(after.sync_local_state[0]).toMatchObject({
+        device_seq: "2",
+        local_seq: "2",
+        received_cursor: "2",
+        applied_cursor: "2",
+        pull_upper_bound: null,
+      });
+      expect(after.sync_bindings[0].binding_id).not.toBe(
+        before.sync_bindings[0].binding_id,
+      );
+      await expect(cancelOperationalB(o)).rejects.toThrow(
+        "requires_finalization",
+      );
+      await expect(f.db.run(cancelAnchorPlan(o.restoreId))).rejects.toThrow(
+        "requires_finalization",
+      );
+      await f.save("C4_OFFLINE_AFTER_RECOVERY");
+      expect(
+        f.sqlite.prepare("SELECT count(*) AS n FROM sync_outbox").get()!.n,
+      ).toBe(1);
+      const b = new DeviceProvisioning(profile, f.client.secrets, f.crypto);
+      const { ManualSync } = await import("@lionpocket/sync-local");
+      const engine = new ManualSync(
+        f.db,
+        b,
+        sodium,
+        dialect,
+        "https://fixture.invalid",
+        {
+          request: async () => {
+            throw new Error("offline");
+          },
+        },
+      );
+      const commit = f.sqlite
+        .prepare("SELECT commit_id FROM sync_outbox")
+        .get()!.commit_id;
+      expect(
+        decodeCommit(encodeUtf8(await engine.prepare(String(commit))))
+          .deviceSeq,
+      ).toBe("3");
+    }, 30000);
+  }
+});
+
+describe("activation crash resumption", () => {
+  it.each(["manifestSha256", "transitionSha256", "trustPinSha256", "serverId", "vaultId", "toEpoch", "anchorDeviceId", "commitCount"])("rejects forged active %s before local installation", async (field) => {
+    const f = await fixture(), old = await oldRecovery(f), o = await plan(f);
+    await prepareOperationalB({ ...o, previousRecovery: old.recovery });
+    await stageOperationalB({ ...o, previousTrustedTransition: null, transport: async (_action, r) => mockStatus(r) });
+    const before = f.snapshot(), options = await mockActivationOptions(f, o), transport = options.transport;
+    options.transport = async (action, request) => {
+      const response = await transport(action, request) as import('@lionpocket/sync-protocol').EpochActivationStatus;
+      if (response.state !== 'active') return response;
+      return { ...response, activation: { ...response.activation, [field]: field === 'commitCount' ? '999' : field.endsWith('Sha256') ? f.crypto.hash('forged') : f.crypto.uuid() } };
+    };
+    await expect(requestAnchorActivation(options, true)).rejects.toThrow(/activation_mismatch|invalid_epoch_activation/);
+    for (const table of [...Object.keys(financialTableTypes), 'sync_revisions', 'sync_heads', 'sync_inbox', 'sync_outbox', 'sync_bindings', 'sync_identity']) expect(f.snapshot()[table]).toEqual(before[table]);
+    expect(f.sqlite.prepare('SELECT phase FROM recovery_activation_saga').get()!.phase).toBe('activation_requested');
+    await resumeAnchorActivation({ ...options, transport });
+    expect(f.sqlite.prepare('SELECT phase FROM recovery_activation_saga').get()!.phase).toBe('recovered');
+  }, 30000);
+  for (const dialect of ["desktop", "android"] as const) {
+    it.each([
+      "request_persisted",
+      "remote_response",
+      "remote_active",
+      "before_checkpoint",
+      "before_sqlite",
+      "during_sqlite",
+      "after_sqlite",
+      "before_profile",
+      "during_profile",
+      "after_profile",
+      "before_coordinator",
+      "before_first_pull",
+      "during_first_pull",
+      "after_first_pull",
+    ])(
+      `${dialect}: restart converges after %s`,
+      async (point) => {
+        const f = await fixture(dialect),
+          old = await oldRecovery(f),
+          o = await plan(f);
+        await prepareOperationalB({ ...o, previousRecovery: old.recovery });
+        await stageOperationalB({
+          ...o,
+          previousTrustedTransition: null,
+          transport: async (_action, r) => mockStatus(r),
+        });
+        const before = f.snapshot();
+        let profile = structuredClone(f.client.profile),
+          record:
+            | import("@lionpocket/sync-protocol").EpochActivationRecord
+            | undefined;
+        let failed = false,
+          activationCalls = 0;
+        const requests: string[] = [];
+        const opts = (): AnchorActivationOptions => ({
+          ...o,
+          db: f.db,
+          deviceA: f.client,
+          dialect,
+          endpoint: "https://fixture.invalid",
+          transport: async (action, r) => {
+            requests.push(canonicalStringify(r));
+            if (action === "status" && !record) return { state: "prepared" };
+            if (action === "activate") activationCalls++;
+            const saga = f.sqlite
+              .prepare(
+                "SELECT profile_b_json,manifest_json FROM recovery_b_saga",
+              )
+              .get()!;
+            const b = JSON.parse(String(saga.profile_b_json)),
+              m = JSON.parse(String(saga.manifest_json));
+            const { signature, ...unsigned } = r;
+            void signature;
+            record ??= {
+              ...unsigned,
+              requestSha256: f.crypto.hash(canonicalStringify(r)),
+              trustPinSha256: f.crypto.hash(canonicalStringify(b.pin)),
+              logPosition: m.commitCount,
+              commitCount: m.commitCount,
+              operationCount: m.operationCount,
+            };
+            return { state: "active", activation: record };
+          },
+          inspectBackup: inspectEpochAnchorBackup,
+          checkpoint: () =>
+            createEpochAnchorBackup(
+              f.sqlite,
+              join(f.directory, randomUUID() + ".sqlite"),
+            ),
+          inspectCheckpoint: (path) =>
+            inspectEpochActivationCheckpoint(path, o.restoreId),
+          saveProfile: async (p) => {
+            if (point === "during_profile" && !failed) {
+              failed = true;
+              throw new Error("client_crash");
+            }
+            profile = structuredClone(p);
+          },
+          loadProfile: async () => profile,
+          firstPull: async () => {
+            if (point === "during_first_pull" && !failed) {
+              failed = true;
+              throw new Error("client_crash");
+            }
+          },
+          fault: (step) => {
+            if (
+              point === "during_sqlite" &&
+              step === "before_sqlite" &&
+              !failed
+            ) {
+              failed = true;
+              f.sqlite.exec(
+                "CREATE TEMP TRIGGER activation_fault BEFORE INSERT ON main.sync_revision_origin BEGIN SELECT RAISE(ABORT,'client_crash'); END",
+              );
+            }
+            if (step === point && !failed) {
+              failed = true;
+              throw new Error("client_crash");
+            }
+          },
+        });
+        await expect(requestAnchorActivation(opts(), true)).rejects.toThrow(
+          "client_crash",
+        );
+        const reserved = String(
+          f.sqlite
+            .prepare("SELECT request_text FROM recovery_activation_saga")
+            .get()!.request_text,
+        );
+        if (
+          [
+            "request_persisted",
+            "remote_response",
+            "remote_active",
+            "before_checkpoint",
+            "before_sqlite",
+            "during_sqlite",
+          ].includes(point)
+        ) {
+          expect(
+            f.sqlite.prepare("SELECT server_epoch FROM sync_local_state").get()!
+              .server_epoch,
+          ).toBe(f.client.profile.pin.serverEpoch);
+          expect(f.snapshot().sync_outbox).toEqual(before.sync_outbox);
+        }
+        await f.restart(f.client.secrets);
+        await resumeAnchorActivation(opts());
+        expect(
+          f.sqlite.prepare("SELECT phase FROM recovery_activation_saga").get()!
+            .phase,
+        ).toBe("recovered");
+        expect(profile.pin.serverEpoch).toBe(f.acceptedAuthorization.toEpoch);
+        expect(new Set(requests)).toEqual(new Set([reserved]));
+        expect(activationCalls).toBe(1);
+        for (const table of Object.keys(financialTableTypes))
+          expect(f.snapshot()[table]).toEqual(before[table]);
+        expect(f.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+        expect(
+          f.sqlite
+            .prepare("SELECT count(*) AS n FROM recovery_archive_sync_outbox")
+            .get()!.n,
+        ).toBe(before.sync_outbox.length);
+      },
+      30000,
+    );
+  }
+});
+
+describe("stable logical sidecars during activation", () => {
+  it("preserves nonempty series/slots/import provenance/aliases record for record", async () => {
+    const f = await fixture();
+    const recurring = f.bank!.saveRecurringExpense({
+      kind: "expense",
+      description: "RECURRING_STABLE_IDENTITY",
+      plannedAmount: 42,
+      dueDay: 8,
+      startMonth: "2026-10",
+      active: true,
+    });
+    f.bank!.ensureRecurringForMonth("2026-10");
+    const slot = f.sqlite
+      .prepare(
+        "SELECT id FROM transactions WHERE source_type='recurring' AND source_id=? LIMIT 1",
+      )
+      .get(recurring.id)!;
+    f.bank!.saveTransaction({
+      ...input,
+      id: String(slot.id),
+      description: "PROMOTED_STABLE_SLOT",
+    });
+    const id = f.sqlite
+      .prepare("SELECT local_id,object_id FROM sync_identity LIMIT 1")
+      .get()!;
+    f.sqlite
+      .prepare("INSERT INTO sync_aliases VALUES(?,?)")
+      .run(randomUUID(), id.object_id);
+    await f.db.run(
+      (function* (): SqlWorkflow {
+        yield sql(
+          "UPDATE transactions SET source_type='imported',source_id=? WHERE id=?",
+          ["lp1:" + "a".repeat(64), String(id.local_id)],
+        );
+        yield sql("INSERT INTO sync_import_provenance VALUES(?,?,NULL)", [
+          String(id.local_id),
+          "a".repeat(64),
+        ]);
+      })(),
+    );
+    const old = await oldRecovery(f),
+      o = await plan(f);
+    await prepareOperationalB({ ...o, previousRecovery: old.recovery });
+    await stageOperationalB({
+      ...o,
+      previousTrustedTransition: null,
+      transport: async (_action, r) => mockStatus(r),
+    });
+    const before = f.snapshot();
+    for (const table of [
+      "sync_series",
+      "sync_slots",
+      "sync_import_provenance",
+      "sync_aliases",
+    ])
+      expect(before[table].length).toBeGreaterThan(0);
+    await requestAnchorActivation(await mockActivationOptions(f, o), true);
+    for (const table of [
+      ...Object.keys(financialTableTypes),
+      "sync_identity",
+      "sync_series",
+      "sync_slots",
+      "sync_import_provenance",
+      "sync_aliases",
+    ])
+      expect(f.snapshot()[table]).toEqual(before[table]);
+  }, 30000);
+});

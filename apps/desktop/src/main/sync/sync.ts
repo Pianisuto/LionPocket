@@ -1,3 +1,4 @@
+import { createEpochAnchorBackup, inspectEpochAnchorBackup, inspectEpochActivationCheckpoint } from './epochBackup';
 import { savePublicProfile } from './publicProfile';
 import { desktopForeground } from './foreground';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
@@ -41,6 +42,11 @@ export async function registerSyncController(bank: LionPocketDatabase) {
           },
           save: (value) => savePublicProfile(profilePath, value),
         },
+        epochBackup: {
+          create: () => createEpochAnchorBackup(bank.db, join(directory, `recovery-${randomUUID()}.sqlite`)),
+          inspect: inspectEpochAnchorBackup,
+          inspectCheckpoint: inspectEpochActivationCheckpoint,
+        },
         backup: async () => {
           const target = join(directory, `pre-binding-${randomUUID()}.sqlite`);
           bank.db.prepare('VACUUM INTO ?').run(target);
@@ -52,6 +58,9 @@ export async function registerSyncController(bank: LionPocketDatabase) {
             clientId: e.oidc.desktopClientId,
             redirectUri: e.oidc.desktopRedirect,
           }, (url) => shell.openExternal(url)),
+      });
+      await beta.resumeRecoveryOnStartup().catch(() => {
+        /* An incomplete saga blocks foreground eligibility. Local use and explicit finalization remain available. */
       });
       const removeWrite = bank.onLocalSyncWrite(() =>
         beta.localWriteCommitted(),
@@ -93,6 +102,12 @@ export async function registerSyncController(bank: LionPocketDatabase) {
         throw new Error('Invalid sync action.');
       const c = await get();
       switch (action) {
+        case 'server-recovery-prepare':
+          return c.prepareServerRecovery(args[0] === true);
+        case 'server-recovery-confirm':
+          return c.confirmServerRecovery(String(args[0]));
+        case 'server-recovery-activate':
+          return c.activateServerRecovery(args[0] === true);
         case 'catalog-batch':
           return c.preserveCatalogBatch(String(args[0]), args[1] === true);
         case 'reconnect':

@@ -1,3 +1,4 @@
+import { mobileEpochBackup } from './epochBackup';
 import { NativeModules } from "react-native";
 import { SyncController, type SyncSaved } from "@lionpocket/sync-local";
 import { onLocalSyncWrite } from "../db/syncWriters";
@@ -39,12 +40,16 @@ export function syncController(): Promise<SyncController> {
             );
           },
         },
+        epochBackup: mobileEpochBackup(db),
         backup: async () => {
           const f = await localFiles.prepareFile("backups", "sqlite");
           await db.executeAsync("VACUUM INTO ?", [f.path]);
           return f.path;
         },
         login: async (e) => androidOidc(e.oidc),
+      });
+      await beta.resumeRecoveryOnStartup().catch(() => {
+        /* An incomplete saga excludes foreground; local financial access stays available. */
       });
       onLocalSyncWrite(db, () => beta.localWriteCommitted());
       return beta;

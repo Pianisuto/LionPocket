@@ -107,7 +107,7 @@ export async function epochRecovery(
   if (previous && canonicalStringify(previous.authorization_envelope) === canonicalStringify(authorization) &&
       canonicalStringify(previous.known_grants) === canonicalStringify(knownGrants)) {
     await sealRestoredGeneration(tx, vaultId, environment.serverEpoch);
-    return { state: 'authorized_awaiting_baseline', activationAvailable: false, authorization: previous.authorization_envelope };
+    return { state: 'authorized_awaiting_baseline', activationAvailable: true, authorization: previous.authorization_envelope };
   }
   if (row.consumed) throw new Error('replay');
   if (!row.fresh) throw new Error('epoch_challenge_expired');
@@ -119,5 +119,5 @@ export async function epochRecovery(
   );
   await tx.query("UPDATE sync_restore_vaults SET state='authorized_awaiting_baseline' WHERE restore_id=$1 AND vault_id=$2", [restored.restore_id, vaultId]);
   await sealRestoredGeneration(tx, vaultId, environment.serverEpoch);
-  return { state: 'authorized_awaiting_baseline', activationAvailable: false, authorization };
+  return { state: 'authorized_awaiting_baseline', activationAvailable: true, authorization };
 }
