@@ -375,6 +375,10 @@ export function cancelAnchorPlan(restoreId: string): SqlWorkflow {
   return recoveryWorkflow(cancelAnchorPlanWorkflow(restoreId));
 }
 function* cancelAnchorPlanWorkflow(restoreId: string): SqlWorkflow {
+  if ((yield sql("SELECT name FROM sqlite_master WHERE name='recovery_activation_saga'")).length &&
+      (yield sql('SELECT 1 FROM recovery_activation_saga WHERE restore_id=?', [restoreId])).length)
+    throw new Error('recovery_activated_requires_finalization');
+
   assertUuid(restoreId, '4');
   const [journal] = yield sql('SELECT * FROM recovery_journal WHERE restore_id=?', [restoreId]);
   if (!journal) throw new Error('recovery_attempt_missing');

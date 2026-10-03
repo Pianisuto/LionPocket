@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import pg from "pg";
 import sodium from "libsodium-wrappers-sumo";
 import { ProvisioningCrypto } from "@lionpocket/sync-local";
+import { verifyActivationBackup } from './activationBackup';
 import { verifyStagingBackup } from "./stagingBackup";
 const database = process.argv[2];
 if (!database || !/^lion_sync$|^lp_verify_sync_[a-f0-9]{32}$/.test(database))
@@ -18,7 +19,9 @@ try {
   await sodium.ready;
   tx = await pool.connect();
   await tx.query("BEGIN READ ONLY");
-  await verifyStagingBackup(tx, new ProvisioningCrypto(sodium));
+  const crypto = new ProvisioningCrypto(sodium);
+  await verifyStagingBackup(tx, crypto);
+  if ((await tx.query("SELECT to_regclass('sync_epoch_activations') AS table")).rows[0].table) await verifyActivationBackup(tx, crypto);
   await tx.query("COMMIT");
   console.log("Staging signatures and public graph verified.");
 } catch {

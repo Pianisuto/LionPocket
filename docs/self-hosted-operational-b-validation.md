@@ -1,5 +1,7 @@
 # Evidência: preparação operacional B crash-safe
 
+Esta página registra a evidência histórica do PR #12. A activation posterior está documentada em [activation do anchor](self-hosted-anchor-activation-validation.md); os limites abaixo referem-se ao HEAD daquele PR.
+
 Base exata: `cbd7067644c63e6c09802b208731b43d239c0031`. Fixtures sintéticas; nenhum dado/cofre de usuário, Vault ou geração ativa foi migrado.
 
 ## Durabilidade e cancelamento

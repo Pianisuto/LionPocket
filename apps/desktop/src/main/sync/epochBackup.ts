@@ -35,3 +35,14 @@ export async function inspectEpochAnchorBackup(path: string): Promise<AnchorBack
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return { sha256: hash.digest('base64url'), integrity: 'ok', bindingPinJson, foreignKeyViolations: 0 };
 }
+
+/** Post-activation evidence must include the durable remote confirmation, not just a pre-preparation backup. */
+export async function inspectEpochActivationCheckpoint(path: string, restoreId: string) {
+  const inspection = await inspectEpochAnchorBackup(path);
+  const backup = new DatabaseSync(path, { readOnly: true });
+  try {
+    const row = backup.prepare('SELECT request_sha256,phase FROM recovery_activation_saga WHERE restore_id=?').get(restoreId);
+    if (!row) throw new Error('epoch_checkpoint_invalid');
+    return { sha256: inspection.sha256, requestSha256: String(row.request_sha256), phase: String(row.phase) };
+  } finally { backup.close(); }
+}

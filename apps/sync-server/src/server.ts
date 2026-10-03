@@ -1,4 +1,5 @@
 import { vaultControl, vaultRecoveryRequest } from './vaultControl';
+import { epochActivation, type ActivationFault } from './epochActivation';
 import { epochStaging } from './epochStaging';
 import { epochRecovery } from './epochRecovery';
 import { acceptCommit, changesPage, CommitRejection } from './commits';
@@ -82,6 +83,10 @@ const knownErrors: Record<string, number> = {
   key_checkpoint_rollback: 409,
   invalid_key_checkpoint: 400,
   invalid_key_recipients: 400,
+  invalid_epoch_activation: 400,
+  activation_mismatch: 409,
+  generation_archive_mismatch: 409,
+  staging_not_prepared: 409,
   invalid_epoch_manifest: 400,
   invalid_epoch_transition: 400,
   epoch_transition_mismatch: 409,
@@ -138,6 +143,7 @@ export function controlServer(options: {
   environment: { serverId: string; serverEpoch: string };
   origin: string;
   identity: (token: string) => Promise<Identity>;
+  activationFault?: ActivationFault;
 }) {
   const { pool, crypto, environment, origin, identity } = options;
   const server = createServer(async (req, res) => {
@@ -170,14 +176,14 @@ export function controlServer(options: {
           controlVersion: 1,
           protocolVersion: 1,
           domainSchema: 1,
-          epochRecovery: { formatVersion: 1, authorizationAvailable: true, stagingAvailable: true, activationAvailable: false },
+          epochRecovery: { formatVersion: 1, authorizationAvailable: true, stagingAvailable: true, activationAvailable: true },
         });
         return;
       }
       // Opt-in controls the only financial routes; every other domain remains absent.
       const create = method === 'POST' && target === '/v1/vaults';
       const match =
-        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|pairing-list|grants|deliveries|registry|commits|changes|recovery-fetch|recover|recovery-store|key-checkpoints|epoch-recovery-challenge|epoch-recovery-authorize|epoch-staging-begin|epoch-staging-batch|epoch-staging-validate|epoch-staging-prepare|epoch-staging-status)$/.exec(
+        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|pairing-list|grants|deliveries|registry|commits|changes|recovery-fetch|recover|recovery-store|key-checkpoints|epoch-recovery-challenge|epoch-recovery-authorize|epoch-staging-begin|epoch-staging-batch|epoch-staging-validate|epoch-staging-prepare|epoch-staging-status|epoch-activation|epoch-activation-status)$/.exec(
           target,
         );
       if (
@@ -224,6 +230,17 @@ export function controlServer(options: {
         await tx.query('BEGIN');
         const result = await epochRecovery(tx, match[2], body.value, match[1], account, environment, crypto);
         await tx.query('COMMIT');
+        respond(200, result);
+        return;
+      }
+      if (match && ['epoch-activation', 'epoch-activation-status'].includes(match[2])) {
+        tx = await pool.connect();
+        await tx.query('BEGIN');
+        const activate = match[2] === 'epoch-activation';
+        const result = await epochActivation(tx, activate, body.value, match[1], account, environment, crypto, options.activationFault);
+        if (activate) await options.activationFault?.('before_commit');
+        await tx.query('COMMIT');
+        if (activate) await options.activationFault?.('after_commit');
         respond(200, result);
         return;
       }

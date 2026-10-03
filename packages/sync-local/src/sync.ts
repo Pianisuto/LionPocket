@@ -1,3 +1,24 @@
+import {
+  prepareAnchorArchive,
+  planAnchorBaseline,
+  type AnchorBackupInspection,
+  type VerifiedAnchorBackup,
+} from "./epoch-archive";
+import { authorizeEpochRecovery } from "./epoch-recovery";
+import {
+  prepareOperationalB,
+  confirmOperationalBRecovery,
+  stageOperationalB,
+} from "./epoch-preparation";
+import {
+  requestAnchorActivation,
+  resumeAnchorActivation,
+  type AnchorActivationOptions,
+} from "./epoch-activation";
+import type {
+  EpochRecoveryAuthorization,
+  EpochTransition,
+} from "@lionpocket/sync-protocol";
 import { assertCompatibleEnvironment } from './compatibility';
 import { bankSyncCoordinator, type SyncCoordinator } from './coordinator';
 import { syncFetchText } from './network';
@@ -88,6 +109,14 @@ export interface SyncOptions {
   dialect: ProjectionDialect;
   storage: SyncStorage;
   backup(): Promise<string>;
+  epochBackup?: {
+    create(): Promise<VerifiedAnchorBackup>;
+    inspect(path: string): Promise<AnchorBackupInspection>;
+    inspectCheckpoint(
+      path: string,
+      restoreId: string,
+    ): Promise<{ sha256: string; requestSha256: string; phase: string }>;
+  };
   defaultEndpoint?: string;
   /** Only isolated synthetic harnesses may use loopback HTTP. Native clients never set this. */
   allowLocalDevelopment?: boolean;
@@ -120,6 +149,7 @@ export class SyncController {
   constructor(readonly options: SyncOptions) {
     this.coordinator = bankSyncCoordinator(options.db, {
       eligible: async () => {
+        if (await this.incompleteActivation()) return false;
         const saved = await options.storage.load();
         const [state] = await options.db.read(
           'SELECT mode,binding_id FROM sync_local_state WHERE id=1',
@@ -137,6 +167,348 @@ export class SyncController {
       cycle: (interactive, signal) => this.syncCycle(interactive, signal),
     });
   }
+  private async incompleteActivation() {
+    if (
+      !(
+        await this.options.db.read(
+          "SELECT name FROM sqlite_master WHERE name='recovery_activation_saga'",
+        )
+      ).length
+    )
+      return null;
+    return (
+      (
+        await this.options.db.read(
+          "SELECT * FROM recovery_activation_saga WHERE phase!='recovered'",
+        )
+      )[0] ?? null
+    );
+  }
+  private async requireRecoveryFinalized() {
+    if (await this.incompleteActivation()) throw new Error('recovery_activated_requires_finalization');
+  }
+  private async recoverySession(s: SyncSaved, interactive: boolean) {
+    const environment = await this.environment(s.endpoint);
+    if (
+      environment.serverId !== s.profile?.pin.serverId ||
+      (s.discovered &&
+        canonicalStringify(environment.oidc) !==
+          canonicalStringify(s.discovered.oidc))
+    )
+      throw new Error("server_configuration_changed");
+    let session = this.cachedSession;
+    if (
+      !session ||
+      !session.expiresAt ||
+      session.expiresAt <= Date.now() + 30000
+    ) {
+      if (!interactive) throw new Error("interaction_required");
+      session = await this.options.login(environment);
+    }
+    if (
+      !s.owner ||
+      session.issuer !== environment.oidc.issuer ||
+      !s.identity ||
+      session.issuer !== s.identity.issuer ||
+      session.subject !== s.identity.subject
+    )
+      throw new Error("account_mismatch");
+    this.cachedSession = session;
+    return session;
+  }
+  private async recoveryControl(
+    s: SyncSaved,
+    action: string,
+    value: unknown,
+    interactive: boolean,
+  ) {
+    const session = await this.recoverySession(s, interactive);
+    const response = await syncFetchText(
+      `${s.endpoint}/v1/vaults/${s.profile!.pin.vaultId}/${action}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer " + session.accessToken,
+        },
+        body: canonicalStringify(value),
+      },
+    );
+    const result = decodeCanonical(
+      encodeUtf8(response.text),
+      4194304,
+      100000,
+    ) as Record<string, unknown>;
+    if (!response.ok)
+      throw new Error(String(result.error ?? "temporary_failure"));
+    return result;
+  }
+  private async recoveryAttempt(s: SyncSaved) {
+    if (
+      !(
+        await this.options.db.read(
+          "SELECT name FROM sqlite_master WHERE name='recovery_journal'",
+        )
+      ).length
+    )
+      return null;
+    return (
+      (
+        await this.options.db.read(
+          "SELECT * FROM recovery_journal WHERE vault_id=? AND from_epoch=? ORDER BY rowid DESC LIMIT 1",
+          [s.profile!.pin.vaultId, s.profile!.pin.serverEpoch],
+        )
+      )[0] ?? null
+    );
+  }
+  async prepareServerRecovery(confirmed: boolean) {
+    if (!confirmed) throw new Error("epoch_anchor_confirmation_required");
+    const backup = this.options.epochBackup;
+    if (!backup) throw new Error("anchor_backup_unavailable");
+    if (await this.incompleteActivation())
+      throw new Error("recovery_activated_requires_finalization");
+    this.coordinator.cancel();
+    await this.pause(true);
+    await this.coordinator.cancelAndWait();
+    const s = await this.saved(),
+      device = this.device(s);
+    let journal = await this.recoveryAttempt(s);
+    const environment = await this.environment(s.endpoint);
+    await this.options.db.run(
+      (function* (): SqlWorkflow {
+        yield {
+          sql: `CREATE TABLE IF NOT EXISTS recovery_owner_requests(from_epoch TEXT NOT NULL,to_epoch TEXT NOT NULL,
+        restore_id TEXT NOT NULL UNIQUE,authorization_json TEXT NOT NULL,recovery_json TEXT,PRIMARY KEY(from_epoch,to_epoch))`,
+        };
+      })(),
+    );
+    if (!journal) {
+      let [reserved] = await this.options.db.read(
+        "SELECT * FROM recovery_owner_requests WHERE from_epoch=? AND to_epoch=?",
+        [device.profile.pin.serverEpoch, environment.serverEpoch],
+      );
+      if (!reserved) {
+        const response = await this.recoveryControl(
+          s,
+          "epoch-recovery-challenge",
+          {
+            fromEpoch: device.profile.pin.serverEpoch,
+            authorityPublicKey: device.profile.pin.authorityPublicKey,
+          },
+          true,
+        );
+        const authorization = await authorizeEpochRecovery(
+          device,
+          response.challenge as Parameters<typeof authorizeEpochRecovery>[1],
+          true,
+        );
+        await this.options.db.run(
+          (function* (): SqlWorkflow {
+            yield {
+              sql: "INSERT INTO recovery_owner_requests VALUES(?,?,?,?,?)",
+              params: [
+                device.profile.pin.serverEpoch,
+                environment.serverEpoch,
+                authorization.restoreId,
+                canonicalStringify(authorization),
+                response.recovery
+                  ? canonicalStringify(response.recovery)
+                  : null,
+              ],
+            };
+          })(),
+        );
+        [reserved] = await this.options.db.read(
+          "SELECT * FROM recovery_owner_requests WHERE restore_id=?",
+          [authorization.restoreId],
+        );
+      }
+      const authorization: EpochRecoveryAuthorization = JSON.parse(
+        String(reserved.authorization_json),
+      );
+      const accepted = await this.recoveryControl(
+        s,
+        "epoch-recovery-authorize",
+        { authorization, knownGrants: device.profile.grants },
+        true,
+      );
+      if (
+        canonicalStringify(accepted.authorization) !==
+        canonicalStringify(authorization)
+      )
+        throw new Error("activation_mismatch");
+      await prepareAnchorArchive({
+        db: this.options.db,
+        device,
+        acceptedAuthorization: authorization,
+        confirmed: true,
+        backup: backup.create,
+        inspectBackup: backup.inspect,
+      });
+      journal = await this.recoveryAttempt(s);
+    }
+    const restoreId = String(journal!.restore_id);
+    await this.options.db.run(
+      planAnchorBaseline(restoreId, () => this.crypto().uuid()),
+    );
+    const preparation = {
+      db: this.options.db,
+      deviceA: device,
+      sodium: this.options.sodium,
+      restoreId,
+    };
+    const [reserved] = await this.options.db.read(
+      "SELECT recovery_json FROM recovery_owner_requests WHERE restore_id=?",
+      [restoreId],
+    );
+    if (!reserved) throw new Error("recovery_artifact_missing");
+    const prepared = await prepareOperationalB({
+      ...preparation,
+      previousRecovery: reserved.recovery_json
+        ? JSON.parse(String(reserved.recovery_json))
+        : null,
+    });
+    return prepared.code
+      ? { code: prepared.code }
+      : this.stageRecovery(s, preparation);
+  }
+  async confirmServerRecovery(code: string) {
+    const s = await this.saved(),
+      journal = await this.recoveryAttempt(s);
+    if (!journal) throw new Error("recovery_attempt_missing");
+    const preparation = {
+      db: this.options.db,
+      deviceA: this.device(s),
+      sodium: this.options.sodium,
+      restoreId: String(journal.restore_id),
+    };
+    await confirmOperationalBRecovery(preparation, code);
+    return this.stageRecovery(s, preparation);
+  }
+  private async stageRecovery(
+    s: SyncSaved,
+    preparation: {
+      db: LocalSyncDatabase;
+      deviceA: DeviceProvisioning;
+      sodium: TransportSodium;
+      restoreId: string;
+    },
+  ) {
+    const previousRows = await this.options.db.read(
+      `SELECT transition_json FROM recovery_b_saga b JOIN recovery_journal j USING(restore_id) WHERE j.vault_id=? AND j.to_epoch=?`,
+      [s.profile!.pin.vaultId, s.profile!.pin.serverEpoch],
+    );
+    const previous: EpochTransition | null = previousRows[0]?.transition_json
+      ? JSON.parse(String(previousRows[0].transition_json))
+      : null;
+    await stageOperationalB({
+      ...preparation,
+      previousTrustedTransition: previous,
+      transport: (action, r) =>
+        this.recoveryControl(s, "epoch-staging-" + action, r, true),
+    });
+    return this.status();
+  }
+  private async activationOptions(
+    s: SyncSaved,
+    id: string,
+    interactive: boolean,
+  ): Promise<AnchorActivationOptions> {
+    const backup = this.options.epochBackup;
+    if (!backup) throw new Error("anchor_backup_unavailable");
+    const [journal] = await this.options.db.read(
+      "SELECT * FROM recovery_journal WHERE restore_id=?",
+      [id],
+    );
+    return {
+      db: this.options.db,
+      deviceA: new DeviceProvisioning(
+        JSON.parse(String(journal.profile_a_json)),
+        this.options.secrets,
+        this.crypto(),
+      ),
+      sodium: this.options.sodium,
+      restoreId: id,
+      dialect: this.options.dialect,
+      endpoint: s.endpoint,
+      transport: (action, r) =>
+        this.recoveryControl(
+          s,
+          action === "activate"
+            ? "epoch-activation"
+            : "epoch-activation-status",
+          r,
+          interactive,
+        ),
+      inspectBackup: backup.inspect,
+      checkpoint: backup.create,
+      inspectCheckpoint: (path) => backup.inspectCheckpoint(path, id),
+      saveProfile: async (profile) => {
+        const [prepared] = await this.options.db.read(
+          "SELECT recovery_json FROM recovery_b_saga WHERE restore_id=?",
+          [id],
+        );
+        const next: SyncSaved = {
+          ...s,
+          profile,
+          phase: "bound",
+          recoveryVersion: JSON.parse(String(prepared.recovery_json)).envelope
+            .recoveryVersion,
+          discovered: s.discovered
+            ? { ...s.discovered, serverEpoch: profile.pin.serverEpoch }
+            : undefined,
+        };
+        delete next.request;
+        delete next.pendingRecovery;
+        delete next.pendingKeyCheckpoint;
+        await this.options.storage.save(next);
+      },
+      loadProfile: async () =>
+        (await this.options.storage.load())?.profile ?? null,
+      firstPull: async (device) => {
+        const current = (await this.options.storage.load())!;
+        const session = await this.session(current, interactive);
+        const engine = new ManualSync(
+          this.options.db,
+          device,
+          this.options.sodium,
+          this.options.dialect,
+          s.endpoint,
+          fetchSyncHttp(s.endpoint),
+        );
+        await engine.pull(session.accessToken);
+      },
+    };
+  }
+  async activateServerRecovery(confirmed: boolean) {
+    await this.coordinator.cancelAndWait();
+    const s = await this.saved(),
+      pending = await this.incompleteActivation(),
+      journal = await this.recoveryAttempt(s);
+    const id = String(pending?.restore_id ?? journal?.restore_id ?? "");
+    if (!id) throw new Error("recovery_attempt_missing");
+    await requestAnchorActivation(
+      await this.activationOptions(s, id, true),
+      confirmed,
+    );
+    this.coordinator.error = undefined;
+    this.coordinator.request("foreground");
+    return this.status();
+  }
+  /** Native startup calls this before subscribing to foreground. It never reserves new consent. */
+  async resumeRecoveryOnStartup() {
+    const pending = await this.incompleteActivation();
+    if (!pending) return;
+    await this.coordinator.cancelAndWait();
+    await resumeAnchorActivation(
+      await this.activationOptions(
+        await this.saved(),
+        String(pending.restore_id),
+        false,
+      ),
+    );
+    this.coordinator.error = undefined;
+  }
   localWriteCommitted() {
     this.coordinator.request('local-write');
   }
@@ -151,6 +523,7 @@ export class SyncController {
     return new ProvisioningCrypto(this.options.sodium);
   }
   async configure(endpoint: string) {
+    await this.requireRecoveryFinalized();
     const saved = await this.options.storage.load();
     const normalized = normalizeEndpoint(endpoint, this.options.allowLocalDevelopment);
     if (saved?.profile && normalized !== saved.endpoint)
@@ -280,6 +653,7 @@ export class SyncController {
     ) as Promise<RegistryResponse>;
   }
   async create() {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       environment = await this.environment(s.endpoint),
@@ -375,6 +749,7 @@ export class SyncController {
     };
   }
   async pair(invitation: string, confirmedFingerprint: string) {
+    await this.requireRecoveryFinalized();
     const invite = await this.inspectInvitation(invitation);
     const selected = await this.options.storage.load();
     if (selected?.endpoint && selected.endpoint !== invite.endpoint) throw new Error('O convite pertence a outro servidor. Confira a URL antes de continuar.');
@@ -432,6 +807,7 @@ export class SyncController {
     this.coordinator.request('foreground');
   }
   async receive() {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       d = this.device(s);
@@ -498,6 +874,7 @@ export class SyncController {
     }>;
   }
   async approve(deviceId: string, fingerprint: string) {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       device = this.device(s);
@@ -612,11 +989,13 @@ export class SyncController {
     }
   }
   async rotateKeys() {
+    await this.requireRecoveryFinalized();
     const s = await this.saved();
     await this.rotate(s, await this.session(s));
     return this.status();
   }
   async revoke(deviceId: string, confirmedDeviceId: string) {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       d = this.device(s);
@@ -664,6 +1043,7 @@ export class SyncController {
     return this.status();
   }
   async generateRecovery() {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       d = this.device(s),
@@ -684,6 +1064,7 @@ export class SyncController {
     return { code: created.code };
   }
   async confirmRecovery(code: string) {
+    await this.requireRecoveryFinalized();
     const s = await this.saved();
     if (!s.pendingRecovery) throw new Error('Gere um código de recovery.');
     openRecovery(this.device(s), this.options.sodium, s.pendingRecovery, code);
@@ -713,6 +1094,7 @@ export class SyncController {
     confirmedFingerprint: string,
     code: string,
   ) {
+    await this.requireRecoveryFinalized();
     const invite = await this.inspectInvitation(invitation);
     if (invite.fingerprint !== confirmedFingerprint)
       throw new Error('fingerprint_mismatch');
@@ -809,6 +1191,7 @@ export class SyncController {
     return this.status();
   }
   async reconnectRestored(confirm: boolean) {
+    await this.requireRecoveryFinalized();
     if (!confirm)
       throw new Error('Revise a cópia restaurada antes de reconectar.');
     const s = await this.saved(),
@@ -828,6 +1211,7 @@ export class SyncController {
     return this.status();
   }
   async pause(paused: boolean) {
+    if (!paused && await this.incompleteActivation()) throw new Error('recovery_activated_requires_finalization');
     await this.options.db.run(
       (function* () {
         yield {
@@ -1173,7 +1557,34 @@ export class SyncController {
     const blocked = await this.options.db.read(
       "SELECT commit_id FROM sync_outbox WHERE state='blocked' AND COALESCE(last_error,'') NOT IN ('key_rotated','remote_accepted_before_rotation')",
     );
+    const activation = await this.incompleteActivation();
+    let recoveryPhase: string | null = activation
+      ? String(activation.phase)
+      : null;
+    if (
+      !recoveryPhase &&
+      saved?.profile &&
+      (
+        await this.options.db.read(
+          "SELECT name FROM sqlite_master WHERE name='recovery_b_saga'",
+        )
+      ).length
+    ) {
+      const hasActivation = (await this.options.db.read("SELECT name FROM sqlite_master WHERE name='recovery_activation_saga'")).length > 0;
+      const rows = await this.options.db.read(
+        hasActivation ?
+          `SELECT b.phase,a.phase AS activation_phase FROM recovery_b_saga b JOIN recovery_journal j USING(restore_id)
+        LEFT JOIN recovery_activation_saga a USING(restore_id) WHERE j.vault_id=? ORDER BY j.rowid DESC LIMIT 1` :
+          `SELECT b.phase FROM recovery_b_saga b JOIN recovery_journal j USING(restore_id) WHERE j.vault_id=? ORDER BY j.rowid DESC LIMIT 1`,
+          [saved.profile.pin.vaultId],
+        );
+      recoveryPhase = rows[0]
+        ? String(rows[0].activation_phase ?? rows[0].phase)
+        : null;
+    }
     const error = this.coordinator.error;
+    // A completed recovery of the selected profile is historical after another server restore.
+    if (recoveryPhase === 'recovered' && error === 'epoch_changed') recoveryPhase = null;
     const accountAction =
       [
         'interaction_required',
@@ -1218,12 +1629,14 @@ export class SyncController {
                     ? 'synced'
                     : 'ready';
     return {
-      activity: activity as SyncActivity,
+      recoveryPhase,
+      anchorRecoveryAvailable: !!this.options.epochBackup && !!saved?.owner,
+      activity: (activation ? 'action-required' : activity) as SyncActivity,
       discovered: saved?.discovered ?? null,
       compatibilityMessage: ['unsupported_version', 'unsupported_capability'].includes(error ?? '')
         ? 'Atualização necessária: cliente e servidor incompatíveis. Banco local e pendências preservados; nenhum envio realizado.'
         : error === 'epoch_changed'
-          ? 'O histórico do servidor mudou. Transporte interrompido; banco local e pendências preservados. Reconexão exige revisão.'
+          ? 'O histórico do servidor mudou. Este aparelho ainda precisa ser reconectado após a recuperação do servidor. Seus dados e alterações locais estão preservados.'
           : error === 'server_configuration_changed'
             ? 'A configuração do servidor mudou. Revise o servidor antes de entrar novamente; banco local e pendências preservados.'
             : null,

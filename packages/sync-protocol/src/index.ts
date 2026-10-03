@@ -10,3 +10,4 @@ export * from './epoch-recovery';
 export * from './epoch-transition';
 
 export * from './epoch-staging';
+export * from './epoch-activation';

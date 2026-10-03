@@ -25,6 +25,9 @@ _spec.loader.exec_module(ledger)
 _generation_spec = importlib.util.spec_from_file_location('lp_generation_backup', BASE / 'generation_backup.py')
 generations = importlib.util.module_from_spec(_generation_spec)
 _generation_spec.loader.exec_module(generations)
+_activation_spec = importlib.util.spec_from_file_location('lp_activation_backup', BASE / 'activation_backup.py')
+activations = importlib.util.module_from_spec(_activation_spec)
+_activation_spec.loader.exec_module(activations)
 _staging_spec = importlib.util.spec_from_file_location('lp_staging_backup', BASE / 'staging_backup.py')
 staging = importlib.util.module_from_spec(_staging_spec)
 _staging_spec.loader.exec_module(staging)
@@ -116,7 +119,7 @@ def checksum(path):
 
 def verify(directory):
     manifest = json.loads((directory / 'manifest.json').read_text())
-    if manifest.get('formatVersion') not in [1, 2, 3, 4] or set(manifest['files']) not in [{'sync.dump', 'auth.dump', 'config.env', 'secrets.json'}, {'sync.dump', 'auth.dump', 'config.env', 'secrets.json', 'trust-ca.pem'}]:
+    if manifest.get('formatVersion') not in [1, 2, 3, 4, 5] or set(manifest['files']) not in [{'sync.dump', 'auth.dump', 'config.env', 'secrets.json'}, {'sync.dump', 'auth.dump', 'config.env', 'secrets.json', 'trust-ca.pem'}]:
         raise ValueError('Manifesto de backup inválido.')
     for name, digest in manifest['files'].items():
         if checksum(directory / name) != digest:
@@ -127,8 +130,10 @@ def verify(directory):
         raise ValueError('Manifesto de restaurações inválido.')
     if manifest['formatVersion'] >= 3 and not re.fullmatch('[0-9a-f]{64}', str(manifest.get('generationArchiveSha256', ''))):
         raise ValueError('Compromisso de gerações inválido.')
-    if manifest['formatVersion'] == 4 and not re.fullmatch('[0-9a-f]{64}', str(manifest.get('stagingSha256', ''))):
+    if manifest['formatVersion'] >= 4 and not re.fullmatch('[0-9a-f]{64}', str(manifest.get('stagingSha256', ''))):
         raise ValueError('Compromisso de staging inválido.')
+    if manifest['formatVersion'] >= 5 and not re.fullmatch('[0-9a-f]{64}', str(manifest.get('activationSha256', ''))):
+        raise ValueError('Compromisso de activation inválido.')
     return manifest
 
 
@@ -189,10 +194,12 @@ def rehearsal(cfg, directory):
         generation_digest = generations.commitment(sql, cfg, sync)
         if manifest['formatVersion'] >= 3 and generation_digest != manifest['generationArchiveSha256']:
             raise ValueError('Arquivo de gerações divergente do manifesto.')
-        if manifest['formatVersion'] == 4:
+        if manifest['formatVersion'] >= 4:
             if staging.commitment(sql, cfg, sync) != manifest['stagingSha256']:
                 raise ValueError('Staging divergente do manifesto.')
             verify_staging(cfg, sync)
+        if manifest['formatVersion'] >= 5 and activations.commitment(sql, cfg, sync) != manifest['activationSha256']:
+            raise ValueError('Activation divergente do manifesto.')
         before = identity[1]
         epoch = str(uuid.uuid4())
         sql(cfg, "UPDATE sync_environment SET server_epoch='" + epoch + "';", sync)
@@ -236,7 +243,7 @@ def main():
             counts = json.loads(sql(cfg, "SELECT json_build_object('pending',count(*) FILTER(WHERE v.state!='recovered'),'authorized',count(*) FILTER(WHERE v.state='authorized_awaiting_baseline'),'recovered',count(*) FILTER(WHERE v.state='recovered')) FROM sync_restore_vaults v JOIN sync_restores r USING(restore_id) JOIN sync_environment e ON e.server_epoch=r.to_epoch;"))
             print(f"{counts['pending']} cofres aguardam recuperação após restauração; {counts['authorized']} autorizações aguardam baseline; {counts['recovered']} recuperados no epoch atual.")
             if counts['pending']:
-                print('Ativação e reconciliação entre epochs ainda indisponíveis nesta versão. Não force pins ou bindings.')
+                print('Continue a recuperação pelo aparelho proprietário que preparou os dados. A ativação exige confirmação e prova criptográfica nesse aparelho.')
     elif command == 'user' and len(args) >= 2:
         username = args[2] if len(args) > 2 else input('Usuário: ').strip()
         if not re.fullmatch('[a-zA-Z0-9._@-]{1,128}', username):
@@ -283,7 +290,7 @@ def main():
                 raise ValueError('Atualize a API antes de criar backup com gerações.')
             staging_digest = staging.commitment(sql, cfg)
             verify_staging(cfg, 'lion_sync')
-            manifest = {'formatVersion': 4, 'stagingSha256': staging_digest, 'generationArchiveSha256': generation_digest, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'serverId': identity[0], 'serverEpoch': identity[1], 'counts': counts, 'restoreLedgerSha256': ledger.digest(ledger.snapshot(sql, cfg)), 'files': {name: checksum(directory / name) for name in files}}
+            manifest = {'formatVersion': 5, 'activationSha256': activations.commitment(sql, cfg), 'stagingSha256': staging_digest, 'generationArchiveSha256': generation_digest, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'serverId': identity[0], 'serverEpoch': identity[1], 'counts': counts, 'restoreLedgerSha256': ledger.digest(ledger.snapshot(sql, cfg)), 'files': {name: checksum(directory / name) for name in files}}
             (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
             print('Backup completo criado. Proteja o diretório fora do Git.')
         finally:
@@ -331,7 +338,7 @@ def main():
             if stop_failed:
                 raise ValueError('Restore falhou e não foi possível confirmar a parada da API/IdP. Pare-os manualmente imediatamente; não reinicie até restaurar bancos e segredo corretamente.') from None
             raise ValueError('Restore falhou; API/IdP permanecem parados. Bancos podem estar parcialmente restaurados. Não reinicie até repetir o restore confirmado com backup válido e segredo correspondente.') from None
-        print('Restore concluído e registrado com novo serverEpoch. Clientes conservam banco/outbox; autorização do proprietário não ativa sync nesta versão. Não altere envelopes assinados.')
+        print('Restore concluído e registrado com novo serverEpoch. Clientes conservam banco/outbox. No aparelho proprietário: preparar, revisar e ativar a sincronização recuperada.')
     elif command == 'restart':
         compose(cfg, 'restart', 'api', 'keycloak')
         compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', 'api', 'keycloak')

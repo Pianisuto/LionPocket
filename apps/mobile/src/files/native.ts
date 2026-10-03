@@ -24,6 +24,7 @@ export const localFiles = NativeModules.LionPocketFiles as {
     displayName: string,
   ): Promise<boolean | null>;
   listBackups(): Promise<RecoveryFile[]>;
+  fingerprintBackup(name: string, seal: boolean): Promise<LocalFile & {sha256:string}>;
   copyBackup(name: string): Promise<PickedFile>;
   removeTransfer(name: string): Promise<void>;
 };

@@ -151,17 +151,26 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
         ctl('restore', str(backup), '--confirm-new-epoch')
         assert Path(cfg['KEYCLOAK_ADMIN_PASSWORD_FILE']).read_bytes() == admin_b, 'Confirmed restore did not restore admin B'
         fixture('epoch')
+        lp.compose(cfg, 'run', '--rm', '-T', '--no-deps', '--entrypoint', 'node', 'fixture', '/app/tools/self-hosted/enable-fixture-user.mjs', capture=True)
+        lp.sql(cfg, 'DELETE FROM sync_disabled_accounts;')
+        fixture('recover-anchor')
         ctl('user', 'create', 'fixture-after-restore', data=b'fixture-only-password-78931\n')
         ctl('status')
         epoch_b = lp.sql(cfg, 'SELECT server_epoch::text FROM sync_environment;')
         history_b = lp.ledger.snapshot(lp.sql, cfg)
         assert len(history_b['sync_restores']) == 1
-        assert all(v['state'] == 'awaiting_authority' for v in history_b['sync_restore_vaults'])
+        assert all(v['state'] == 'recovered' for v in history_b['sync_restore_vaults'])
         backup_b = directory / 'operational-backup-epoch-b'
         ctl('backup', str(backup_b))
+        manifest_b = json.loads((backup_b / 'manifest.json').read_text())
+        assert manifest_b['formatVersion'] == 5 and len(manifest_b['activationSha256']) == 64
         before_b_verify = active_snapshot()
         ctl('verify-backup', str(backup_b))
         assert active_snapshot() == before_b_verify, 'Epoch B verify modified active state'
+        lp.compose(cfg, 'stop', 'api', 'keycloak', 'postgres', capture=True)
+        fixture('offline-recovered')
+        lp.compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', 'postgres', 'keycloak', 'api')
+        fixture('restart-recovered')
         ctl('restore', str(backup_b), '--confirm-new-epoch')
         history_c = lp.ledger.snapshot(lp.sql, cfg)
         epoch_c = lp.sql(cfg, 'SELECT server_epoch::text FROM sync_environment;')
@@ -170,8 +179,19 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
         assert any(r['from_epoch'] == epoch_b and r['to_epoch'] == epoch_c for r in history_c['sync_restores'])
         assert any(r == history_b['sync_restores'][0] for r in history_c['sync_restores'])
         fixture('epoch')
+        fixture('recover-anchor')
         ctl('status')
-        print('Operational E1→E2→E3 ledger and isolated verification: passed (financial migration remains blocked)')
+        activation_count = lp.sql(cfg, 'SELECT count(*) FROM sync_epoch_activations;')
+        assert activation_count == '2'
+        # Activation records and the new backup manifest remain public commitments/ciphertext only.
+        server_bytes = lp.compose(cfg, 'exec', '-T', 'postgres', 'pg_dump', '-U', 'postgres', 'lion_sync', capture=True).stdout
+        logs = lp.compose(cfg, 'logs', '--no-color', capture=True).stdout
+        client = json.loads((directory / 'client-state.json').read_text())
+        manifests = (backup / 'manifest.json').read_bytes() + (backup_b / 'manifest.json').read_bytes()
+        for private in [b'LP_SELFHOST_CANARY_DESCRIPTION_72319', b'LP_SELFHOST_CANARY_NOTE_87931', b'9876543', b'98765.43', client['recovery'].encode(), b'RevisionPlaintext']:
+            assert private not in server_bytes and private not in logs and private not in manifests, 'Post-activation privacy canary leaked'
+        assert not re.search(rb'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', logs), 'JWT in post-activation logs'
+        print('Operational E1→E2→E3 ledger and isolated verification: passed (anchor activated and ordinary sync resumed twice)')
         print('Clean self-host install, normal client E2EE, restart, privacy, offline and backup/restore/epoch: passed')
     except Exception:
         # Only isolated fixture services: preserve useful startup errors before cleanup.

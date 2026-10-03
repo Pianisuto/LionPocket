@@ -703,7 +703,7 @@ export async function stageOperationalB(
         !["uploading", "validated", "prepared"].includes(
           String(response.state),
         ) ||
-        response.activationAvailable !== false ||
+        typeof response.activationAvailable !== "boolean" ||
         typeof response.readyForActivation !== "boolean"
       )
         throw new Error("invalid_staging_response");
@@ -998,10 +998,14 @@ export async function stageOperationalB(
       params: [o.restoreId],
     },
   ]);
-  return { manifest, transition, activationAvailable: false as const };
+  return { manifest, transition, activationAvailable: true as const };
 }
 /** Local cancel is an explicit pause. It preserves the preparation bundle, artifacts, A and the reviewed plan. */
 export async function cancelOperationalB(o: BaseOptions) {
+  if ((await o.db.read("SELECT name FROM sqlite_master WHERE name='recovery_activation_saga'")).length &&
+      (await o.db.read('SELECT 1 FROM recovery_activation_saga WHERE restore_id=?', [o.restoreId])).length)
+    throw new Error('recovery_activated_requires_finalization');
+
   await o.db.run(
     recoveryRun(
       (function* (): SqlWorkflow {
@@ -1080,4 +1084,26 @@ export async function resumeOperationalB(o: BaseOptions) {
     phase: String(row.resume_phase),
     activationAvailable: false as const,
   };
+}
+
+/** Activation validates the original private reservation even after the active graph was replaced.
+ * The sealed journal/mapping, never the selected profile, identify that reservation. */
+export async function validatePreparedOperationalB(o: BaseOptions, requireLiveA: boolean) {
+  const row = await attempt(o);
+  if (row.phase !== 'prepared' || !row.recovery_confirmed || !row.manifest_json || !row.transition_json) throw new Error('staging_not_prepared');
+  const [journal] = await o.db.read('SELECT * FROM recovery_journal WHERE restore_id=?', [o.restoreId]);
+  if (!journal || journal.profile_a_json !== canonicalStringify(o.deviceA.profile)) throw new Error('recovery_attempt_mismatch');
+  const commitments = await anchorPlanCommitments(o.db, o.restoreId, text => o.deviceA.crypto.hash(text));
+  if (requireLiveA) {
+    for (const [table, cols] of Object.entries(epochArchiveColumns)) {
+      // Activation itself pauses transport; that flag is not part of the financial or causal snapshot.
+      const columns = cols.filter(c => table !== 'sync_control' || c !== 'paused').map(c => `CAST(${c} AS TEXT) AS ${c}`).join(',');
+      const active = `SELECT ${columns} FROM ${table}`;
+      const archived = `SELECT ${columns} FROM recovery_archive_${table} WHERE vault_id_scope=? AND epoch_scope=?`;
+      if ((await o.db.read(`SELECT * FROM (${active} EXCEPT ${archived}) LIMIT 1`, [journal.vault_id, journal.from_epoch])).length ||
+          (await o.db.read(`SELECT * FROM (${archived} EXCEPT ${active}) LIMIT 1`, [journal.vault_id, journal.from_epoch])).length) throw new Error('epoch_archive_stale');
+    }
+  }
+  await withPreparation(o, row, { journal, commitments }, async (b, _bundle, material) => verifySecrets(b, row, material));
+  return { row, journal, commitments, device: deviceB(o, row) };
 }

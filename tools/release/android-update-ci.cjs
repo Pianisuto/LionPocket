@@ -13,8 +13,11 @@ execFileSync('python3', [join(__dirname, 'android-compatibility.py'), '--serial'
 // Instrumentation uses a disposable private subtree and random installation IDs, outside all financial fixtures.
 execFileSync('adb', ['-s', serial, 'install', '-r', join(root, 'apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk')], { stdio: 'inherit' });
 execFileSync('adb', ['-s', serial, 'install', '-r', join(root, 'apps/mobile/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')], { stdio: 'inherit' });
-const nativeSecrets = execFileSync('adb', ['-s', serial, 'shell', 'am', 'instrument', '-w', 'com.lionpocketmobile.test/androidx.test.runner.AndroidJUnitRunner'], { encoding: 'utf8', timeout: 120000 });
+const nativeSecrets = execFileSync('adb', ['-s', serial, 'shell', 'am', 'instrument', '-w', '-e', 'class', 'com.lionpocketmobile.SyncSecretStorageTest', 'com.lionpocketmobile.test/androidx.test.runner.AndroidJUnitRunner'], { encoding: 'utf8', timeout: 120000 });
 process.stdout.write(nativeSecrets);
 if (!/OK \(4 tests\)/.test(nativeSecrets) || /FAILURES|INSTRUMENTATION_FAILED/.test(nativeSecrets)) throw new Error('Native preparation SecretStore regressions failed.');
 
-writeFileSync(preparationReport, JSON.stringify({ formatVersion: 1, tests: 4, passed: true, backend: 'AndroidKeyStore/AndroidX AtomicFile', operationalV1Preserved: true, emulator: serial }));
+const nativeBackup = execFileSync('adb', ['-s', serial, 'shell', 'am', 'instrument', '-w', '-e', 'class', 'com.lionpocketmobile.DurableBackupFileTest', 'com.lionpocketmobile.test/androidx.test.runner.AndroidJUnitRunner'], { encoding: 'utf8', timeout: 120000 });
+process.stdout.write(nativeBackup);
+if (!/OK \(1 test\)/.test(nativeBackup) || /FAILURES|INSTRUMENTATION_FAILED/.test(nativeBackup)) throw new Error('Native activation checkpoint regressions failed.');
+writeFileSync(preparationReport, JSON.stringify({ formatVersion: 1, tests: 4, passed: true, activationCheckpointPassed: true, backend: 'AndroidKeyStore/AndroidX AtomicFile', operationalV1Preserved: true, emulator: serial }));

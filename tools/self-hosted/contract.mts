@@ -12,6 +12,7 @@ import { MobileRepository } from '../../apps/mobile/src/db/repository';
 import { mobileSyncDatabase } from '../../apps/mobile/src/sync/database';
 import { loginOidc } from '../../apps/desktop/src/main/sync/oidc';
 import { TestSecrets } from '../../apps/sync-server/src/testSupport';
+import {createEpochAnchorBackup,inspectEpochAnchorBackup,inspectEpochActivationCheckpoint} from '../../apps/desktop/src/main/sync/epochBackup';
 import { canonicalStringify } from '@lionpocket/sync-protocol';
 
 const endpoint = 'https://sync.fixture.test';
@@ -92,7 +93,7 @@ async function login(e: SyncEnvironment, android: boolean, username = 'fixture-a
   if (username === 'fixture-alice') await writeFile('/fixtures/ephemeral-token-' + (android ? 'android' : 'desktop') + '.json', JSON.stringify(session), { mode: 0o600 });
   return session;
 }
-const a = new SyncController({ db: desktop.syncDatabase(), secrets, sodium, dialect: 'desktop', storage: { load: async () => saved.desktop ? structuredClone(saved.desktop) : null, save: async value => { saved.desktop = structuredClone(value); } }, backup: async () => { const path = '/fixtures/pre-binding-' + randomBytes(8).toString('hex') + '.sqlite'; desktop.db.prepare('VACUUM INTO ?').run(path); return path; }, login: e => login(e, false) });
+const a = new SyncController({ epochBackup:{create:()=>createEpochAnchorBackup(desktop.db,'/fixtures/recovery-'+randomBytes(8).toString('hex')+'.sqlite'),inspect:inspectEpochAnchorBackup,inspectCheckpoint:inspectEpochActivationCheckpoint},db: desktop.syncDatabase(), secrets, sodium, dialect: 'desktop', storage: { load: async () => saved.desktop ? structuredClone(saved.desktop) : null, save: async value => { saved.desktop = structuredClone(value); } }, backup: async () => { const path = '/fixtures/pre-binding-' + randomBytes(8).toString('hex') + '.sqlite'; desktop.db.prepare('VACUUM INTO ?').run(path); return path; }, login: e => login(e, false) });
 const b = new SyncController({ db: mobileSyncDatabase(mobile.db), secrets, sodium, dialect: 'android', storage: { load: async () => saved.android ? structuredClone(saved.android) : null, save: async value => { saved.android = structuredClone(value); } }, backup: async () => { const path = '/fixtures/pre-binding-android-' + randomBytes(8).toString('hex') + '.sqlite'; await mobile.db.executeAsync('VACUUM INTO ?', [path]); return path; }, login: e => login(e, true) });
 a.setForeground(true); b.setForeground(true);
 const input = { kind: 'income' as const, description: 'LP_SELFHOST_ANDROID_74321', plannedAmount: 0, actualAmount: null, dueDate: '2026-10-03', status: 'planned' as const };
@@ -159,6 +160,32 @@ try {
     assert.ok(desktop.listTransactions({ month: '2026-10' }).length >= 2);
     assert.equal((await repo.list({ month: '2026-10' })).length, desktop.listTransactions({ month: '2026-10' }).length);
     assert.equal((await a.status()).sync?.pending, 0); assert.equal((await b.status()).sync?.pending, 0);
+  } else if (phase === 'recover-anchor') {
+    b.setForeground(false);
+    const secondaryBefore=Object.fromEntries((await import('@lionpocket/sync-local')).syncTables.map(t=>[t,mobile.sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]));
+    const financialBefore=Object.fromEntries(Object.keys((await import('@lionpocket/sync-local')).financialTableTypes).map(t=>[t,desktop.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]));
+    await a.prepareServerRecovery(true);
+    assert.equal((await a.status()).recoveryPhase,'prepared');
+    await a.activateServerRecovery(true);
+    assert.equal((await a.status()).recoveryPhase,'recovered');
+    for(const [t,rows] of Object.entries(financialBefore))assert.deepEqual(desktop.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(),rows);
+    for(const [t,rows] of Object.entries(secondaryBefore))assert.deepEqual(mobile.sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(),rows);
+    await a.sync();
+    desktop.saveTransaction({...input,description:'C4_RECOVERED_'+saved.desktop!.profile!.pin.serverEpoch});
+    await a.sync();
+    assert.equal((await a.status()).sync?.pending,0);
+  } else if (phase === 'offline-recovered') {
+    b.setForeground(false);
+    desktop.saveTransaction({...input,description:'C5_OFFLINE_RECOVERED'});
+    assert.ok(desktop.getOverview('2026-10'));
+    assert.ok(desktop.db.prepare("SELECT count(*) AS n FROM sync_outbox WHERE state='pending'").get()!.n);
+    await assert.rejects(a.sync());
+  } else if (phase === 'restart-recovered') {
+    b.setForeground(false);
+    await a.sync();
+    assert.equal((await a.status()).sync?.pending,0);
+    b.setForeground(true);await assert.rejects(b.sync(),/epoch_changed/);
+    assert.ok(desktop.listTransactions({month:'2026-10'}).some(t=>t.description==='C5_OFFLINE_RECOVERED'));
   } else if (phase === 'epoch') {
     desktop.saveTransaction({ ...input, description: 'OFFLINE_EPOCH_PENDING' });
     const before = desktop.db.prepare('SELECT * FROM sync_outbox').all();
