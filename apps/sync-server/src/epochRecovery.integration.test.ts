@@ -530,6 +530,8 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
             .get()!.request_text,
         ),
       );
+      for (const mutate of [() => owner.create(), () => owner.generateRecovery(), () => owner.rotateKeys(), () => owner.reconnectRestored(true)])
+        await expect(mutate()).rejects.toThrow('recovery_activated_requires_finalization');
       expect(
         (
           await request(
@@ -851,6 +853,10 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
         [restore3, oldVault(), epoch2],
       );
       // Exercise the actual controller used by native desktop UI, including explicit staging/activation separation.
+      owner.setForeground(true);
+      await expect(owner.sync()).rejects.toThrow('epoch_changed');
+      owner.setForeground(false);
+      expect((await owner.status()).recoveryPhase).toBeNull();
       await owner.prepareServerRecovery(true);
       expect((await owner.status()).recoveryPhase).toBe("prepared");
       expect(

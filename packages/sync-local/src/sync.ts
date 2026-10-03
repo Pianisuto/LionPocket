@@ -184,6 +184,9 @@ export class SyncController {
       )[0] ?? null
     );
   }
+  private async requireRecoveryFinalized() {
+    if (await this.incompleteActivation()) throw new Error('recovery_activated_requires_finalization');
+  }
   private async recoverySession(s: SyncSaved, interactive: boolean) {
     const environment = await this.environment(s.endpoint);
     if (
@@ -488,6 +491,7 @@ export class SyncController {
       await this.activationOptions(s, id, true),
       confirmed,
     );
+    this.coordinator.error = undefined;
     this.coordinator.request("foreground");
     return this.status();
   }
@@ -503,6 +507,7 @@ export class SyncController {
         false,
       ),
     );
+    this.coordinator.error = undefined;
   }
   localWriteCommitted() {
     this.coordinator.request('local-write');
@@ -518,6 +523,7 @@ export class SyncController {
     return new ProvisioningCrypto(this.options.sodium);
   }
   async configure(endpoint: string) {
+    await this.requireRecoveryFinalized();
     const saved = await this.options.storage.load();
     const normalized = normalizeEndpoint(endpoint, this.options.allowLocalDevelopment);
     if (saved?.profile && normalized !== saved.endpoint)
@@ -647,6 +653,7 @@ export class SyncController {
     ) as Promise<RegistryResponse>;
   }
   async create() {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       environment = await this.environment(s.endpoint),
@@ -742,6 +749,7 @@ export class SyncController {
     };
   }
   async pair(invitation: string, confirmedFingerprint: string) {
+    await this.requireRecoveryFinalized();
     const invite = await this.inspectInvitation(invitation);
     const selected = await this.options.storage.load();
     if (selected?.endpoint && selected.endpoint !== invite.endpoint) throw new Error('O convite pertence a outro servidor. Confira a URL antes de continuar.');
@@ -799,6 +807,7 @@ export class SyncController {
     this.coordinator.request('foreground');
   }
   async receive() {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       d = this.device(s);
@@ -865,6 +874,7 @@ export class SyncController {
     }>;
   }
   async approve(deviceId: string, fingerprint: string) {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       device = this.device(s);
@@ -979,11 +989,13 @@ export class SyncController {
     }
   }
   async rotateKeys() {
+    await this.requireRecoveryFinalized();
     const s = await this.saved();
     await this.rotate(s, await this.session(s));
     return this.status();
   }
   async revoke(deviceId: string, confirmedDeviceId: string) {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       d = this.device(s);
@@ -1031,6 +1043,7 @@ export class SyncController {
     return this.status();
   }
   async generateRecovery() {
+    await this.requireRecoveryFinalized();
     const s = await this.saved(),
       session = await this.session(s),
       d = this.device(s),
@@ -1051,6 +1064,7 @@ export class SyncController {
     return { code: created.code };
   }
   async confirmRecovery(code: string) {
+    await this.requireRecoveryFinalized();
     const s = await this.saved();
     if (!s.pendingRecovery) throw new Error('Gere um código de recovery.');
     openRecovery(this.device(s), this.options.sodium, s.pendingRecovery, code);
@@ -1080,6 +1094,7 @@ export class SyncController {
     confirmedFingerprint: string,
     code: string,
   ) {
+    await this.requireRecoveryFinalized();
     const invite = await this.inspectInvitation(invitation);
     if (invite.fingerprint !== confirmedFingerprint)
       throw new Error('fingerprint_mismatch');
@@ -1176,6 +1191,7 @@ export class SyncController {
     return this.status();
   }
   async reconnectRestored(confirm: boolean) {
+    await this.requireRecoveryFinalized();
     if (!confirm)
       throw new Error('Revise a cópia restaurada antes de reconectar.');
     const s = await this.saved(),
@@ -1567,6 +1583,8 @@ export class SyncController {
         : null;
     }
     const error = this.coordinator.error;
+    // A completed recovery of the selected profile is historical after another server restore.
+    if (recoveryPhase === 'recovered' && error === 'epoch_changed') recoveryPhase = null;
     const accountAction =
       [
         'interaction_required',

@@ -24,7 +24,7 @@ A geração antiga muda `active → archived`; a nova é inserida `active`, sob 
 
 Um retry exato devolve o mesmo record, sem reinserir log/receipts. Outro request assinado para a mesma tentativa recebe `idempotency_mismatch` (status `mismatch`). Duas intenções diferentes válidas concorrentes produzem uma única activation; a que obtiver o lock e commitar reserva a tentativa, e a outra é recusada. A durabilidade da intenção do cliente é indispensável: ele nunca gera uma segunda activationId em retry.
 
-Depois do COMMIT não há rollback automático. Proofs, commits e changes antigos permanecem recusados (`epoch_changed`). A UI não oferece Cancelar; oferece **Continuar finalização**. Helpers de cancelamento recusam abandonar/deletar secrets depois que existe uma intenção durável, conservadoramente também durante ambiguidade de resposta.
+Depois do COMMIT não há rollback automático. Proofs, commits e changes antigos permanecem recusados (`epoch_changed`). A UI não oferece Cancelar; oferece **Continuar finalização**. Helpers de cancelamento recusam abandonar/deletar secrets depois que existe uma intenção durável, conservadoramente também durante ambiguidade de resposta. Operações normais que alterariam profile, recovery ou chaves também são recusadas enquanto a activation estiver incompleta. Depois de outro restore, o marcador recovered anterior é tratado como histórico e a UI oferece a nova preparação.
 
 ## Instalação local e startup
 
