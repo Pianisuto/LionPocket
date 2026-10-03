@@ -1,8 +1,11 @@
-import type { KeyCheckpoint } from './security';
-import { sha256 } from '@noble/hashes/sha256';
+import { dataKeys, validateKeyCheckpoints } from "./security";
+import type { KeyCheckpoint } from "./security";
+import { sha256 } from "@noble/hashes/sha256";
 import {
   activeDevice,
   assertKeyBundle,
+  baseKeyVersion,
+  validateEpochDataKeys,
   assertTrustPin,
   canonicalStringify,
   decodeCanonical,
@@ -25,8 +28,8 @@ import {
   type RegistryCheckpoint,
   type TrustPin,
   type VaultKeyDelivery,
-} from '@lionpocket/sync-protocol';
-import { uuidFromRandom, type SecretScope, type SecretStore } from './secrets';
+} from "@lionpocket/sync-protocol";
+import { uuidFromRandom, type SecretScope, type SecretStore } from "./secrets";
 
 /** Both pinned sodium bindings implement this byte API; no private key leaves the runtime. */
 export interface ProvisioningSodium {
@@ -130,7 +133,11 @@ export class DeviceProvisioning {
   ) {
     assertTrustPin(profile.pin);
   }
-  scope(purpose: SecretScope['purpose'], keyVersion = this.profile.activeKeyVersion ?? 1): SecretScope {
+  scope(
+    purpose: SecretScope["purpose"],
+    keyVersion = this.profile.activeKeyVersion ??
+      baseKeyVersion(this.profile.pin),
+  ): SecretScope {
     return {
       installationId: this.profile.installationId,
       deviceId: this.profile.deviceId,
@@ -138,12 +145,12 @@ export class DeviceProvisioning {
       serverEpoch: this.profile.pin.serverEpoch,
       vaultId: this.profile.pin.vaultId,
       purpose,
-      keyVersion: purpose === 'dataKey' ? keyVersion : 1,
+      keyVersion: purpose === "dataKey" ? keyVersion : 1,
     };
   }
-  private async secret(purpose: SecretScope['purpose']) {
+  private async secret(purpose: SecretScope["purpose"]) {
     const seed = await this.secrets.load(this.scope(purpose));
-    if (!seed) throw new Error('secret_unavailable');
+    if (!seed) throw new Error("secret_unavailable");
     return seed;
   }
   static async prepare(
@@ -158,29 +165,29 @@ export class DeviceProvisioning {
       installationId: crypto.uuid(),
       pin: { ...pin },
       deviceId: founder ? pin.founderDeviceId : crypto.uuid(),
-      signingPublicKey: '',
-      boxPublicKey: '',
+      signingPublicKey: "",
+      boxPublicKey: "",
       grants: [],
     };
     const client = new DeviceProvisioning(profile, secrets, crypto);
-    const purposes: SecretScope['purpose'][] = founder
-      ? ['signingSeed', 'boxSeed', 'authoritySeed', 'dataKey']
-      : ['signingSeed', 'boxSeed'];
+    const purposes: SecretScope["purpose"][] = founder
+      ? ["signingSeed", "boxSeed", "authoritySeed", "dataKey"]
+      : ["signingSeed", "boxSeed"];
     // Scope IDs are new CSPRNG IDs. Probe the cofre before publishing anything remotely.
     for (const purpose of purposes) {
       if (await secrets.load(client.scope(purpose)))
-        throw new Error('secret_already_exists');
+        throw new Error("secret_already_exists");
       const seed = crypto.sodium.randombytes_buf(32);
       try {
         await secrets.store(client.scope(purpose), seed);
-        if (purpose === 'signingSeed' || purpose === 'authoritySeed') {
+        if (purpose === "signingSeed" || purpose === "authoritySeed") {
           const pair = crypto.sodium.crypto_sign_seed_keypair(seed);
-          if (purpose === 'signingSeed')
+          if (purpose === "signingSeed")
             profile.signingPublicKey = crypto.encode(pair.publicKey);
           else profile.pin.authorityPublicKey = crypto.encode(pair.publicKey);
           crypto.erase(pair.privateKey);
         }
-        if (purpose === 'boxSeed') {
+        if (purpose === "boxSeed") {
           const pair = crypto.sodium.crypto_box_seed_keypair(seed);
           profile.boxPublicKey = crypto.encode(pair.publicKey);
           crypto.erase(pair.privateKey);
@@ -193,18 +200,18 @@ export class DeviceProvisioning {
   }
   private async sign(
     text: string,
-    purpose: 'signingSeed' | 'authoritySeed' = 'signingSeed',
+    purpose: "signingSeed" | "authoritySeed" = "signingSeed",
   ) {
     const seed = await this.secret(purpose);
     try {
       const pair = this.crypto.sodium.crypto_sign_seed_keypair(seed);
       const expected =
-        purpose === 'authoritySeed'
+        purpose === "authoritySeed"
           ? this.profile.pin.authorityPublicKey
           : this.profile.signingPublicKey;
       const actual = this.crypto.encode(pair.publicKey);
       this.crypto.erase(pair.privateKey);
-      if (actual !== expected) throw new Error('key_mismatch');
+      if (actual !== expected) throw new Error("key_mismatch");
       return this.crypto.sign(text, seed);
     } finally {
       this.crypto.erase(seed);
@@ -234,23 +241,33 @@ export class DeviceProvisioning {
   async grant(
     request: PairingRequest,
     confirmedFingerprint: string,
-    status: 'approved' | 'revoked' = 'approved',
+    status: "approved" | "revoked" = "approved",
   ): Promise<DeviceGrant> {
     verifyPairing(request, this.crypto);
     sameScope(request, this.profile.pin);
     if (confirmedFingerprint !== request.fingerprint)
-      throw new Error('fingerprint_mismatch');
-    if(this.profile.deviceId!==this.profile.pin.founderDeviceId){const authority=await this.secrets.load(this.scope('authoritySeed'));if(!authority)throw new Error('founder_required');this.crypto.erase(authority);}
+      throw new Error("fingerprint_mismatch");
+    if (this.profile.deviceId !== this.profile.pin.founderDeviceId) {
+      const authority = await this.secrets.load(this.scope("authoritySeed"));
+      if (!authority) throw new Error("founder_required");
+      this.crypto.erase(authority);
+    }
     // Possession of the independently stored authority seed authorizes administration.
     // Paired devices receive only data keys, never this seed.
-    if(this.profile.grants.length)validateGrantChain(this.profile.grants,this.profile.pin,this.crypto,this.profile.checkpoint);
+    if (this.profile.grants.length)
+      validateGrantChain(
+        this.profile.grants,
+        this.profile.pin,
+        this.crypto,
+        this.profile.checkpoint,
+      );
     const previous = this.profile.grants[this.profile.grants.length - 1];
     const unsigned = {
       formatVersion: 1 as const,
       serverId: request.serverId,
       serverEpoch: request.serverEpoch,
       vaultId: request.vaultId,
-      registryVersion: nextRegistryVersion(previous?.registryVersion ?? '0'),
+      registryVersion: nextRegistryVersion(previous?.registryVersion ?? "0"),
       previousRegistrySha256: previous
         ? this.crypto.hash(canonicalStringify(previous))
         : null,
@@ -263,7 +280,7 @@ export class DeviceProvisioning {
       ...unsigned,
       signature: await this.sign(
         deviceGrantSigningInput(unsigned),
-        'authoritySeed',
+        "authoritySeed",
       ),
     };
     validateGrantChain(
@@ -278,7 +295,7 @@ export class DeviceProvisioning {
     if (
       canonicalStringify(response.pin) !== canonicalStringify(this.profile.pin)
     )
-      throw new Error('trust_pin_mismatch');
+      throw new Error("trust_pin_mismatch");
     const result = validateGrantChain(
       response.grants,
       this.profile.pin,
@@ -290,7 +307,7 @@ export class DeviceProvisioning {
       own.signingPublicKey !== this.profile.signingPublicKey ||
       own.boxPublicKey !== this.profile.boxPublicKey
     )
-      throw new Error('key_mismatch');
+      throw new Error("key_mismatch");
     this.profile.grants = response.grants;
     this.profile.checkpoint = result.checkpoint;
   }
@@ -303,20 +320,35 @@ export class DeviceProvisioning {
     );
     activeDevice(registry.devices, this.profile.deviceId);
     const recipient = activeDevice(registry.devices, recipientDeviceId);
-    const key = await this.secrets.load(this.scope('dataKey',1));
-    if (!key) throw new Error('secret_unavailable');
+    const keyVersion =
+      this.profile.activeKeyVersion ?? baseKeyVersion(this.profile.pin);
+    const key = await this.secrets.load(this.scope("dataKey", keyVersion));
+    if (!key) throw new Error("secret_unavailable");
     try {
       const { serverId, serverEpoch, vaultId } = this.profile.pin;
-      const bundle: KeyBundle = {
-        formatVersion: 1,
-        serverId,
-        serverEpoch,
-        vaultId,
-        recipientDeviceId,
-        registryVersion: registry.checkpoint.version,
-        keyVersion: 1,
-        vaultKey: this.crypto.encode(key),
-      };
+      const bundle: KeyBundle =
+        keyVersion === 1
+          ? {
+              formatVersion: 1,
+              serverId,
+              serverEpoch,
+              vaultId,
+              recipientDeviceId,
+              registryVersion: registry.checkpoint.version,
+              keyVersion,
+              vaultKey: this.crypto.encode(key),
+            }
+          : {
+              formatVersion: 2,
+              serverId,
+              serverEpoch,
+              vaultId,
+              recipientDeviceId,
+              registryVersion: registry.checkpoint.version,
+              keyVersion,
+              baseKeyVersion: baseKeyVersion(this.profile.pin),
+              dataKeys: await dataKeys(this),
+            };
       const sealed = this.crypto.sodium.crypto_box_seal(
         encodeUtf8(canonicalStringify(bundle)),
         this.crypto.decode(recipient.boxPublicKey),
@@ -328,7 +360,7 @@ export class DeviceProvisioning {
         vaultId,
         recipientDeviceId,
         registryVersion: registry.checkpoint.version,
-        keyVersion: 1,
+        keyVersion,
         sealedBox: this.crypto.encode(sealed),
         authorDeviceId: this.profile.deviceId,
       };
@@ -345,7 +377,7 @@ export class DeviceProvisioning {
     if (
       canonicalStringify(response.pin) !== canonicalStringify(this.profile.pin)
     )
-      throw new Error('trust_pin_mismatch');
+      throw new Error("trust_pin_mismatch");
     const registry = validateGrantChain(
       response.grants,
       this.profile.pin,
@@ -357,27 +389,46 @@ export class DeviceProvisioning {
       own.signingPublicKey !== this.profile.signingPublicKey ||
       own.boxPublicKey !== this.profile.boxPublicKey
     )
-      throw new Error('key_mismatch');
+      throw new Error("key_mismatch");
     if (
       !response.delivery ||
       response.delivery.recipientDeviceId !== this.profile.deviceId
     )
-      throw new Error('delivery_missing');
+      throw new Error("delivery_missing");
     const delivery = response.delivery;
+    const version = validateKeyCheckpoints(
+      response.keyCheckpoints ?? [],
+      this.profile.pin,
+      response.grants,
+      this,
+    );
+    if (
+      version <
+      (this.profile.activeKeyVersion ?? baseKeyVersion(this.profile.pin))
+    )
+      throw new Error("key_checkpoint_rollback");
+    // A signed delivery can precede a later rotation in the same onboarding transaction sequence.
+    // Accept only an authenticated version in this generation; the caller then consumes the newer checkpoints.
+    if (delivery.keyVersion > version) throw new Error("key_version_mismatch");
+    if (
+      delivery.keyVersion <
+      (this.profile.activeKeyVersion ?? baseKeyVersion(this.profile.pin))
+    )
+      throw new Error("key_checkpoint_rollback");
     validateDelivery(delivery, response.grants, this.profile.pin, this.crypto);
-    const seed = await this.secret('boxSeed');
+    const seed = await this.secret("boxSeed");
     const pair = this.crypto.sodium.crypto_box_seed_keypair(seed);
     this.crypto.erase(seed);
     let bytes: Uint8Array | null = null;
     try {
       if (this.crypto.encode(pair.publicKey) !== own.boxPublicKey)
-        throw new Error('key_mismatch');
+        throw new Error("key_mismatch");
       bytes = this.crypto.sodium.crypto_box_seal_open(
         this.crypto.decode(delivery.sealedBox),
         pair.publicKey,
         pair.privateKey,
       );
-      if (!bytes) throw new Error('invalid_sealed_box');
+      if (!bytes) throw new Error("invalid_sealed_box");
       const bundle = decodeCanonical(bytes);
       assertKeyBundle(bundle);
       sameScope(bundle, delivery);
@@ -386,17 +437,48 @@ export class DeviceProvisioning {
         bundle.registryVersion !== delivery.registryVersion ||
         bundle.keyVersion !== delivery.keyVersion
       )
-        throw new Error('key_bundle_mismatch');
-      const key = this.crypto.decode(bundle.vaultKey);
-      const existing = await this.secrets.load(this.scope('dataKey',1));
-      try {
-        if (existing && this.crypto.encode(existing) !== bundle.vaultKey)
-          throw new Error('key_mismatch');
-        await this.secrets.store(this.scope('dataKey',1), key);
-      } finally {
-        this.crypto.erase(key);
-        if (existing) this.crypto.erase(existing);
+        throw new Error("key_bundle_mismatch");
+      if (
+        bundle.formatVersion === 2 &&
+        bundle.baseKeyVersion !== baseKeyVersion(this.profile.pin)
+      )
+        throw new Error("key_bundle_mismatch");
+      const keys =
+        bundle.formatVersion === 1
+          ? validateEpochDataKeys(
+              [{ keyVersion: bundle.keyVersion, vaultKey: bundle.vaultKey }],
+              baseKeyVersion(this.profile.pin),
+              delivery.keyVersion,
+            )
+          : validateEpochDataKeys(
+              bundle.dataKeys,
+              bundle.baseKeyVersion,
+              delivery.keyVersion,
+            );
+      // Check every collision before any write.
+      for (const k of keys) {
+        const existing = await this.secrets.load(
+          this.scope("dataKey", k.keyVersion),
+        );
+        try {
+          if (existing && this.crypto.encode(existing) !== k.vaultKey)
+            throw new Error("key_mismatch");
+        } finally {
+          if (existing) this.crypto.erase(existing);
+        }
       }
+      for (const k of keys) {
+        const key = this.crypto.decode(k.vaultKey);
+        try {
+          await this.secrets.store(this.scope("dataKey", k.keyVersion), key);
+        } finally {
+          this.crypto.erase(key);
+        }
+      }
+      this.profile.activeKeyVersion = delivery.keyVersion;
+      this.profile.keyCheckpoints = (response.keyCheckpoints ?? []).filter(
+        (k) => k.keyVersion <= delivery.keyVersion,
+      );
       this.profile.grants = response.grants;
       this.profile.checkpoint = registry.checkpoint;
     } finally {

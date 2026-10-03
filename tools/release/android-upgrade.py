@@ -4,7 +4,7 @@ Requires old APKs supplied by the operator (or generated from the base revision)
 No clear-storage, uninstall, downgrade, personal data or signature workaround.
 """
 import argparse, json, pathlib, sqlite3, subprocess, tempfile
-from android_readiness import EmulatorDatabase
+from android_readiness import EmulatorDatabase, prepare_emulator_root
 
 p = argparse.ArgumentParser()
 p.add_argument('--serial', required=True)
@@ -23,8 +23,7 @@ if not fixtures.name.startswith('lion-release-fixtures-') or fixtures.parent != 
 def adb(*args, binary=False):
     return subprocess.check_output(['adb', '-s', a.serial, *args], text=not binary).strip() if not binary else subprocess.check_output(['adb', '-s', a.serial, *args])
 def shell(command): return adb('shell', command)
-if shell('getprop ro.kernel.qemu') != '1': raise SystemExit('Emulator guard failed.')
-adb('root'); adb('wait-for-device')
+prepare_emulator_root(a.serial)
 results = []
 for pkg, old, new, versions in [
     ('com.lionpocketmobile', a.old_normal, a.new_normal, [1, 4, 5, 8]),

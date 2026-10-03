@@ -544,12 +544,12 @@ export class SyncController {
         d.profile.pin,
         currentResponse.grants,
         d,
-      ) !== (d.profile.activeKeyVersion ?? 1)
+      ) !== (d.profile.activeKeyVersion ?? d.profile.pin.keyVersion)
     )
       throw new Error('recovery_stale');
     if (
       s.pendingKeyCheckpoint &&
-      s.pendingKeyCheckpoint.keyVersion <= (d.profile.activeKeyVersion ?? 1) &&
+      s.pendingKeyCheckpoint.keyVersion <= (d.profile.activeKeyVersion ?? d.profile.pin.keyVersion) &&
       canonicalStringify(s.pendingKeyCheckpoint) !==
         canonicalStringify(
           d.profile.keyCheckpoints?.[d.profile.keyCheckpoints.length - 1],
@@ -1229,7 +1229,7 @@ export class SyncController {
             : null,
       lastCompletedAt: this.coordinator.lastCompletedAt ?? null,
       restoreReview: state.mode === 'disabled' && !!state.binding_id,
-      activeKeyVersion: saved?.profile?.activeKeyVersion ?? 1,
+      activeKeyVersion: saved?.profile?.activeKeyVersion ?? saved?.profile?.pin.keyVersion ?? 1,
       recoveryVersion: saved?.recoveryVersion ?? '0',
       endpoint: saved?.endpoint ?? (this.options.defaultEndpoint ?? ''),
       phase: saved?.phase ?? 'local',

@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { verifyStagingBackup } from './stagingBackup';
+import { epochStaging } from './epochStaging';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,9 +13,9 @@ import sodium from 'libsodium-wrappers-sumo';
 import {
   authorizeEpochRecovery, authorizeEpochRecoveryWithCode, DeviceProvisioning, ProvisioningCrypto,
   SyncController, syncTables, type SyncSaved, type SyncSession, type SignedRecovery,
-  prepareAnchorArchive, planAnchorBaseline,
+  financialTableTypes, prepareAnchorArchive, planAnchorBaseline, prepareOperationalB, stageOperationalB, makeRecovery, openRecovery, epochPreparationSecretScope,
 } from '@lionpocket/sync-local';
-import { canonicalStringify, epochRecoverySigningInput, type EpochRecoveryChallenge, type EpochRecoveryAuthorization } from '@lionpocket/sync-protocol';
+import { canonicalStringify, decodeCanonical, epochRecoverySigningInput, type EpochRecoveryChallenge, type EpochRecoveryAuthorization, type EpochStagingRequest, epochStagingSigningInput, commitSigningInput, decodeCommit, encodeUtf8 } from '@lionpocket/sync-protocol';
 import { LionPocketDatabase } from '../../desktop/src/main/database';
 import { loginDevelopmentOidc } from '../../desktop/src/main/sync/oidc';
 import { sqliteTestConnection } from '../../mobile/src/db/sqliteTestConnection';
@@ -48,8 +52,8 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
   const device = () => new DeviceProvisioning(structuredClone(ownerProfile()), secrets, crypto);
   const oldVault = () => ownerProfile().pin.vaultId;
   const snapshotLocal = () => ({
-    desktop: Object.fromEntries(syncTables.map(t => [t, bank.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])),
-    android: Object.fromEntries(syncTables.map(t => [t, mobile.sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])),
+    desktop: Object.fromEntries([...syncTables,...Object.keys(financialTableTypes)].map(t => [t, bank.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])),
+    android: Object.fromEntries([...syncTables,...Object.keys(financialTableTypes)].map(t => [t, mobile.sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])),
   });
   async function request(action: string, value: unknown, token = session.accessToken, vaultId = oldVault()) {
     const res = await fetch(`${endpoint}/v1/vaults/${vaultId}/${action}`, { method: 'POST',
@@ -73,6 +77,48 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
       oidc: { issuer, desktopClientId: 'lionpocket-desktop-dev', androidClientId: 'lionpocket-android-dev',
         desktopRedirect: 'http://127.0.0.1:18761/callback', androidRedirect: 'com.lionpocketmobile.syncdev:/callback' } });
     return new Promise<void>(resolve => server.listen(18779, '127.0.0.1', resolve));
+  }
+  async function backupRehearsal(expected:'uploading'|'prepared') {
+    const copy='lion_staging_backup_'+randomUUID().replaceAll('-','');
+    const compose=fileURLToPath(new URL('../../../tools/sync-dev/compose.yml',import.meta.url));
+    const dump=execFileSync('docker',['compose','-f',compose,'exec','-T','postgres','pg_dump','-U','liondev','-Fc',database],{maxBuffer:32*1024*1024});
+    await admin.query(`CREATE DATABASE ${copy}`);
+    const restored=new pg.Pool({connectionString:`postgresql://liondev:liondev@127.0.0.1:55432/${copy}`});
+    try{
+      execFileSync('docker',['compose','-f',compose,'exec','-T','postgres','pg_restore','--exit-on-error','-U','liondev','-d',copy],{input:dump,maxBuffer:1024*1024});
+      const tx=await restored.connect();
+      try{await tx.query('BEGIN READ ONLY');await verifyStagingBackup(tx,crypto);await tx.query('COMMIT');}finally{tx.release();}
+      expect((await restored.query('SELECT state FROM sync_epoch_staging')).rows).toEqual([{state:expected}]);
+      expect((await restored.query('SELECT state,server_epoch FROM sync_generations')).rows).toEqual([{state:'active',server_epoch:epochA}]);
+      expect((await restored.query('SELECT count(*) FROM sync_epoch_transitions')).rows[0].count).toBe(expected==='prepared'?'1':'0');
+      // Simulate the operational epoch bump after restoring this physical snapshot, then resume its original B attempt.
+      const next={serverId:environment.serverId,serverEpoch:crypto.uuid()},newRestore=crypto.uuid();
+      await restored.query('INSERT INTO sync_restores(restore_id,server_id,from_epoch,to_epoch,displaced_epoch,backup_manifest_sha256) VALUES($1,$2,$3,$4,$3,$5)',
+        [newRestore,next.serverId,environment.serverEpoch,next.serverEpoch,'d'.repeat(64)]);
+      await restored.query('INSERT INTO sync_restore_vaults(restore_id,vault_id,source_epoch) VALUES($1,$2,$3)',[newRestore,oldVault(),epochA]);
+      await restored.query('UPDATE sync_environment SET server_epoch=$1',[next.serverEpoch]);
+      const localPath=join(directory,'staging-rehearsal-'+crypto.uuid()+'.sqlite');
+      bank.db.prepare('VACUUM INTO ?').run(localPath);const localCopy=new LionPocketDatabase(localPath);
+      const vault=(await restored.query('SELECT * FROM sync_vaults WHERE vault_id=$1',[oldVault()])).rows[0];
+      try {
+        await stageOperationalB({db:localCopy.syncDatabase(),deviceA:device(),sodium,restoreId,previousTrustedTransition:null,
+          transport:async(action,r)=>{
+            const connection=await restored.connect();
+            try{
+              await connection.query('BEGIN');
+              const response=await epochStaging(connection,action,r,oldVault(),{issuer:vault.owner_issuer,subject:vault.owner_subject},next,crypto);
+              await connection.query('COMMIT');
+              if(action==='prepare')expect(response.readyForActivation).toBe(false);
+              return response;
+            }catch(error){await connection.query('ROLLBACK');throw error;}finally{connection.release();}
+          }});
+        expect((await restored.query('SELECT state FROM sync_epoch_staging')).rows).toEqual([{state:'prepared'}]);
+        expect((await restored.query('SELECT server_epoch,state FROM sync_generations')).rows).toEqual([{server_epoch:epochA,state:'active'}]);
+        const audit=await restored.connect();
+        try{await audit.query('BEGIN READ ONLY');await verifyStagingBackup(audit,crypto);await audit.query('COMMIT');}finally{audit.release();}
+      }finally{localCopy.db.close();}
+
+    }finally{await restored.end();await admin.query(`DROP DATABASE ${copy}`);}
   }
   beforeAll(async () => {
     await sodium.ready;
@@ -247,6 +293,90 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     expect((await pool.query('SELECT count(*) FROM sync_commits')).rows[0].count).toBe('1');
     expect((await request('epoch-recovery-activate', {})).status).toBe(404);
   });
+  it('stages C1+C2 under owner OIDC and B signatures, converges after lost responses, and never activates B', async () => {
+    expect((await request('epoch-staging-begin',{oversized:'A'.repeat(4194304)})).status).toBe(413);
+    const a=device(),beforeLocal=snapshotLocal();
+    const beforeRemote=Object.fromEntries(await Promise.all(Object.keys(generationArchiveKeys).map(async t=>[t,(await pool.query(`SELECT to_jsonb(t) AS row FROM ${t} t ORDER BY to_jsonb(t)::text`)).rows])));
+    const master=await secrets.load(a.scope('recoveryMaster'));if(!master)throw new Error('fixture');
+    let previousRecovery:SignedRecovery;
+    try{previousRecovery=(await makeRecovery(a,sodium,'9007199254740993',master)).recovery;}finally{master.fill(0);}
+    const options={db:bank.syncDatabase(),deviceA:a,sodium,restoreId};
+    const prepared=await prepareOperationalB({...options,previousRecovery});
+    expect(prepared.phase).toBe('recovery_confirmed');
+    const preparationBytes=(await secrets.load(epochPreparationSecretScope(a.profile,restoreId,environment.serverEpoch)))!;
+    const preparation=decodeCanonical(preparationBytes) as Record<string,string>;
+    const secretCanaries=['signingSeed','boxSeed','dataKey','authoritySeed','recoveryMaster'].map(p=>preparation[p]);
+    secretCanaries.push(new TextDecoder().decode(preparationBytes)); preparationBytes.fill(0);
+    const b=new DeviceProvisioning(prepared.profile,secrets,crypto);
+    expect(openRecovery(b,sodium,prepared.recovery,code).dataKeys.map(k=>k.keyVersion)).toEqual([a.profile.activeKeyVersion!+1]);
+    let lost=true;let beginRequest:EpochStagingRequest|undefined,batchRequest:EpochStagingRequest|undefined;
+    const resign=async(r:EpochStagingRequest,payload:unknown)=>{
+      const seed=await secrets.load(b.scope('signingSeed'));if(!seed)throw new Error('fixture');
+      const unsigned={formatVersion:1 as const,vaultId:r.vaultId,restoreId:r.restoreId,action:r.action,payload};
+      try{return {...unsigned,signature:crypto.sign(epochStagingSigningInput(unsigned),seed)};}finally{seed.fill(0);}
+    };
+    const transport=async(action:string,r:EpochStagingRequest)=>{
+      if(action==='begin') {
+        beginRequest=r;
+        expect((await request('epoch-staging-begin',r,other.accessToken)).status).toBe(403);
+        const concurrent=await Promise.all([request('epoch-staging-begin',r),request('epoch-staging-begin',r)]);
+        expect(concurrent.map(x=>x.status)).toEqual([200,200]);
+        expect((await request('epoch-staging-begin',await resign(r,{...(r.payload as object),mappingSha256:crypto.nonce()}))).body.error).toBe('idempotency_mismatch');
+        return concurrent[0].body;
+      }
+      if(action==='batch'&&!batchRequest) {
+        batchRequest=r;
+        const batch=r.payload as {envelopes:string[]};
+        const envelope=decodeCommit(encodeUtf8(batch.envelopes[0]));
+        const seed=await secrets.load(b.scope('signingSeed'));if(!seed)throw new Error('fixture');
+        try{for(const change of [
+          {...envelope,keyVersion:envelope.keyVersion+1},
+          {...envelope,deviceRegistryVersion:'2'},
+          {...envelope,operations:[{...envelope.operations[0],parents:[crypto.uuid()]}]},
+        ]) {
+          const {signature,...unsigned}=change;void signature;
+          const bad=canonicalStringify({...unsigned,signature:crypto.sign(commitSigningInput(unsigned),seed)});
+          expect((await request('epoch-staging-batch',await resign(r,{...batch,envelopes:[bad,...batch.envelopes.slice(1)]}))).status).not.toBe(200);
+        }}finally{seed.fill(0);}
+        expect((await request('epoch-staging-batch',{...r,signature:crypto.encode(new Uint8Array(64))})).status).toBe(403);
+        await pool.query(`CREATE FUNCTION batch_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.ordinal=2 THEN RAISE EXCEPTION 'synthetic_fault'; END IF; RETURN NEW; END $$;
+          CREATE TRIGGER batch_fault BEFORE INSERT ON sync_epoch_staging_commits FOR EACH ROW EXECUTE FUNCTION batch_fault();`);
+        expect((await request('epoch-staging-batch',r)).status).toBe(503);
+        expect((await pool.query('SELECT count(*) FROM sync_epoch_staging_commits')).rows[0].count).toBe('0');
+        expect((await pool.query('SELECT count(*) FROM sync_epoch_staging_batches')).rows[0].count).toBe('0');
+        await pool.query('DROP TRIGGER batch_fault ON sync_epoch_staging_commits; DROP FUNCTION batch_fault();');
+      }
+      const result=await request('epoch-staging-'+action,r);expect(result.status).toBe(200);
+      if(action==='batch'&&lost){await backupRehearsal('uploading');lost=false;throw new Error('response_lost_after_pg_commit');}
+      return result.body;
+    };
+    await expect(stageOperationalB({...options,transport,previousTrustedTransition:null})).rejects.toThrow('response_lost_after_pg_commit');
+    const result=await stageOperationalB({...options,transport,previousTrustedTransition:null});
+    expect(result.manifest.operationCount).toBe('2');
+    await backupRehearsal('prepared');
+    expect((await pool.query('SELECT state FROM sync_epoch_staging')).rows).toEqual([{state:'prepared'}]);
+    expect((await pool.query('SELECT count(*) FROM sync_epoch_staging_commits')).rows[0].count).toBe('2');
+    expect((await pool.query('SELECT count(*) FROM sync_epoch_transitions')).rows[0].count).toBe('1');
+    for(const table of Object.keys(generationArchiveKeys))expect((await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows).toEqual(beforeRemote[table]);
+    expect(snapshotLocal()).toEqual(beforeLocal);
+    expect((await pool.query('SELECT server_epoch,state FROM sync_generations')).rows).toEqual([{server_epoch:epochA,state:'active'}]);
+    for(const table of ['sync_epoch_staging_batches','sync_epoch_staging_commits','sync_epoch_staging_operations','sync_epoch_transitions'])
+      await expect(pool.query(`DELETE FROM ${table}`)).rejects.toThrow('immutable');
+    for(const table of ['sync_epoch_staging','sync_epoch_staging_batches','sync_epoch_staging_commits','sync_epoch_staging_operations','sync_epoch_staging_heads','sync_epoch_transitions']) {
+      const text=JSON.stringify((await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t`)).rows);
+      for(const privateText of [canary,'DESKTOP_C2_AFTER_BACKUP',code,...secretCanaries])expect(text.includes(privateText)).toBe(false);
+    }
+    expect(beginRequest).toBeDefined();expect(batchRequest).toBeDefined();
+    for(const privateText of secretCanaries) expect(canonicalStringify([beginRequest,result]).includes(privateText)).toBe(false);
+    for(const field of ['commitCount','operationCount','batchCount','headsSha256','envelopesSha256','registrySha256','keyCheckpointSha256','recoverySha256','archiveSha256','mappingSha256']) {
+      const changed={...result.manifest,[field]:field.endsWith('Count')?'3':crypto.nonce()};
+      const unsigned={formatVersion:1 as const,vaultId:oldVault(),restoreId,action:'validate' as const,payload:changed};
+      expect((await request('epoch-staging-validate',await resign({...unsigned,signature:''},changed))).status).not.toBe(200);
+    }
+    const {requireActiveGeneration}=await import('./generations');const tx=await pool.connect();
+    try{await expect(requireActiveGeneration(tx,b.profile.pin)).rejects.toThrow('epoch_changed');}finally{tx.release();}
+    expect((await request('epoch-recovery-activate',{})).status).toBe(404);
+  },60000);
   it('keeps pending authorization history across B→C and refuses A→C skipping unrecovered B', async () => {
     const epochB = environment.serverEpoch; environment.serverEpoch = crypto.uuid();
     const second = crypto.uuid();

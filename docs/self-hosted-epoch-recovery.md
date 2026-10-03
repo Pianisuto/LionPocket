@@ -2,13 +2,13 @@
 
 ## Estado desta implementação
 
-**Rebase causal verificável do aparelho âncora; ainda não existe geração B ativa.**
+**Preparação operacional B retomável até prepared; B continua sem ativação.**
 
-Este incremento parte de `eb215897286845f0b632def359b4a4b9f848a2dd` (main após PR #10). PR #9 entregou autorização de preparação; PR #10 entregou generations, archives, backup/journal/mapping e contratos de manifesto/`EpochTransition`. O planner v2 substitui o baseline de heads como raízes pelo fechamento causal completo necessário, com replay financeiro antes de `planned`.
+Este incremento parte exatamente de `cbd7067644c63e6c09802b208731b43d239c0031` (main após PR #11). O plano causal v2 anterior agora pode produzir identidade, registry, chave, recovery, staging, manifesto e transition B reais. O staging é isolado das tabelas ativas. Nenhum binding/profile ativo, financeiro, outbox A ou coordinator é substituído.
 
-O critério de transformação **do grafo local sincronizável** é validado para o recorte descrito abaixo. O critério de retomada operacional ainda não está atendido: não existem staging, nova identidade/key/recovery/registry B, ativação, binding B ou sync B. Discovery mantém `activationAvailable:false`. Foreground não chama os helpers. A continua bloqueada diante do epoch novo. Todas as evidências usam bancos sintéticos descartáveis.
+O material aleatório irreproduzível é persistido como um único `EpochPreparationSecretBundle` privado no SecretStore, relido e verificado **antes** da reserva pública no SQLite. Secrets operacionais são materializações idempotentes desse bundle; crash após sua durabilidade retoma exatamente a mesma B. Não há transação multi-secret, derivação de chaves a partir de A ou secrets no journal público. Sagas do draft anterior sem bundle são marcadas como `legacy_preparation_blocked`, sem inventar material perdido.
 
-Segundo aparelho e recovery sem SQLite antigo continuam pendentes; este PR não reconecta nenhum aparelho. O bloqueio heads-only demonstrado no PR #10 agora possui regressão positiva: ZB e os parents XB/YB conservam a base comum, o registro e o conflito. Dependencies históricas são reemitidas com seus ancestors, sem substituir seu alvo por um head mais recente. Dados sem interpretação segura continuam em review.
+O caminho desde o preparation bundle durável possui retry testado até `prepared`, inclusive com fechamento/reabertura do SQLite e novos adapters. Discovery informa staging disponível e mantém `activationAvailable:false`. Helpers continuam ações explícitas, sem UX nova ou foreground automático. A permanece a geração selecionada e bloqueada pelo epoch mismatch. Segundo aparelho/C3 permanece intocado. As evidências usam fixtures descartáveis; não são alegação de recuperação operacional E1→E2 completa.
 
 ## Fronteira de segurança
 
@@ -113,7 +113,7 @@ Parents precisam existir no mesmo objeto; dependencies precisam existir com o ob
 
 Kahn com min-heap produz ordem topológica sobre **ambas** as relações. UUID desempata apenas revisões já disponíveis; relógios não decidem ordem ou vencedor. O algoritmo é iterativo, O((V+E) log V), com consultas indexadas por revisão e leitura paginada de IDs reservados. Cada revisão incluída recebe novo op/revision ID e novo commit ID, mantendo object ID, snapshot/action, authoredAt e audit. `provenance.origin='restore'`; `restoredFrom` é a referência de audit explícita para A, não uma edge B.
 
-Parents B são os mappings dos parents A, ordenados como conjunto; dependencies B mantêm o object ID e apontam **à revisão histórica mapeada exata**, nunca ao head mais recente. Nenhuma edge B aponta para A. Commit planning continua um commit por revisão, sem compactação ou batching remoto. Série, slot, alias e prioridade continuam identidades lógicas.
+Parents B são os mappings dos parents A, ordenados como conjunto; dependencies B mantêm o object ID e apontam **à revisão histórica mapeada exata**, nunca ao head mais recente. Nenhuma edge B aponta para A. Commit planning continua um commit por revisão, sem compactação. A preparação operacional abaixo agrupa esses commits em batches. Série, slot, alias e prioridade continuam identidades lógicas.
 
 ### Schema, compatibilidade e compromissos
 
@@ -121,7 +121,7 @@ Parents B são os mappings dos parents A, ordenados como conjunto; dependencies 
 
 `migrateAnchorPlan()` adiciona as colunas idempotentemente a um archive PR #10, preservando seu plano como formato 1. O planner, o consumidor e os compromissos **recusam formato 1**. `discardLegacyAnchorPlan()` descarta apenas esse mapping antigo e seus reviews, em transação, retorna a `archived` v2 e permite replanejar a mesma evidência. Nunca apaga archive A, backup, autorização ou profile. A imutabilidade do mapping é reinstalada na mesma transação. Um v2 já durável não pode ser convertido em v1. Review v2 ainda exige uma tentativa/snapshot explícito futuro; não se edita archive selado.
 
-`anchorPlanCommitments` usa domínio mapping v2 e compromete ordinal, revision A/B, object, commit, **parents B ordenados, head/non-head** e hash do payload, que inclui dependencies B. Alterar parent muda o digest. `headsSha256` compromete somente heads finais. O contrato `EpochBaselineManifest` já contém `mappingSha256`; manifesto/transition e vetor contratual não precisaram mudar. Nenhum manifesto é persistido ou ativado.
+`anchorPlanCommitments` usa domínio mapping v2 e compromete ordinal, revision A/B, object, commit, **parents B ordenados, head/non-head** e hash do payload, que inclui dependencies B. Alterar parent muda o digest. `headsSha256` compromete somente heads finais. O contrato `EpochBaselineManifest` já contém `mappingSha256`; manifesto/transition e vetor contratual não precisaram mudar. O planner por si só não persiste manifesto. A saga operacional abaixo o persiste sem ativação.
 
 ### Conflict preservation e restore provenance
 
@@ -145,7 +145,7 @@ Crash antes do commit reverte todas as linhas do mapping; retry após commit reu
 
 No teste PostgreSQL/Keycloak, C1 foi aceito antes do backup e C2 depois. Restore perde C2 remoto, mas o archive/fechamento local contém C1+C2 e o replay v2 passa. Android offline conserva C3, binding/outbox/SQLite A, sem chamadas novas nem recuperação no foreground.
 
-**Ainda não existe geração B ativa.** Discovery continua `activationAvailable:false`. Nenhum seed signing/box, data key, recovery, registry operacional, binding B, staging/upload/manifesto remoto, ativação ou sync B foi criado.
+**Ainda não existe geração B ativa.** Discovery continua `activationAvailable:false`. A preparação abaixo cria secrets/artifacts/staging B; binding B, ativação e sync B permanecem ausentes.
 
 ## Manifesto B e prova final separada
 
@@ -157,32 +157,108 @@ A helper de verificação confere assinatura, compromissos, pin A confiável, pi
 
 `fixtures/epoch-transition.json` e `tools/epoch-recovery/generate-transition-vector.cjs` congelam bytes, hashes e assinatura com Node/OpenSSL, independentemente dos adapters sodium. São seeds públicas e artifacts de compromisso **somente de teste**, não registry/key/recovery de produção. Contagens maiores que `MAX_SAFE_INTEGER` evitam coerção numérica acidental.
 
-Não há rota para publicar ou ativar uma transition, nem tabela de transitions finalizadas neste draft. Esses contratos são revisáveis em draft antes de qualquer produção. O ledger continua auxiliar; não é a cadeia criptográfica final.
+A rota `epoch-staging-prepare` persiste a transition assinada em `sync_epoch_transitions`, com estado exclusivamente `prepared`. Ela não seleciona uma geração ativa. O ledger continua auxiliar; não substitui a cadeia criptográfica final.
 
-## Staging, identidade, chave, recovery e saga: pendentes
+## Operational B preparation
 
-Não há staging remoto nesta implementação. O próximo passo precisa de begin/batches imutáveis idempotentes/validate/manifest/prepare, vinculados a restore/vault/owner/autorização/anchor B, com uma tentativa concorrente por autorização. Assinaturas, escopo, keyVersion, grafo público B, contagens, hashes e completude precisam ser validados sem plaintext. Não usar bootstrap nem `/commits` normal para essa preparação.
+`prepareOperationalB` exige journal `planned` / `plan_format=2`, archive selado, profile A exato e todos os sidecars A iguais ao archive. Revalida isso antes de fechar e publicar artifacts finais. Dirty, inbox, quarantine, reviews e mudança após o archive não são migrados nem tolerados.
 
-A identidade operacional B deve ser nova (device/signing/box), mantendo serverId/vaultId/authority. Registry inicial só anchor, grants novos pela authority, chaves A preservadas. A chave ativa B deve ser nova e monotônica (`activeKeyVersionA+1`), com checkpoint/delivery exclusivo ao anchor e scopes próprios. A inicialização dessa cadeia ainda precisa resolver as assumptions atuais de `TrustPin.keyVersion=1` e checkpoints que começam em 2; não transportar uma cadeia/checkpoint A como se fosse B.
+Cria novo deviceId, signing seed/public key e box seed/public key. Preserva installationId do aplicativo físico: ele não é fronteira criptográfica; deviceId, profile, epoch e SecretScope são. O pin B preserva serverId/vaultId/authority, muda epoch para `authorization.toEpoch` e founder para o novo anchor. Registry B é uma cadeia nova com somente o grant approved do anchor, versão textual `1`, assinado pela authority A. Não copia grants/revogações A.
 
-Recovery B deve existir confirmado antes de ativar: reembrulhar com master previamente confirmado, mantendo o mesmo código, ou apresentar código novo e exigir redigitação. Deve conter scope/authority/registry e keys corretos, com versão monotônica. Nenhum código é alterado por este draft; recovery B/abertura em instalação limpa **não foram implementados nem testados**.
+A ordem é: validar A/archive/plano; determinar scope estável; carregar ou gerar/persistir/reler/verificar o bundle; construir identidade pública B; inserir saga formato 2 com hash do bundle e digests dos secrets; materializar os secrets B individualmente; avançar a `secrets_prepared`. Falha ambígua de store exige load e comparação exata antes do INSERT. Um bundle ausente depois da reserva é erro duro, nunca regeneração.
 
-A saga completa deve persistir profile B público, estado dos scopes/segredos (sem material privado), tentativa/staging, manifesto/transition e activation state. Depois de ativação PostgreSQL atômica, deve verificar a transition ativa e retomar instalação SQLite/profile após crash, sem nova baseline. Não há activation transaction nem instalação B aqui; nenhum crash posterior a ativação pode ser anunciado como coberto. Nunca apagar A nem fazer “cancelar” voltar para A depois da ativação.
+SecretScopes preservam installation/server/vault e distinguem device B, epoch B, purpose e keyVersion. Seeds/authority/master usam purpose version 1; a data key usa sua versão operacional. A scope e profile continuam preservados. A DEK B é CSPRNG nova de 32 bytes; não deriva nem reutiliza DEK A. O material da authority é copiado para o scope B, sem trocar/remover a authority A.
 
-A outbox A não é transmitida em B e não recebe marca de superseded nesta preparação. Uma implementação futura só pode marcar efeitos com evidência suficiente, preservando envelopes/receipts. Reviews/drafts fora do grafo não são migrados silenciosamente.
+### Key base across epochs
+
+`TrustPin.keyVersion` já existe no wire v1 e agora tem semântica explícita de **base imutável da geração** (`baseKeyVersion(pin)`). Nenhum campo extra torna pins legacy permissivos. Cofres antigos permanecem com base 1. B começa em `activeKeyVersionA+1`; `activeKeyVersionB=base`. Checkpoints B começam vazios e rotações posteriores são base+1, base+2. Não são checkpoints A com epoch alterado.
+
+PostgreSQL persiste `base_key_version` e `active_key_version` em sync_vaults. Migration idempotente usa NULL como sentinel para backfill uma vez: base do pin (1 para legacy), ativa do último checkpoint ou da base. Depois instala defaults/NOT NULL/CHECK. Rotação atualiza a versão ativa transacionalmente. `archive_sync_vaults` ganha as colunas; arquivos antigos mantêm seus valores anteriores, com NULL nas novas colunas históricas. Cópia usa nomes explícitos de colunas para não depender de sua posição.
+
+`EpochKeyBase` é um artifact separado: formatVersion 1, serverId/serverEpoch/vaultId/restoreId/fromEpoch, baseKeyVersion, previousActiveKeyVersion, previousKeyCheckpointsSha256 e signature. Domínio Ed25519: `LionPocket/epoch-key-base/v1`. Assert estrito exige base=previousActive+1. O begin inclui a história A conhecida, verificada com grants A autorizados e prefixo exato da história restaurada. Assim, rotações A perdidas no restore são preservadas como evidência; não viram cadeia operacional B. O campo `keyCheckpointSha256` do manifesto compromete **o JSON canônico completo desse EpochKeyBase assinado**, sem ambiguidade com checkpoint de rotação.
+
+Delivery cria a chave ativa e, quando necessário, KeyBundle formatVersion 2 com baseKeyVersion/dataKeys do intervalo deste epoch. KeyBundle v1 continua estrito e emitido para base/ativa 1. O envelope de delivery assinado permanece v1. Upload/recepção admitem delivery assinado histórico deste epoch seguido por checkpoints mais novos: pairing pode publicar delivery e então rotacionar. Checkpoints já recebidos integralmente pelo bundle não exigem um sealedBox histórico dirigido a um device que ainda não existia. Não há condicionais específicas de recovery nesses caminhos.
+
+### Recovery B
+
+O envelope recovery assinado e a KDF LP1 permanecem v1. Somente seu conteúdo cifrado evolui: RecoveryBundle v2 acrescenta baseKeyVersion. Parsing bifurca estritamente por versão e `exactObject`; v1 continua legível e emitido para gerações base 1, preservando recovery de clientes anteriores. `dataKeys` contém exatamente o intervalo base..active do epoch, até 1000 chaves, sem exigir 1..base-1. Versões de recovery são strings int64: B=versão conhecida A+1, inclusive acima de MAX_SAFE_INTEGER.
+
+Se master A confirmado está no SecretStore, o recovery A assinado é aberto e seus secrets/authority/versões conferidos contra o contexto confiável. O mesmo master é copiado para B, preservando o código humano. Recovery B é novo ciphertext e aberto novamente antes de confirmação. O servidor recebe apenas o objeto assinado; não aprende que o código foi reutilizado.
+
+Se master A não está disponível, gera master B novo e retorna código LP1 **somente ao caller**, sem persisti-lo em SQLite/logs. A fase fica `recovery_pending_confirmation`. `confirmOperationalBRecovery` exige redigitação, verifica assinatura/AEAD/scope/authority/registry/base/ativa e todas as DEKs B contra SecretStore, e persiste apenas a flag pública. Código novo nunca é auto-confirmado. O begin assinado pelo anchor inclui `recoveryConfirmed:true`, uma declaração do cliente; o servidor não consegue verificar a redigitação nem decryptar recovery.
+
+### Preparation secret bundle e scope
+
+`EpochPreparationSecretScope` é um tipo específico, localizado sem depender do deviceId B: formatVersion 1, purpose `epochPreparation`, installationId, anchorDeviceId A, serverId, vaultId, fromEpoch, toEpoch e restoreId. Wrapping usa domínio `LionPocket/epoch-preparation-wrap/v1`, distinto de `LionPocket/local-wrap/v1` dos secrets operacionais.
+
+O bundle privado formatVersion 1 guarda deviceId B; signingSeed, boxSeed e dataKey B CSPRNG independentes; cópia da authority necessária; master confirmado A ou master B novo; nonce recovery B; public keys derivadas/baseKeyVersion; recovery A assinado quando aplicável; hashes do profile A/autorização e compromissos do plano. Guarda bytes do master, sem código textual LP1. O nonce durável também reproduz ciphertext/signature do recovery se ocorrer crash antes do INSERT desse artifact. Não cria uma KDF nova.
+
+Parsing exige JSON canônico/exact object, UUIDs, comprimentos exatos, scope/plano/profile A confiáveis. Recalcula public keys signing/box/authority e valida recovery A/master/DEKs antes de aceitar. Toda reserva pública precisa coincidir exatamente com o bundle, sem reparo de um lado pelo outro. Mensagens de parsing são fixas e não citam conteúdo privado. O bundle tem limite de 128 KiB.
+
+Desktop usa safeStorage seguro, tempfile fsynced e publicação create-if-absent por hard link; uma reserva existente diferente é recusada. Linux basic_text/unavailable continua recusado. Android usa AES-GCM AndroidKeyStore + AndroidX AtomicFile (.new em todas as APIs suportadas, incluindo primeira escrita, com fsync explícito antes de publicar; lê backups .bak operacionais legados) no noBackupFilesDir, alias/diretório exclusivos da preparação, wrapper versão 2; wrappers operacionais versão 1/32 bytes permanecem compatíveis. TestSecrets aplica a mesma imutabilidade. Os três adapters aceitam bytes variáveis somente nesse scope específico.
+
+### Saga local e crash recovery
+
+Extensão instalada explicitamente após o archive, sem bump da migration financeira normal:
+
+- `recovery_b_saga`: identity_reserved → secrets_prepared → recovery_pending_confirmation → recovery_confirmed → staging → staged → prepared.
+- `preparation_format=2` e `preparation_sha256` imutáveis vinculam o artifact privado. Migration aditiva atribui formato 1 a rows antigos, bloqueados explicitamente.
+- `recovery_b_envelopes` e `recovery_b_batches`: bytes/digests/identidades imutáveis.
+
+SQLite guarda somente artifacts públicos/ciphertext, compromissos e digests; bundle/seeds/DEK/master/LP1 não entram no SQLite, PostgreSQL, backup público, staging begin, manifest ou transition. Antes de existir bundle durável, não existe reserva pública e retry pode gerar material. Depois, retry somente carrega o bundle original: secret ausente é gravado com aqueles bytes; presente diferente falha duramente. Faults cobrem todas as fronteiras e releitura. `last_device_seq` preserva o contador baseline para futura ativação, sem mudar o contador ativo A.
+
+Antes de `remote_started=1`, `cancelOperationalB` significa pausar: `phase='cancelled'` preserva a fase anterior em `resume_phase`, archive/plano/bundle/identidade/secrets/artifacts. `resumeOperationalB` é ação explícita, valida novamente a reserva e restaura a fase original; foreground não retoma. `cancelAnchorPlan` delega essa semântica quando há saga B formato 2, mantendo o plano `planned`. Atualizações de preparação/confirmation verificam a pausa na mesma transação e não a sobrescrevem por corrida. Depois que `remote_started=1` é marcado conservadoramente antes do begin, cancelamento continua recusado; retry continua a mesma B.
+
+**Lifetime:** o bundle permanece durável durante preparação e staging, inclusive em `prepared` ou pausa. Este PR não implementa cleanup. Condição futura segura: ativação B e instalação local (binding/profile, secrets e dados selecionados) totalmente finalizadas e verificadas de forma durável, incluindo a recuperação de crashes nessa fronteira. Somente o próximo fluxo poderá definir e executar sua remoção; `prepared` não é essa condição.
+
+## Staging remoto
+
+Rotas POST `/v1/vaults/:vaultId/epoch-staging-{begin,batch,validate,prepare,status}` usam owner OIDC habilitado + autorização PR #9 persistida e owner do challenge. Request tem exatamente formatVersion/vaultId/restoreId/action/payload/signature; a signing key nova B assina domínio `LionPocket/epoch-staging-request/v1`. Não exige proof HTTP normal do epoch ativo. Login sozinho, signing key A ou outro owner não bastam.
+
+B existe exclusivamente em `sync_epoch_staging`, `sync_epoch_staging_batches`, `sync_epoch_staging_commits`, `sync_epoch_staging_operations`, `sync_epoch_staging_heads`, `sync_epoch_transitions`. Nenhuma linha de geração B é inserida em sync_generations; `requireActiveGeneration(B)` falha. Estados uploading → validated → prepared não incluem active. Locks PostgreSQL do vault serializam begin/batch/prepare; PKs/FKs/uniqueness complementam os locks. Triggers proíbem update/delete de bytes aceitos e substituição de artifacts finais.
+
+Begin verifica pin B no mesmo server/vault/authority, founder e public keys novos, registry B inicial, key-base monotônica, history A assinada, recoveries A/B assinados e versão monotônica, autorização exata e plan commitments. Uma autorização aceita somente uma reserva; alteração de artifacts válidos é `idempotency_mismatch`.
+
+Batch tem batchOrdinal/firstOrdinal/lastOrdinal int64 textuais e envelopes canônicos exatos como strings. Limites: 100 commits/batch, 1000 operações/batch, envelope financeiro até 1 MiB (limite v1 existente), request até 4 MiB, máximo 100000 batches. O cliente divide também por bytes e persiste antes do upload. Device sequence começa em 1 e segue o ordinal causal, um commit por revisão; IDs/objectId/parents são exatamente os mappings v2. Payloads usam primitives normais wire-v1 para nonce, AD, AEAD e assinatura.
+
+Servidor verifica canonical bytes, assinatura B, scope/IDs/sequence/key/registry, limites, duplicatas, parents já disponíveis no mesmo attempt/objeto e ordem causal. Não aceita parents A ou outro attempt. Deriva heads ao inserir operações e rederiva do grafo ao validar, conferindo também o índice de heads. Counts e digest chain são recalculados dos bytes armazenados em páginas limitadas; contadores int64 nunca viram Number.
+
+### Compromissos exatos
+
+Todos os hashes são SHA-256 UTF-8 base64url sobre canonicalStringify:
+
+- authorizationSha256: autorização PR #9 completa assinada.
+- registrySha256: array completo dos grants B assinados, o mesmo objeto no begin.
+- keyCheckpointSha256: EpochKeyBase completo assinado.
+- recoverySha256: SignedRecovery B completo (envelope e signature).
+- archiveSha256/mappingSha256: exatamente os compromissos locais do planner/archive v2.
+- envelopesSha256: começa em `{context:"LionPocket/epoch-staging-envelopes/v1",restoreId,vaultId,fromEpoch,toEpoch}`; cada entrada hash de `{context:"LionPocket/epoch-staging-envelope-entry/v1",previousSha256,ordinal,batchOrdinal,commitId,envelopeText}`. Compromete ordem, batch e bytes exatos, incluindo nonce/signature.
+- headsSha256: domínios `epoch-baseline-heads/v1` e `epoch-baseline-head-entry/v1` já usados no plano, mesma scope, ordenação objectId/revisionId e conjunto derivado.
+
+`fixtures/epoch-staging.json` congela genesis, assinatura, digest chains e RecoveryBundle v2/AEAD com seeds públicas de teste. Ed25519 é conferida independentemente com Node/OpenSSL; recovery com sodium.
+
+Depois de todos os batches, `epochBaselineManifestInput` fecha o manifesto real. Validate reconta envelopes/ops/batches, verifica signatures e metadata contra linhas públicas, parents, contiguidade, heads e todos os hashes observáveis. Archive/mapping são commitments do anchor, **não validação semântica financeira pelo servidor**. A equivalência local anterior e decrypt/replay de testes são a fronteira semântica.
+
+Somente após validate, a helper assina EpochTransition pela mesma authority, verifica localmente contra artifacts/pins/authorization/chain tip confiável e envia prepare. Transition imutável em estado prepared; retry byte-idêntico não duplica nada. Nenhum logPosition/receipt ativo é inventado. Resposta preparada é conferida antes do save local. Tip anterior do cliente é explicitamente confiável; servidor procura transition previamente persistida terminando no pin A, não aceita tip arbitrária de request.
+
+Backup/restauração de uma tentativa preserva seus epochs/identity/bytes. Uma tentativa já aceita pode continuar no target original após um restore operacional registrado desse target para o ambiente novo; não pode criar outra identidade nem retargetear A→C. Um target preparado diferente do ambiente retorna `readyForActivation:false`. Definir a futura ativação e resolver a continuidade operacional permanece fora deste PR.
+
+**B ainda não está ativa.** Não há cópia para sync_commits, substituição de pin/grants/heads/binding A, sync normal B, eliminação de A, supersede/transmissão da outbox A ou recuperação C3. A activation transaction continua trabalho futuro.
 
 ## Operação self-hosted e backups
 
 O ledger PR #9 continua com `sync_restores`, `sync_restore_vaults`, `sync_epoch_challenges`, `sync_epoch_authorizations`. `lpctl restore` preserva esse ledger num journal externo durável antes de substituir bancos, mescla estados monotônicos e gera novo epoch. Um cofre A ainda pendente não pula para C; autorização anterior não é apagada por restore antigo. Não existe comando administrativo de ativação.
 
-Backup operacional agora produz manifesto **v3**, acrescentando `generationArchiveSha256` ao digest do ledger v2 e aos checksums dos dumps sync/IdP. `pg_dump` inclui índice/tabelas ativas/archives e evidência de autorização. `verify-backup` continua read-only para a instalação: restaura ambos os dumps em bancos temporários, valida referências/geração selecionada/selo/positions/parents/heads e hash dos bytes dos envelopes arquivados, e calcula o compromisso em páginas de 100. Confere o digest v3 antes do ensaio de novo epoch. Falha limpa os bancos temporários e não modifica segredos/configuração/serviços ativos.
+Backup operacional produz manifesto **v4**, conservando generationArchiveSha256/restoreLedgerSha256/checksums dos dumps e acrescentando `stagingSha256`. `pg_dump` preserva attempts, batches, commits/ops/heads, manifestos e transitions prepared. Domínio do digest operacional novo: `LionPocket/operational-staging-backup/v1\n`, tabelas/PKs e linhas canônicas paginadas em ordem, incluindo ciphertext/bytes exatos e fases incompletas.
 
-Manifestos v1/v2 continuam aceitos explicitamente. Ausência total de estrutura de gerações é legacy, mas presença parcial ou arquivo inconsistente falha. Atualização da API migra estado legacy sem onboarding novo. Os checksums não substituem autenticação externa do backup, e a ferramenta não interpreta finanças ou verifica signatures pela authority. Staging/transitions futuros precisam ser incluídos quando existirem; não estão disfarçados como campos já persistidos.
+`verify-backup` continua sem mutações na instalação ativa: restaura dumps em bancos temporários, confere o digest e executa o verificador Node em `BEGIN READ ONLY` nesse banco. Verifica schema/triggers, autorização/owner/referências, signatures de registry/key/recovery/envelopes/transition, contiguidade dos batches, grafo/heads/counters/hashes e cadeia final prepared. Incomplete permanece incomplete; prepared permanece prepared, nunca active. Não há DEK nem decrypt.
+
+Manifestos v1/v2/v3 continuam aceitos com seus contratos/digests anteriores. A nova verificação de staging é exclusiva do v4. Schema parcial não é backup v4 válido. Migração de cofres legacy não exige onboarding novo. Checksums não substituem autenticação externa do backup. O verifier não é oracle de plaintext financeiro.
 
 ## Validação e limites da evidência
 
-Veja [evidência deste draft](self-hosted-anchor-generation-validation.md). A [evidência PR #9](self-hosted-epoch-recovery-validation.md) permanece histórica, com seus próprios limites.
+Veja [evidência da preparação operacional B](self-hosted-operational-b-validation.md), [evidência do planner PR #11](self-hosted-anchor-generation-validation.md) e [evidência PR #9](self-hosted-epoch-recovery-validation.md), que permanecem históricas.
 
-Entregue: normal sync/cliente anterior, arquivo remoto transacional e imutável, SQLite backup/arquivo/mapping, C1+C2, tombstone/branches no plano, reviews, paginação, rollback/retry de preparação, contratos finais/chaining, clean-install/backup/verify/restore operacional e canários. **Não entregue:** geração B ativa, nova proteção B, staging/upload, activation replay/concurrency, instalação/saga B, todos os fault points posteriores ao planejamento, integração financeira E1→E2→E3, UX funcional de recuperação.
+O recorte inclui preparação real até prepared após persistência dos secrets, encrypted replay C1+C2, conflitos/tombstones, pairing/rotation base N, retry de bytes, autenticação/tampering, PostgreSQL/Keycloak, backup v4 e ensaios isolados. O bloqueio pré-secrets foi removido pelo bundle durável; faults de todas as escritas convergem sem regenerar B. Não há ativação, instalação de binding B, segundo aparelho recuperado, integração nativa de UX/backup Android ou E1→E2 operacional completo.
 
-`protocolVersion=1`, `domainSchema=1` e wire financeiro normal permanecem iguais. Discovery continua `epochRecovery:{formatVersion:1,authorizationAvailable:true,activationAvailable:false}`. As decisões do Vault/Visão e Decisões não foram alteradas: local-first, causalidade sem relógio, revisão explícita e autoridade do usuário permanecem necessárias.
+`protocolVersion=1`, `domainSchema=1` e wire financeiro permanecem. Discovery é `epochRecovery:{formatVersion:1,authorizationAvailable:true,stagingAvailable:true,activationAvailable:false}`. As decisões do Vault/Visão e Decisões não foram alteradas.

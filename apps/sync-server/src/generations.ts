@@ -64,6 +64,10 @@ DROP TRIGGER IF EXISTS immutable_archive ON archive_${table};
 CREATE TRIGGER immutable_archive BEFORE INSERT OR UPDATE OR DELETE ON archive_${table}
 FOR EACH ROW EXECUTE FUNCTION sync_immutable_generation_archive();
 `).join('') + `
+-- Existing archive rows preserve the exact legacy pin and checkpoint chain.
+ALTER TABLE archive_sync_vaults ADD COLUMN IF NOT EXISTS base_key_version bigint;
+ALTER TABLE archive_sync_vaults ADD COLUMN IF NOT EXISTS active_key_version bigint;
+-- Backfill is deliberately performed only before the archive immutability trigger is restored by this migration.
 CREATE INDEX IF NOT EXISTS archive_sync_commits_position ON archive_sync_commits(vault_id,generation_epoch,log_position);
 CREATE INDEX IF NOT EXISTS archive_sync_operations_object ON archive_sync_operations(vault_id,generation_epoch,object_id);
 `;
@@ -81,7 +85,8 @@ export async function sealRestoredGeneration(tx: PoolClient, vaultId: string, cu
   if (generation.archive_sealed) return;
   for (const table of Object.keys(generationArchiveKeys)) {
     // Table names are a fixed internal allowlist. All source fields, including exact envelope_text/receipts, are copied.
-    await tx.query(`INSERT INTO archive_${table} SELECT t.*,$2::uuid FROM ${table} t WHERE vault_id=$1`, [vaultId, epoch]);
+    const columns = (await tx.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position", [table])).rows.map(r => String(r.column_name));
+    await tx.query(`INSERT INTO archive_${table}(${columns.join(',')},generation_epoch) SELECT ${columns.map(c => `t.${c}`).join(',')},$2::uuid FROM ${table} t WHERE vault_id=$1`, [vaultId, epoch]);
   }
   await tx.query('UPDATE sync_generations SET archive_sealed=true WHERE vault_id=$1 AND server_epoch=$2', [vaultId, epoch]);
 }
