@@ -579,7 +579,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
         try {
           const { verifyActivationBackup } = await import('./activationBackup');
           await audit.query('BEGIN READ ONLY'); await verifyActivationBackup(audit, crypto); await audit.query('COMMIT');
-          for (const corrupt of ["UPDATE sync_commits SET receipt=jsonb_set(receipt,'{logPosition}','\"99\"')", "UPDATE sync_environment SET server_epoch=gen_random_uuid()"] ) {
+          for (const corrupt of ["UPDATE sync_commits SET receipt=jsonb_set(receipt,'{logPosition}','\"99\"')", "UPDATE sync_commits SET accepted_registry_version=999,receipt=jsonb_set(receipt,'{acceptedRegistryVersion}','\"999\"')", "UPDATE sync_environment SET server_epoch=gen_random_uuid()"] ) {
             await audit.query('BEGIN'); await audit.query(corrupt);
             await expect(verifyActivationBackup(audit, crypto)).rejects.toThrow('invalid_activation_backup');
             await audit.query('ROLLBACK');
@@ -819,6 +819,10 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
             await import("./activationBackup")
           ).verifyActivationBackup(audit, crypto);
           await audit.query("COMMIT");
+          await audit.query('BEGIN');
+          await audit.query("UPDATE sync_commits SET accepted_registry_version=999,receipt=jsonb_set(receipt,'{acceptedRegistryVersion}','\"999\"') WHERE log_position>2");
+          await expect((await import('./activationBackup')).verifyActivationBackup(audit, crypto)).rejects.toThrow('invalid_activation_backup');
+          await audit.query('ROLLBACK');
         } finally {
           audit.release();
           await restored.end();

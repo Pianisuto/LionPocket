@@ -195,6 +195,11 @@ export async function verifyActivationBackup(
         );
         const { signature, ...unsignedCommit } = e;
         if (
+          accepted.checkpoint.version !== c.accepted_registry_version ||
+          authored.checkpoint.version !== e.deviceRegistryVersion ||
+          BigInt(e.deviceRegistryVersion) > BigInt(c.accepted_registry_version) ||
+          e.keyVersion < Number(target.base_key_version) ||
+          e.keyVersion > Number(target.active_key_version) ||
           BigInt(c.log_position) !== BigInt(cursor) + 1n ||
           e.commitId !== c.commit_id ||
           e.deviceId !== c.device_id ||
