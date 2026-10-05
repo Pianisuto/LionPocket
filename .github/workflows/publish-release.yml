@@ -49,10 +49,15 @@ jobs:
       - run: npm run lint
       - run: npm run sync:self-hosted:validate
       - run: git diff --check
-      - name: Refuse an existing public release
+      - name: Refuse an existing tag or public release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
+            echo "Tag v$RELEASE_VERSION already exists; refusing to reuse it." >&2
+            exit 1
+          fi
           if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
             echo "Release v$RELEASE_VERSION already exists." >&2
             exit 1
@@ -197,6 +202,10 @@ jobs:
           set -euo pipefail
           node tools/release/validate.cjs "v$RELEASE_VERSION"
           test -f "docs/releases/v$RELEASE_VERSION.md"
+          if git show-ref --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
+            echo "Tag already exists; refusing to reuse it." >&2
+            exit 1
+          fi
           if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
             echo "Release already exists; refusing to replace it." >&2
             exit 1
