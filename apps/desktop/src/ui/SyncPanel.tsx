@@ -194,71 +194,77 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       <div
         className={`sync-overview ${needsAttention ? 'is-attention' : connected ? 'is-connected' : ''}`}
       >
-        <div className="sync-overview__state" role="status" aria-live="polite">
-          <span className="sync-overview__icon">
-            <StatusIcon
-              size={22}
-              aria-hidden="true"
-              className={status.activity === 'syncing' ? 'sync-spinning' : ''}
-            />
-          </span>
-          <div>
-            <strong>{statusTitle}</strong>
-            <p>{statusDescription}</p>
+        <div className="sync-overview__main">
+          <div
+            className="sync-overview__state"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="sync-overview__icon">
+              <StatusIcon
+                size={22}
+                aria-hidden="true"
+                className={status.activity === 'syncing' ? 'sync-spinning' : ''}
+              />
+            </span>
+            <div>
+              <strong>{statusTitle}</strong>
+              <p>{statusDescription}</p>
+            </div>
           </div>
+          {canManage && (
+            <div className="sync-actions">
+              <button
+                className="button button--primary"
+                disabled={busy || status.paused || status.restoreReview}
+                onClick={() => void run('sync')}
+              >
+                <RefreshCw size={16} aria-hidden="true" />
+                {busy ? 'Aguarde…' : 'Sincronizar agora'}
+              </button>
+              <button
+                className="button"
+                disabled={busy}
+                onClick={() => void run('pause', [!status.paused])}
+              >
+                {status.paused ? (
+                  <Play size={15} aria-hidden="true" />
+                ) : (
+                  <Pause size={15} aria-hidden="true" />
+                )}
+                {status.paused ? 'Retomar' : 'Pausar'}
+              </button>
+            </div>
+          )}
         </div>
-        {canManage && (
-          <div className="sync-actions">
-            <button
-              className="button button--primary"
-              disabled={busy || status.paused || status.restoreReview}
-              onClick={() => void run('sync')}
-            >
-              <RefreshCw size={16} aria-hidden="true" />
-              {busy ? 'Aguarde…' : 'Sincronizar agora'}
-            </button>
-            <button
-              className="button"
-              disabled={busy}
-              onClick={() => void run('pause', [!status.paused])}
-            >
-              {status.paused ? (
-                <Play size={15} aria-hidden="true" />
-              ) : (
-                <Pause size={15} aria-hidden="true" />
-              )}
-              {status.paused ? 'Retomar' : 'Pausar'}
-            </button>
-          </div>
+
+        {connected && (
+          <dl className="sync-connection">
+            <div>
+              <dt>
+                <Server size={14} aria-hidden="true" />
+                Servidor
+              </dt>
+              <dd>
+                {status.endpoint
+                  ? new URL(status.endpoint).host
+                  : 'Não informado'}
+              </dd>
+            </div>
+            <div>
+              <dt>
+                <CheckCheck size={14} aria-hidden="true" />
+                Última sincronização
+              </dt>
+              <dd>
+                {status.lastCompletedAt
+                  ? new Date(status.lastCompletedAt).toLocaleString('pt-BR')
+                  : 'Ainda não concluída'}
+              </dd>
+            </div>
+          </dl>
         )}
       </div>
-
-      {connected && (
-        <dl className="sync-connection">
-          <div>
-            <dt>
-              <Server size={14} aria-hidden="true" />
-              Servidor
-            </dt>
-            <dd>
-              {status.endpoint
-                ? new URL(status.endpoint).host
-                : 'Não informado'}
-            </dd>
-          </div>
-          <div>
-            <dt>
-              <CheckCheck size={14} aria-hidden="true" />
-              Última sincronização
-            </dt>
-            <dd>
-              {status.lastCompletedAt
-                ? new Date(status.lastCompletedAt).toLocaleString('pt-BR')
-                : 'Ainda não concluída'}
-            </dd>
-          </div>
-        </dl>
-      )}
 
       {status.compatibilityMessage && (
         <SyncNotice
@@ -698,7 +704,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
           description="Ele permite recuperar os dados criptografados se você perder todos os aparelhos. Guarde o código e o convite juntos, em um lugar seguro fora do aplicativo."
         >
           {!recoveryCode ? (
-            <div className="sync-actions">
+            <div className="sync-actions sync-actions--end">
               <button
                 className="button button--primary"
                 disabled={busy}
@@ -709,42 +715,32 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
               </button>
             </div>
           ) : (
-            <>
+            <RecoveryCode
+              code={recoveryCode}
+              confirmed={confirmedCode}
+              onConfirmChange={setConfirmedCode}
+              busy={busy}
+              confirmLabel="Ativar sincronização"
+              onConfirm={() => void run('recovery-confirm', [confirmedCode])}
+              recoveryDetails={{
+                endpoint: status.endpoint,
+                invitation: status.invitation,
+              }}
+              onRegenerate={() => void run('recovery-generate')}
+            />
+          )}
+          {!recoveryCode && (
+            <SyncDisclosure icon={Link2} title="Convite para recuperação">
               <label className="field">
-                <span>Informações para recuperar seus dados</span>
+                <span>Guarde junto do código de recuperação</span>
                 <textarea
                   readOnly
-                  aria-label="Informações para recuperar seus dados"
-                  value={`Servidor: ${status.endpoint}\nCódigo de recuperação: ${recoveryCode}\nConvite: ${status.invitation}`}
+                  aria-label="Convite para recuperação"
+                  value={status.invitation}
                 />
               </label>
-              <RecoveryCode
-                code={recoveryCode}
-                confirmed={confirmedCode}
-                onConfirmChange={setConfirmedCode}
-                busy={busy}
-                confirmLabel="Ativar sincronização"
-                onConfirm={() => void run('recovery-confirm', [confirmedCode])}
-              />
-              <button
-                className="button button--ghost"
-                disabled={busy}
-                onClick={() => void run('recovery-generate')}
-              >
-                Gerar outro código
-              </button>
-            </>
+            </SyncDisclosure>
           )}
-          <SyncDisclosure icon={Link2} title="Convite para recuperação">
-            <label className="field">
-              <span>Guarde junto do código de recuperação</span>
-              <textarea
-                readOnly
-                aria-label="Convite para recuperação"
-                value={status.invitation}
-              />
-            </label>
-          </SyncDisclosure>
         </SyncSection>
       )}
 
@@ -937,22 +933,24 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                   <span>Versão da chave: {status.activeKeyVersion}</span>
                 </div>
                 <div className="sync-subsection">
-                  <h5>Código de recuperação</h5>
-                  <p>
-                    Guarde este segredo fora do aplicativo. Ele recupera o
-                    conteúdo e o acesso ao cofre.
-                  </p>
-                  <div className="sync-actions">
-                    <button
-                      className="button"
-                      disabled={busy}
-                      onClick={() => void run('recovery-generate')}
-                    >
-                      <KeyRound size={16} aria-hidden="true" />
-                      {recoveryCode
-                        ? 'Gerar outro código'
-                        : 'Gerar código de recuperação'}
-                    </button>
+                  <div className="sync-setting-row">
+                    <div>
+                      <h5>Código de recuperação</h5>
+                      <p>
+                        Guarde este segredo fora do aplicativo. Ele recupera o
+                        conteúdo e o acesso ao cofre.
+                      </p>
+                    </div>
+                    {!recoveryCode && (
+                      <button
+                        className="button"
+                        disabled={busy}
+                        onClick={() => void run('recovery-generate')}
+                      >
+                        <KeyRound size={16} aria-hidden="true" />
+                        Gerar código de recuperação
+                      </button>
+                    )}
                   </div>
                   {recoveryCode && (
                     <RecoveryCode
@@ -964,6 +962,11 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                       onConfirm={() =>
                         void run('recovery-confirm', [confirmedCode])
                       }
+                      recoveryDetails={{
+                        endpoint: status.endpoint,
+                        invitation: status.invitation,
+                      }}
+                      onRegenerate={() => void run('recovery-generate')}
                     />
                   )}
                 </div>
@@ -1284,6 +1287,8 @@ function RecoveryCode({
   busy,
   confirmLabel,
   onConfirm,
+  recoveryDetails,
+  onRegenerate,
 }: {
   code: string;
   confirmed: string;
@@ -1291,24 +1296,79 @@ function RecoveryCode({
   busy: boolean;
   confirmLabel: string;
   onConfirm: () => void;
+  recoveryDetails?: { endpoint: string; invitation: string };
+  onRegenerate?: () => void;
 }) {
   return (
     <div className="sync-recovery-code">
-      <div className="sync-fingerprint">
-        <span>Seu código de recuperação</span>
-        <code>{code}</code>
+      <div className="sync-recovery-code__steps">
+        <section className="sync-recovery-step">
+          <header className="sync-recovery-step__header">
+            <span aria-hidden="true">1</span>
+            <div>
+              <h5>Guarde seu código</h5>
+              <p>Salve fora do aplicativo, em um lugar seguro.</p>
+            </div>
+          </header>
+          <div className="sync-fingerprint">
+            <code>{code}</code>
+          </div>
+          {recoveryDetails && (
+            <details className="sync-recovery-kit">
+              <summary>
+                <Link2 size={14} aria-hidden="true" />
+                Convite e informações para guardar
+                <ChevronDown size={14} aria-hidden="true" />
+              </summary>
+              <label className="field">
+                <span>
+                  Guarde o código, o convite e o endereço do servidor juntos
+                </span>
+                <textarea
+                  readOnly
+                  aria-label="Informações para recuperar seus dados"
+                  value={`Servidor: ${recoveryDetails.endpoint}\nCódigo de recuperação: ${code}\nConvite: ${recoveryDetails.invitation}`}
+                />
+              </label>
+            </details>
+          )}
+        </section>
+        <section className="sync-recovery-step">
+          <header className="sync-recovery-step__header">
+            <span aria-hidden="true">2</span>
+            <div>
+              <h5>Confirme o que guardou</h5>
+              <p>Digite o código para concluir esta etapa.</p>
+            </div>
+          </header>
+          <label className="field">
+            <span>Digite o código que você guardou</span>
+            <input
+              aria-label="Digite o código que você guardou"
+              type="password"
+              autoComplete="off"
+              value={confirmed}
+              onChange={(e) => onConfirmChange(e.target.value)}
+            />
+          </label>
+        </section>
       </div>
-      <label className="field">
-        <span>Digite o código que você guardou</span>
-        <input
-          aria-label="Digite o código que você guardou"
-          type="password"
-          autoComplete="off"
-          value={confirmed}
-          onChange={(e) => onConfirmChange(e.target.value)}
-        />
-      </label>
-      <div className="sync-actions">
+      <div className="sync-recovery-code__footer">
+        {onRegenerate ? (
+          <button
+            className="button button--ghost"
+            disabled={busy}
+            onClick={onRegenerate}
+          >
+            <RefreshCw size={15} aria-hidden="true" />
+            Gerar outro código
+          </button>
+        ) : (
+          <span className="sync-recovery-code__hint">
+            <LockKeyhole size={14} aria-hidden="true" />A confirmação exige o
+            código completo.
+          </span>
+        )}
         <button
           className="button button--primary"
           disabled={busy || confirmed !== code}
