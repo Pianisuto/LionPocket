@@ -452,16 +452,41 @@ export function SyncPanel({
               ))}
             </View>
           ))}
-          {series.map((s) => (
-            <SeriesReviewForm
-              key={s.localId}
-              series={s}
-              busy={busy}
-              submit={(slots) =>
-                act((c) => c.reviewSeries(s.entityType, s.localId, slots))
-              }
-            />
-          ))}
+          {!!series.length && (
+            <View>
+              <Text style={styles.heading}>Preparar séries antigas</Text>
+              <Text style={styles.text}>
+                {series.length} série(s) ·{' '}
+                {series.reduce((total, item) => total + item.slots.length, 0)} ocorrência(s).
+                O LionPocket consegue reconstruir automaticamente a maioria delas sem alterar seus lançamentos.
+              </Text>
+              {!!series.filter((item) => item.autoResolvable).length && (
+                <Button
+                  label={`Resolver automaticamente ${series.filter((item) => item.autoResolvable).length} série(s)`}
+                  disabled={busy}
+                  onPress={() => act((c) => c.reviewSuggestedSeries(true))}
+                />
+              )}
+              {!!series.filter((item) => !item.autoResolvable).length && (
+                <Text style={styles.muted}>
+                  {series.filter((item) => !item.autoResolvable).length} série(s)
+                  têm ambiguidade real e aparecem abaixo já pré-preenchidas.
+                </Text>
+              )}
+            </View>
+          )}
+          {series
+            .filter((s) => !s.autoResolvable)
+            .map((s) => (
+              <SeriesReviewForm
+                key={s.localId}
+                series={s}
+                busy={busy}
+                submit={(slots) =>
+                  act((c) => c.reviewSeries(s.entityType, s.localId, slots))
+                }
+              />
+            ))}
           {!!catalogs.length && (
             <CatalogBatchReview
               catalogs={catalogs}
@@ -514,7 +539,11 @@ export function SyncPanel({
                 />
               </View>
             ))}
-          {!!status.reviews.length && <Text style={styles.text}>{status.reviews.length} registro(s) precisam de revisão antes de concluir a sincronização.</Text>}
+          {!!status.reviews.filter((r) => r.reason !== 'identity_unresolved').length && (
+            <Text style={styles.text}>
+              {status.reviews.filter((r) => r.reason !== 'identity_unresolved').length} registro(s) precisam de revisão antes de concluir a sincronização.
+            </Text>
+          )}
           {!!status.quarantine.length && <Text style={styles.text}>Alguns recebimentos foram preservados para revisão. Seus dados locais continuam disponíveis.</Text>}
           {advanced && <>
             {status.reviews.map(r => <Text key={String(r.review_id)}>{String(r.reason)} · {String(r.object_id)}</Text>)}
@@ -593,13 +622,7 @@ function SeriesReviewForm({
 }) {
   const styles = useStyles();
   const [choices, setChoices] = useState<ReviewedSlot[]>(() =>
-      series.slots.map((t) => ({
-        localId: t.localId,
-        originalDate: '',
-        slotKey: '',
-        originalIndex: null,
-        publish: false,
-      })),
+      series.suggestedSlots.map((slot) => ({ ...slot })),
     ),
     [confirmed, setConfirmed] = useState(false);
   const change = (i: number, patch: Partial<ReviewedSlot>) =>
@@ -610,9 +633,9 @@ function SeriesReviewForm({
         Revisar série antiga: {series.description}
       </Text>
       <Text style={styles.text}>
-        Confira as datas originais no histórico. Slots mensais usam
-        monthly:AAAA-MM; outros exigem chave única. Parcelas exigem a posição
-        original antes da renumeração.
+        {series.autoReason ??
+          'Os valores foram pré-preenchidos com a melhor informação disponível.'}{' '}
+        Ajuste apenas o que estiver diferente do histórico e confirme a série.
       </Text>
       {series.slots.map((t, i) => (
         <View key={t.localId}>
