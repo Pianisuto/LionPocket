@@ -34,6 +34,7 @@ describe.skipIf(!enabled)(
     let environment: Awaited<ReturnType<typeof initialize>>;
     const headers = (token: string, proof: HttpProof) => ({
       connection: 'close',
+      'x-lionpocket-control-version': '2',
       authorization: 'Bearer ' + token,
       'content-type': 'application/json',
       'x-lionpocket-proof': Buffer.from(canonicalStringify(proof)).toString(

@@ -1,3 +1,4 @@
+import { SYNC_CONTROL_VERSION } from './compatibility';
 import { syncFetchText } from './network';
 import { acceptKeyCheckpoints } from './security';
 import { reissueForKeyVersion } from './reemission';
@@ -81,6 +82,7 @@ export function fetchSyncHttp(endpoint: string, signal?: AbortSignal): SyncHttp 
           'content-type': 'application/json',
           authorization: `Bearer ${token}`,
           'x-lionpocket-proof': proof,
+          'x-lionpocket-control-version': String(SYNC_CONTROL_VERSION),
         },
         body,
       }, signal);
@@ -569,8 +571,7 @@ export class ManualSync {
       if (localState.mode==='financial') await acceptKeyCheckpoints(this.device,response);
       await this.db.run(updateRegistry(this.device.profile));
       if (localState.mode==='financial') { await this.pull(token);await this.db.run(reissueForKeyVersion(this.device.profile.activeKeyVersion??this.device.profile.pin.keyVersion,()=>this.device.crypto.uuid())); }
-      const bootstrap = localState.mode === 'financial' ? (await this.db.read('SELECT state FROM sync_bootstrap WHERE id=1'))[0] : null;
-      const rows = bootstrap?.state === 'joining_review' ? [] : await this.db.read(
+      const rows = await this.db.read(
         "SELECT commit_id FROM sync_outbox WHERE state!='acknowledged' AND state!='blocked' ORDER BY length(local_seq),local_seq",
       );
       let sendError: unknown;

@@ -189,6 +189,7 @@ app
         method,
         signal: AbortSignal.timeout(15000),
         headers: {
+          'x-lionpocket-control-version': '2',
           authorization: 'Bearer ' + session.accessToken,
           'content-type': 'application/json',
           'x-lionpocket-proof': Buffer.from(canonicalStringify(proof)).toString(

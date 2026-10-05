@@ -108,30 +108,10 @@ export async function registerSyncController(bank: LionPocketDatabase) {
           return c.confirmServerRecovery(String(args[0]));
         case 'server-recovery-activate':
           return c.activateServerRecovery(args[0] === true);
-        case 'catalog-batch':
-          return c.preserveCatalogBatch(String(args[0]), args[1] === true);
         case 'reconnect':
           return c.reconnectRestored(args[0] === true);
-        case 'series-reviews':
-          return c.seriesReviews();
-        case 'series-review':
-          return c.reviewSeries(
-            args[0] as 'recurring' | 'installmentPurchase',
-            String(args[1]),
-            args[2] as import('@lionpocket/sync-local').ReviewedSlot[],
-          );
-        case 'import-review':
-          return c.reviewLegacyImport(String(args[0]), args[1] === true);
         case 'delete-review':
           return c.confirmLegacyDeletion(String(args[0]), args[1] === true);
-        case 'catalog-reviews':
-          return c.catalogReviews();
-        case 'catalog-separate':
-          return c.preserveBothCatalogs(
-            String(args[0]),
-            String(args[1]),
-            String(args[2]),
-          );
         case 'rotate':
           return c.rotateKeys();
         case 'revoke':
@@ -160,8 +140,6 @@ export async function registerSyncController(bank: LionPocketDatabase) {
           return c.approve(String(args[0]), String(args[1]));
         case 'pause':
           return c.pause(args[0] === true);
-        case 'confirm':
-          return c.confirmCombination();
         case 'resolve':
           return c.resolve(
             String(args[0]),

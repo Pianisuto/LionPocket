@@ -59,7 +59,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
   });
   async function request(action: string, value: unknown, token = session.accessToken, vaultId = oldVault()) {
     const res = await fetch(`${endpoint}/v1/vaults/${vaultId}/${action}`, { method: 'POST',
-      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: canonicalStringify(value) });
+      headers: { 'x-lionpocket-control-version': '2', authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: canonicalStringify(value) });
     return { status: res.status, body: await res.json() };
   }
   async function challenge() {
@@ -150,7 +150,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     const first = await owner.status(), invite = await secondary.inspectInvitation(first.invitation);
     await secondary.pair(first.invitation, invite.fingerprint);
     const pairing = (await owner.requests()).requests[0]; await owner.approve(pairing.deviceId, pairing.fingerprint);
-    await secondary.receive(); await secondary.sync(); await secondary.confirmCombination();
+    await secondary.receive(); await secondary.sync();
     bank.saveTransaction(input); await owner.sync(); await secondary.sync();
     owner.setForeground(false); secondary.setForeground(false);
     // PostgreSQL snapshot/restore in this isolated database; official pg_dump/lpctl is tested by clean-install.

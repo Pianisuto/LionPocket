@@ -207,7 +207,7 @@ function* planAnchorBaselineWorkflow(restoreId: string, uuid: () => string): Sql
   const args = [journal.vault_id, journal.from_epoch];
   const query = (table: string) => sql(`SELECT * FROM recovery_archive_${table} WHERE vault_id_scope=? AND epoch_scope=?`, args);
   const reviews: { reason: string; objectId: string | null; revision: string | null }[] = [];
-  const informativeReviews = new Set(['active_key_version', 'reemission_provenance', 'legacy_import_review_provenance']);
+  const informativeReviews = new Set(['active_key_version', 'reemission_provenance', 'legacy_import_review_provenance', 'catalog_projection_audit', 'restore_reconnect_backup']);
   const reviewKeys = new Set<string>();
   for (const row of [...(yield query('sync_review')), ...(yield sql('SELECT * FROM sync_review'))])
     if (!informativeReviews.has(String(row.reason)) && !String(row.reason).startsWith('import_receipt:'))
@@ -283,13 +283,16 @@ function* planAnchorBaselineWorkflow(restoreId: string, uuid: () => string): Sql
   }
   for (const [id, { row, revision }] of old) if (revision.action === 'delete' && !tombstoneIds.has(id))
     reviews.push({ reason: 'missing_tombstone', objectId: String(row.object_id), revision: id });
-  // projectObject currently selects a delete row without a semantic tie breaker. Different
-  // deletion authorship among necessary tombstones is not safe to replay by a new ID ordering.
+  // Different projected delete timestamps are not safe to replay by a new ID
+  // ordering. Copies of an adopted deletion preserve the same legacy timestamps,
+  // even when each device authored its migration at a different time.
   const deleteAuthorship = new Map<string, string>();
   for (const [id, { row, revision }] of old) if (revision.action === 'delete') {
     const objectId = String(row.object_id), prior = deleteAuthorship.get(objectId);
-    if (prior && prior !== revision.authoredAt) reviews.push({ reason: 'ambiguous_tombstone_projection', objectId, revision: id });
-    deleteAuthorship.set(objectId, revision.authoredAt);
+    const projection = revision.reason === 'legacy_unknown' && revision.provenance.legacyDeletedAt && revision.provenance.legacyUpdatedAt
+      ? canonicalStringify([revision.provenance.legacyDeletedAt, revision.provenance.legacyUpdatedAt]) : revision.authoredAt;
+    if (prior && prior !== projection) reviews.push({ reason: 'ambiguous_tombstone_projection', objectId, revision: id });
+    deleteAuthorship.set(objectId, projection);
   }
   let ordered: string[] = [];
   for (const relation of ['parents', 'dependencies', 'combined'] as const) {

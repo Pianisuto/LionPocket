@@ -1,3 +1,4 @@
+import { equivalentMigrationHeads } from './financial';
 import {
   assertDecimal64,
   assertManualTransactionRevision,
@@ -312,7 +313,8 @@ export function* applyCommit(
     touched.add(op.objectId);
   }
   yield sql('UPDATE sync_local_state SET local_seq=? WHERE id=1', [sequence]);
-  for (const id of touched) yield* projectObject(id, dialect, uuid, projectionTime);
+  for (const id of touched)
+    yield* projectObject(id, dialect, uuid, projectionTime);
   if (state.mode === 'financial')
     yield sql('UPDATE sync_control SET applying=0 WHERE id=1');
   yield sql(
@@ -327,7 +329,10 @@ function commonBase(rows: SqlRow[], heads: string[]): string | null {
       JSON.parse(String(r.parents_json)) as string[],
     ]),
   );
-  return causalCommonBase(new Map([...graph].map(([id, parents]) => [id, { parents }])), heads);
+  return causalCommonBase(
+    new Map([...graph].map(([id, parents]) => [id, { parents }])),
+    heads,
+  );
 }
 export function* projectObject(
   objectId: string,
@@ -350,10 +355,14 @@ export function* projectObject(
   );
   // A linear live object needs only its head payload, not repeated scans of its history.
   // Conflicts and tombstones still use the complete parent graph / historical delete rows.
-  const rows = yield sql(heads.length <= 1 && !tombstones.length
-    ? 'SELECT * FROM sync_revisions WHERE object_id=? AND revision_id=? AND revision_id NOT IN (SELECT revision_id FROM sync_rejected)'
-    : 'SELECT * FROM sync_revisions WHERE object_id=? AND revision_id NOT IN (SELECT revision_id FROM sync_rejected)',
-    heads.length <= 1 && !tombstones.length ? [objectId, heads[0] ?? ''] : [objectId]);
+  const rows = yield sql(
+    heads.length <= 1 && !tombstones.length
+      ? 'SELECT * FROM sync_revisions WHERE object_id=? AND revision_id=? AND revision_id NOT IN (SELECT revision_id FROM sync_rejected)'
+      : 'SELECT * FROM sync_revisions WHERE object_id=? AND revision_id NOT IN (SELECT revision_id FROM sync_rejected)',
+    heads.length <= 1 && !tombstones.length
+      ? [objectId, heads[0] ?? '']
+      : [objectId],
+  );
   const [conflict] = yield sql(
     'SELECT * FROM sync_conflicts WHERE object_id=? AND resolution_id IS NULL',
     [objectId],
@@ -383,19 +392,33 @@ export function* projectObject(
     : null;
   const localId = String(identity.local_id);
   if (identity.entity_type !== 'manualTransaction') {
-    if (heads.length > 1 && revision && !tombstones.length) {
+    const equivalentRoots =
+      heads.length > 1 &&
+      !revision &&
+      (yield* equivalentMigrationHeads(objectId));
+    if (heads.length > 1 && (!tombstones.length || equivalentRoots)) {
       const branches = heads.map(
         (h) =>
           JSON.parse(
             String(rows.find((r) => r.revision_id === h)?.payload_json),
           ) as RevisionPlaintext,
       );
-      const restoring = branches.some(branch => branch.provenance.origin === 'restore');
-      const merged = restoring ? null : mergeFinancialGroups(
-        revision,
-        branches,
-        projectionTime ?? new Date().toISOString(),
+      // Identical adoption roots carry one value, not competing edits. Different roots still conflict.
+      const restoring = branches.some(
+        (branch) => branch.provenance.origin === 'restore',
       );
+      const merged = equivalentRoots
+        ? {
+            ...branches[0],
+            authoredAt: projectionTime ?? new Date().toISOString(),
+          }
+        : restoring || !revision
+          ? null
+          : mergeFinancialGroups(
+              revision,
+              branches,
+              projectionTime ?? new Date().toISOString(),
+            );
       if (merged) {
         const [origin] = yield sql(
           'SELECT device_id FROM sync_revision_origin WHERE revision_id=?',
@@ -414,9 +437,21 @@ export function* projectObject(
     const deletedRow = tombstones.length
       ? rows.find((r) => r.action === 'delete')
       : null;
+    if (equivalentRoots)
+      yield sql('UPDATE sync_conflicts SET resolution_id=? WHERE object_id=?', [
+        heads[0],
+        objectId,
+      ]);
     const selected = deletedRow
       ? (JSON.parse(String(deletedRow.payload_json)) as RevisionPlaintext)
-      : revision;
+      : (revision ??
+        (equivalentRoots
+          ? (JSON.parse(
+              String(
+                rows.find((r) => r.revision_id === heads[0])?.payload_json,
+              ),
+            ) as RevisionPlaintext)
+          : null));
     if (selected) yield* projectFinancial(localId, selected, dialect);
     else if (
       ['transaction', 'recurring', 'installmentPurchase', 'goal'].includes(

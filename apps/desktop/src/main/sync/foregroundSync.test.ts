@@ -101,6 +101,7 @@ async function setup(path = ':memory:') {
   const posts: string[] = [];
   const environment: Record<string, unknown> = {
     ...client.profile.pin,
+    controlVersion: 2,
     financialSyncEnabled: true,
     entityScopes: ['transaction'],
     oidc: { issuer: 'https://identity.invalid', desktopClientId: 'lionpocket-desktop', androidClientId: 'lionpocket-android', desktopRedirect: 'http://127.0.0.1:18761/callback', androidRedirect: 'com.lionpocketmobile:/callback' },
@@ -188,7 +189,9 @@ async function manual(beta: BetaSync) {
 describe('financial foreground sync boundaries', () => {
   it.each([
     { protocolVersion: 2 },
-    { controlVersion: 2 },
+    { controlVersion: 1 },
+    { controlVersion: null },
+    { controlVersion: 3 },
     { domainSchema: 2 },
     { entityScopes: ['transaction', 'futureObject'] },
     { serverEpoch: 'ffffffff-ffff-4fff-bfff-ffffffffffff' },
@@ -207,9 +210,9 @@ describe('financial foreground sync boundaries', () => {
     expect(status.activity).toBe('review');
     expect(status.compatibilityMessage).toMatch(/preservad/);
   });
-  it('accepts explicit v1 discovery without changing wire or domain versions', async () => {
+  it('accepts control v2 discovery without changing wire or domain versions', async () => {
     const s = await setup();
-    Object.assign(s.environment, { controlVersion: 1, protocolVersion: 1, domainSchema: 1 });
+    Object.assign(s.environment, { controlVersion: 2, protocolVersion: 1, domainSchema: 1 });
     await foreground(s.beta);
     await manual(s.beta);
     s.bank.saveTransaction(input);
@@ -237,6 +240,23 @@ describe('financial foreground sync boundaries', () => {
     expect(JSON.stringify(await s.options.storage.load())).not.toContain(
       'only-in-memory',
     );
+  });
+  it('sends without legacy combination approval and leaves real restore decisions specific to their records', async () => {
+    const s = await setup();
+    s.bank.saveTransaction(input);
+    s.bank.db.exec("UPDATE sync_bootstrap SET state='joining_review'");
+    await foreground(s.beta);
+    await manual(s.beta);
+    expect(s.posts).toHaveLength(1);
+    expect((await s.beta.status()).sync?.pending).toBe(0);
+    expect((await s.beta.status()).activity).toBe('synced');
+    const missingObject = randomUUID();
+    s.bank.db.prepare('INSERT INTO sync_review VALUES(?,?,?,?)').run(randomUUID(), missingObject, 'restored_missing_record', '{}');
+    s.bank.saveTransaction({ ...input, description: 'Independente da recuperação' });
+    await manual(s.beta);
+    expect(s.posts).toHaveLength(2);
+    expect((await s.beta.status()).reviews).toHaveLength(1);
+    expect(s.bank.db.prepare('SELECT * FROM sync_tombstones WHERE object_id=?').all(missingObject)).toEqual([]);
   });
   it('four rapid financial commits remain immutable and share one debounced network pass', async () => {
     const s = await setup();

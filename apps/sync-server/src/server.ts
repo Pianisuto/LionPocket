@@ -173,7 +173,7 @@ export function controlServer(options: {
           ...(options.oidc ? {oidc:options.oidc} : {}),
           audience: 'lionpocket-sync-api',
           cryptoSuites: ['lp-sodium-v1'],
-          controlVersion: 1,
+          controlVersion: 2,
           protocolVersion: 1,
           domainSchema: 1,
           epochRecovery: { formatVersion: 1, authorizationAvailable: true, stagingAvailable: true, activationAvailable: true },
@@ -201,6 +201,14 @@ export function controlServer(options: {
         !options.financialEnabled
       ) {
         respond(404, { error: 'not_found' });
+        return;
+      }
+      // Discovery makes v0.3.11 stop before preparing any envelope. Enforce the
+      // same floor here for already-running clients, cached sessions and requests
+      // in flight across a server upgrade. No proof is consumed or state mutated.
+      // This compatibility declaration supplements, never replaces, authorization.
+      if (req.headers['x-lionpocket-control-version'] !== '2') {
+        respond(426, { error: 'client_upgrade_required', controlVersion: 2 });
         return;
       }
       const authorization = req.headers.authorization;

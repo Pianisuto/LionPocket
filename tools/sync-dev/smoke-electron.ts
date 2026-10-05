@@ -75,6 +75,7 @@ app
       const result = await fetch(origin + path, {
         method,
         headers: {
+          'x-lionpocket-control-version': '2',
           authorization: 'Bearer ' + token,
           'content-type': 'application/json',
           'x-lionpocket-proof': Buffer.from(canonicalStringify(proof)).toString(

@@ -1,12 +1,14 @@
 import { createRequire } from 'node:module';
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import { canonicalStringify } from "@lionpocket/sync-protocol";
 import pg from "pg";
 import sodium from "libsodium-wrappers-sumo";
 import {
   BetaSync,
   DeviceProvisioning,
   ManualSync,
+  fetchSyncHttp,
   ProvisioningCrypto,
   validateSyncBackup,
   syncTables,
@@ -90,7 +92,7 @@ describe.skipIf(!enabled)(
       );
       let saved: BetaSaved | null = null;
       const secrets = new TestSecrets();
-      const sync = new Controller({
+      const options: ConstructorParameters<typeof BetaSync>[0] = {
         allowLocalDevelopment: true,
         requireRecoveryConfirmation: false,
         db: bank.syncDatabase(),
@@ -105,56 +107,66 @@ describe.skipIf(!enabled)(
         },
         backup: async () => "/private/synthetic-backup.sqlite",
         login: async () => sessions[session],
-      });
+      };
+      const sync = new Controller(options);
       bank.onLocalSyncWrite(() => sync.localWriteCommitted());
       controllers.push(sync);
       sync.setForeground(true);
-      return { bank, sync, secrets, profile: () => saved };
+      return { bank, sync, secrets, options, profile: () => saved };
     }
-    it.skipIf(!process.env.LIONPOCKET_PREVIOUS_CLIENT)("previous client v1 interoperates and freezes SQLite/outbox after an operational restore", async () => {
-      const old = client(0, true), current = client(1);
-      await old.sync.configure(endpoint);
-      const first = await old.sync.create();
-      const invite = await current.sync.inspectInvitation(first.invitation);
-      await current.sync.pair(first.invitation, invite.fingerprint);
-      const request = (await old.sync.requests()).requests[0];
-      await old.sync.approve(request.deviceId, request.fingerprint);
-      await current.sync.receive();
+    it.skipIf(!process.env.LIONPOCKET_PREVIOUS_CLIENT)("released v0.3.11 stops before discovery writes and preserves an already-bound bank with prepared pending data", async () => {
+      const Old = createRequire(import.meta.url)(process.env.LIONPOCKET_PREVIOUS_CLIENT!);
+      const fresh = client(0, true);
+      await expect(fresh.sync.configure(endpoint)).rejects.toThrow('unsupported_version');
+      expect(fresh.profile()).toBeNull();
+      const current = client();
+      await current.sync.configure(endpoint);
+      await current.sync.create();
       await current.sync.sync();
-      await current.sync.confirmCombination();
-      old.bank.saveTransaction({ kind: "expense", description: "Previous client zero", plannedAmount: 0, actualAmount: 0, dueDate: "2026-10-02", settledDate: "2026-10-02", status: "paid" });
-      await old.sync.sync(); await current.sync.sync();
-      expect(current.bank.listTransactions({ month: "2026-10" })).toMatchObject([{ description: "Previous client zero", plannedAmount: 0, actualAmount: 0 }]);
-      current.bank.saveTransaction({ kind: "income", description: "Current client null", plannedAmount: 12.34, actualAmount: null, dueDate: "2026-10-03", status: "planned" });
-      await current.sync.sync(); await old.sync.sync();
-      expect(old.bank.listTransactions({ month: "2026-10" }).find(t => t.description === "Current client null")).toMatchObject({ plannedAmount: 12.34, actualAmount: null });
-      expect((await old.sync.status()).sync?.pending).toBe(0);
+      current.sync.setForeground(false);
+      current.bank.saveTransaction({ kind: 'expense', description: 'Pending on the old installation',
+        plannedAmount: 42, dueDate: '2026-10-04', status: 'planned' });
+      const device = new DeviceProvisioning(current.profile()!.profile!, current.secrets, new ProvisioningCrypto(sodium));
+      const manual = new ManualSync(current.bank.syncDatabase(), device, sodium, 'desktop', endpoint);
+      const pending = current.bank.db.prepare("SELECT * FROM sync_outbox WHERE state='pending' ORDER BY length(local_seq),local_seq DESC LIMIT 1").get()!;
+      await manual.prepare(String(pending.commit_id));
+      const old = new Old.BetaSync(current.options) as BetaSync;
+      controllers.push(old);
+      old.setForeground(true);
+      const snapshot = () => Object.fromEntries([...syncTables, 'transactions'].map(table => [table, current.bank.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+      const before = snapshot(), saved = current.profile();
+      const counts = async () => (await pool.query(`SELECT (SELECT count(*) FROM sync_commits) AS commits,
+        (SELECT count(*) FROM sync_http_nonces) AS nonces, (SELECT count(*) FROM sync_grants) AS grants`)).rows;
+      const serverBefore = await counts();
+      await expect(old.sync()).rejects.toThrow('unsupported_version');
+      await expect(old.requests()).rejects.toThrow('unsupported_version');
+      expect(snapshot()).toEqual(before);
+      expect(current.profile()).toEqual(saved);
+      expect(await counts()).toEqual(serverBefore);
+      // Even an engine that bypasses discovery and reuses a prepared envelope
+      // cannot read/write after the server upgrade. The old HTTP code sends no v2 header.
+      const token = sessions[0].accessToken;
+      const target = `/v1/vaults/${device.profile.pin.vaultId}/commits`;
+      const body = String(current.bank.db.prepare('SELECT envelope_json FROM sync_outbox WHERE commit_id=?').get(pending.commit_id)!.envelope_json);
+      const proof = await device.proof('POST', target, endpoint, body, token);
+      await expect(Old.fetchSyncHttp(endpoint).request(target, body,
+        device.crypto.encode(new TextEncoder().encode(canonicalStringify(proof))), token)).rejects.toThrow('client_upgrade_required');
+      expect(snapshot()).toEqual(before);
+      expect(await counts()).toEqual(serverBefore);
+      const oldEngine = new Old.ManualSync(current.bank.syncDatabase(), device, sodium, 'desktop', endpoint);
+      await expect(oldEngine.sync(token)).rejects.toThrow('client_upgrade_required');
+      expect(snapshot()).toEqual(before);
+      expect(await counts()).toEqual(serverBefore);
+      // The refused proof was not consumed; a compatible transport may use it.
+      await fetchSyncHttp(endpoint).request(target, body,
+        device.crypto.encode(new TextEncoder().encode(canonicalStringify(proof))), token);
+      old.setForeground(false);
+      // Updating the app resumes exactly that bank and exactly that prepared commit.
+      current.sync.setForeground(true);
+      await current.sync.sync();
       expect((await current.sync.status()).sync?.pending).toBe(0);
-      old.sync.setForeground(false); current.sync.setForeground(false);
-      old.bank.saveTransaction({ kind: 'expense', description: 'Previous client offline after backup', plannedAmount: 1,
-        dueDate: '2026-10-04', status: 'planned' });
-      const snapshot = () => Object.fromEntries(syncTables.map(table => [table, old.bank.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
-      const before = snapshot(), oldEpoch = environment.serverEpoch, restoreId = randomUUID();
-      const commits = (await pool.query('SELECT count(*) FROM sync_commits')).rows[0].count;
-      environment.serverEpoch = randomUUID();
-      try {
-        await pool.query('UPDATE sync_environment SET server_epoch=$1', [environment.serverEpoch]);
-        await pool.query('INSERT INTO sync_restores(restore_id,server_id,from_epoch,to_epoch,displaced_epoch,backup_manifest_sha256) VALUES($1,$2,$3,$4,$3,$5)',
-          [restoreId, environment.serverId, oldEpoch, environment.serverEpoch, 'a'.repeat(64)]);
-        const oldProfile = old.profile()?.profile;
-        if (!oldProfile) throw new Error('fixture_previous_profile_unavailable');
-        await pool.query('INSERT INTO sync_restore_vaults(restore_id,vault_id,source_epoch) VALUES($1,$2,$3)',
-          [restoreId, oldProfile.pin.vaultId, oldEpoch]);
-        old.sync.setForeground(true);
-        await expect(old.sync.sync()).rejects.toThrow('epoch_changed');
-        expect(snapshot()).toEqual(before);
-        expect((await pool.query('SELECT count(*) FROM sync_commits')).rows[0].count).toBe(commits);
-      } finally {
-        old.sync.setForeground(false); environment.serverEpoch = oldEpoch;
-        await pool.query('UPDATE sync_environment SET server_epoch=$1', [oldEpoch]);
-      }
     }, 30000);
-    it("creates, pairs, reviews, synchronizes, rotates/reemits and recovers through the app commands", async () => {
+    it("creates, pairs, automatically adopts, synchronizes, rotates/reemits and recovers through the app commands", async () => {
       const a = client(),
         b = client(1);
       await a.sync.configure(endpoint);
@@ -165,9 +177,9 @@ describe.skipIf(!enabled)(
       const request = (await a.sync.requests()).requests[0];
       await a.sync.approve(request.deviceId, request.fingerprint);
       await b.sync.receive();
-      expect((await b.sync.status()).joiningReview).toBe(true);
+      expect((await b.sync.status()).reviews).toEqual([]);
       await b.sync.sync();
-      await b.sync.confirmCombination();
+
       a.bank.createCatalogItem({
         type: "category",
         name: "Beta 🦁",
@@ -247,7 +259,7 @@ describe.skipIf(!enabled)(
       expect(recovered.owner).toBe(true);
       await c.sync.sync();
       expect(c.bank.listTransactions({ month: "2026-10" })).toHaveLength(2);
-      await c.sync.confirmCombination();
+
       await c.sync.revoke(
         b.profile()!.profile!.deviceId,
         b.profile()!.profile!.deviceId,
