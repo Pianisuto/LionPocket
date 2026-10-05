@@ -1231,6 +1231,9 @@ export class SyncController {
       description: string;
       frequency: string;
       scheduleEpoch: string;
+      autoResolvable: boolean;
+      autoReason: string | null;
+      suggestedSlots: ReviewedSlot[];
       slots: {
         localId: string;
         description: string;
@@ -1250,25 +1253,96 @@ export class SyncController {
           `SELECT * FROM ${table} WHERE id=?`,
           [meta.local_id],
         );
-      const slots = await this.options.db.read(
+      if (!row) continue;
+      const rawSlots = await this.options.db.read(
         'SELECT * FROM transactions WHERE source_type=? AND source_id=? ORDER BY due_date,id',
         [type === 'recurring' ? 'recurring' : 'installment', meta.local_id],
       );
-      result.push({
-        entityType: type,
-        localId: String(meta.local_id),
-        description: String(row.description),
-        frequency: String(row.frequency ?? 'installment'),
-        scheduleEpoch: String(meta.schedule_epoch),
-        slots: slots.map((t) => ({
+      const frequency = String(row.frequency ?? 'installment'),
+        scheduleEpoch = String(meta.schedule_epoch),
+        startingInstallment = Number(row.starting_installment ?? 1),
+        slots = rawSlots.map((t) => ({
           localId: String(t.id),
           description: String(t.description),
           status: String(t.status),
           currentDate: String(
             t.occurrence_date ?? t.purchase_date ?? t.due_date,
           ),
-          installmentNumber: t.installment_number as number | null,
-        })),
+          installmentNumber:
+            t.installment_number == null ? null : Number(t.installment_number),
+        }));
+      const suggestedSlots: ReviewedSlot[] = rawSlots.map((t) => {
+        const originalDate = String(
+            t.occurrence_date ?? t.purchase_date ?? t.due_date,
+          ),
+          installmentNumber =
+            t.installment_number == null ? null : Number(t.installment_number),
+          originalIndex =
+            type === 'installmentPurchase' && installmentNumber != null
+              ? installmentNumber - startingInstallment + 1
+              : null,
+          slotKey =
+            type === 'installmentPurchase'
+              ? `installment:${originalIndex ?? String(t.id)}`
+              : frequency === 'monthly'
+                ? `monthly:${originalDate.slice(0, 7)}`
+                : frequency === 'manual'
+                  ? `manual:${scheduleEpoch}:${originalDate.slice(0, 7)}`
+                  : `${scheduleEpoch}:${originalDate}`;
+        return {
+          localId: String(t.id),
+          originalDate,
+          slotKey,
+          originalIndex,
+          // Planned generated rows can be recreated from the series. Preserve
+          // completed/cancelled or otherwise materialized history automatically.
+          publish:
+            String(t.status) !== 'planned' ||
+            t.actual_cents != null ||
+            t.actual_amount_cents != null,
+        };
+      });
+      let autoReason: string | null = null;
+      if (
+        type === 'recurring' &&
+        Boolean(row.anchor_to_actual)
+      )
+        autoReason =
+          'A série depende da realização anterior e precisa de uma conferência curta.';
+      else if (
+        suggestedSlots.some(
+          (s) => !/^\d{4}-\d{2}-\d{2}$/.test(s.originalDate),
+        )
+      )
+        autoReason = 'Há uma ocorrência sem data válida.';
+      else if (
+        new Set(suggestedSlots.map((s) => s.slotKey)).size !==
+        suggestedSlots.length
+      )
+        autoReason =
+          'Mais de uma ocorrência cairia na mesma posição da série.';
+      else if (
+        type === 'installmentPurchase' &&
+        (suggestedSlots.some(
+          (s) =>
+            !Number.isSafeInteger(s.originalIndex) ||
+            Number(s.originalIndex) < 1,
+        ) ||
+          new Set(suggestedSlots.map((s) => s.originalIndex)).size !==
+            suggestedSlots.length)
+      )
+        autoReason =
+          'A numeração atual das parcelas não permite reconstrução automática.';
+      result.push({
+        entityType: type,
+        localId: String(meta.local_id),
+        description: String(row.description),
+        frequency,
+        scheduleEpoch,
+        autoResolvable: autoReason === null,
+        autoReason,
+        suggestedSlots,
+        slots,
       });
     }
     return result;
@@ -1288,6 +1362,27 @@ export class SyncController {
     );
     this.localWriteCommitted();
     return this.status();
+  }
+  async reviewSuggestedSeries(confirm: boolean) {
+    if (!confirm)
+      throw new Error('Confirme o uso dos dados atuais como base.');
+    const reviews = await this.seriesReviews(),
+      automatic = reviews.filter((review) => review.autoResolvable);
+    for (const review of automatic)
+      await this.options.db.run(
+        reviewLegacySeries(
+          review.entityType,
+          review.localId,
+          review.suggestedSlots,
+          () => this.crypto().uuid(),
+        ),
+      );
+    if (automatic.length) this.localWriteCommitted();
+    return {
+      resolved: automatic.length,
+      remaining: reviews.length - automatic.length,
+      status: await this.status(),
+    };
   }
   async reviewLegacyImport(objectId: string, confirm: boolean) {
     if (!confirm) throw new Error('Confirme a origem manual do registro.');
