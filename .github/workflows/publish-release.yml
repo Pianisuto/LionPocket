@@ -1,0 +1,213 @@
+name: Publish LionPocket release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without v prefix
+        required: true
+        default: '0.3.11'
+        type: string
+      confirm:
+        description: Type PUBLICAR vX.Y.Z
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Require explicit release confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "Publicação só pode ser executada a partir de main." >&2; exit 1; }
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_CONFIRM" == "PUBLICAR v$RELEASE_VERSION" ]]
+          node tools/release/validate.cjs "v$RELEASE_VERSION"
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run sync:self-hosted:validate
+      - run: git diff --check
+      - name: Refuse an existing tag or public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
+            echo "Tag v$RELEASE_VERSION already exists; refusing to reuse it." >&2
+            exit 1
+          fi
+          if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Release v$RELEASE_VERSION already exists." >&2
+            exit 1
+          fi
+
+  desktop:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      LIONPOCKET_BUILD_CHANNEL: normal
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build:core
+      - run: npm run test --workspace apps/desktop -- --testTimeout=30000 --hookTimeout=30000
+      - if: runner.os == 'Windows'
+        run: npm run make -- --platform=win32 --arch=x64
+      - if: runner.os == 'Linux'
+        run: npm run make:linux
+      - name: Stage Linux public artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp "apps/desktop/out/make/deb/x64/lionpocket_${RELEASE_VERSION}_amd64.deb" release-assets/
+          zip_file="$(find apps/desktop/out/make/zip/linux/x64 -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          [[ -n "$zip_file" ]]
+          cp "$zip_file" "release-assets/LionPocket-Linux-x64-${RELEASE_VERSION}.zip"
+      - name: Stage Windows public artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item apps/desktop/out/make/squirrel.windows/x64/LionPocket-Instalador.exe release-assets/
+          Copy-Item apps/desktop/out/make/squirrel.windows/x64/RELEASES release-assets/
+          Get-ChildItem apps/desktop/out/make/squirrel.windows/x64/*.nupkg | ForEach-Object { Copy-Item $_.FullName release-assets/ }
+          $zip = Get-ChildItem apps/desktop/out/make/zip/win32/x64/*.zip | Select-Object -First 1
+          if (-not $zip) { throw 'Windows ZIP missing' }
+          Copy-Item $zip.FullName "release-assets/LionPocket-Windows-x64-$env:RELEASE_VERSION.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+      - run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.1.12297006"
+      - run: npm ci
+      - run: npm run build:core
+      - name: Materialize protected production keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LIONPOCKET_ANDROID_KEYSTORE_BASE64 }}
+          LIONPOCKET_ANDROID_STORE_PASSWORD: ${{ secrets.LIONPOCKET_ANDROID_STORE_PASSWORD }}
+          LIONPOCKET_ANDROID_KEY_ALIAS: ${{ secrets.LIONPOCKET_ANDROID_KEY_ALIAS }}
+          LIONPOCKET_ANDROID_KEY_PASSWORD: ${{ secrets.LIONPOCKET_ANDROID_KEY_PASSWORD }}
+          LIONPOCKET_ANDROID_CERTIFICATE_SHA256: ${{ secrets.LIONPOCKET_ANDROID_CERTIFICATE_SHA256 }}
+        run: |
+          set -euo pipefail
+          [[ -n "$KEYSTORE_BASE64" && -n "$LIONPOCKET_ANDROID_STORE_PASSWORD" && -n "$LIONPOCKET_ANDROID_KEY_ALIAS" && -n "$LIONPOCKET_ANDROID_KEY_PASSWORD" ]]
+          [[ "$LIONPOCKET_ANDROID_CERTIFICATE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lionpocket-production.p12"
+          echo "LIONPOCKET_ANDROID_STORE_FILE=$RUNNER_TEMP/lionpocket-production.p12" >> "$GITHUB_ENV"
+      - name: Build production-signed Android APK
+        working-directory: apps/mobile/android
+        env:
+          LIONPOCKET_ANDROID_STORE_PASSWORD: ${{ secrets.LIONPOCKET_ANDROID_STORE_PASSWORD }}
+          LIONPOCKET_ANDROID_KEY_ALIAS: ${{ secrets.LIONPOCKET_ANDROID_KEY_ALIAS }}
+          LIONPOCKET_ANDROID_KEY_PASSWORD: ${{ secrets.LIONPOCKET_ANDROID_KEY_PASSWORD }}
+          LIONPOCKET_ANDROID_CERTIFICATE_SHA256: ${{ secrets.LIONPOCKET_ANDROID_CERTIFICATE_SHA256 }}
+        run: ./gradlew assembleRelease --no-daemon --max-workers=2
+      - name: Verify permanent certificate and stage APK
+        env:
+          LIONPOCKET_ANDROID_CERTIFICATE_SHA256: ${{ secrets.LIONPOCKET_ANDROID_CERTIFICATE_SHA256 }}
+        run: node tools/release/android-production-candidate.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: release-candidates/public/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [validate, desktop, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create release manifest and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort | while read -r file; do
+            sha256sum "$file"
+          done > SHA256SUMS.txt
+          node -e 'const fs=require("fs"); const version=process.env.RELEASE_VERSION; fs.writeFileSync("build-manifest.json", JSON.stringify({version,androidVersionCode:4,source:process.env.GITHUB_SHA,tag:"v"+version,publicRelease:true,server:"Git tag/source archive is the self-hosted server release"},null,2)+"\n")'
+      - name: Publish immutable GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/release/validate.cjs "v$RELEASE_VERSION"
+          test -f "docs/releases/v$RELEASE_VERSION.md"
+          if git show-ref --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
+            echo "Tag already exists; refusing to reuse it." >&2
+            exit 1
+          fi
+          if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Release already exists; refusing to replace it." >&2
+            exit 1
+          fi
+          gh release create "v$RELEASE_VERSION" release-assets/*             --target "$GITHUB_SHA"             --title "LionPocket v$RELEASE_VERSION"             --notes-file "docs/releases/v$RELEASE_VERSION.md"             --latest
