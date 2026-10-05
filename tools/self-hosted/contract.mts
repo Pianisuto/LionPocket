@@ -131,7 +131,7 @@ try {
     await assert.rejects(b.receive()); // Unapproved device receives no financial keys/log.
     const request = (await a.requests()).requests[0];
     await a.approve(request.deviceId, request.fingerprint);
-    await b.receive(); await b.sync(); await b.confirmCombination();
+    await b.receive(); await b.sync();
     assert.equal((await repo.list({ month: '2026-10' }))[0].plannedAmount, 98765.43);
     await repo.save(input); await b.sync(); await a.sync();
     const tx = desktop.listTransactions({ month: '2026-10' }).find(t => t.description === input.description);

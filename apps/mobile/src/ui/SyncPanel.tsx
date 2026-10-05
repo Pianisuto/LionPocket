@@ -3,9 +3,6 @@ import React, { useEffect, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import type {
   SyncStatus,
-  SeriesReview,
-  CatalogReview,
-  ReviewedSlot,
 } from '@lionpocket/sync-local';
 import type { PairingRequest } from '@lionpocket/sync-protocol';
 import { syncController, betaEndpoint } from '../sync/sync';
@@ -32,17 +29,11 @@ export function SyncPanel({
     [path, setPath] = useState<'create' | 'pair' | ''>(''),
     [advanced, setAdvanced] = useState(false),
     [adding, setAdding] = useState(false);
-  const [series, setSeries] = useState<SeriesReview[]>([]),
-    [catalogs, setCatalogs] = useState<CatalogReview[]>([]);
   const refresh = async () => {
     const s = await (await syncController()).status();
     setStatus(s);
     setEndpoint(s.endpoint);
-    if (s.phase === 'bound') {
-      const c = await syncController();
-      setSeries(await c.seriesReviews());
-      setCatalogs(await c.catalogReviews());
-    }
+
   };
   useEffect(() => {
     let disposed = false;
@@ -125,18 +116,9 @@ export function SyncPanel({
           </>}
           {configured && path && <>
           <Text style={styles.text}>Uma cópia de segurança será criada antes de vincular seus dados.</Text>
-          <Button
-            label={
-              reviewed
-                ? 'Base revisada. Backup e envio autorizados'
-                : 'Revisar e autorizar backup e envio'
-            }
-            disabled={busy}
-            onPress={() => setReviewed(!reviewed)}
-          />
           {path === 'create' && <Button
             label="Entrar e criar cofre" tone="primary"
-            disabled={busy || !reviewed}
+            disabled={busy}
             onPress={() => act((c) => c.create())}
           />}
           {path === 'pair' && <>
@@ -180,7 +162,7 @@ export function SyncPanel({
               />
               <Button
                 label="Entrar e pedir aprovação"
-                disabled={busy || !reviewed || fingerprint !== authority}
+                disabled={busy || fingerprint !== authority}
                 onPress={() => act((c) => c.pair(invitation, fingerprint))}
               />
             </>
@@ -322,29 +304,6 @@ export function SyncPanel({
             disabled={busy}
             onPress={() => act((c) => c.pause(!status.paused))}
           />
-          {status.joiningReview && (
-            <>
-              <Text style={styles.heading}>Combinar bases preenchidas</Text>
-              <Text style={styles.text}>
-                Sincronize para receber a base remota. Nomes iguais exigem
-                revisão. Os registros de identidades distintas são conservados.
-              </Text>
-              <Button
-                label={
-                  reviewed
-                    ? 'Bases revisadas'
-                    : 'Revisei as bases e desejo combinar'
-                }
-                disabled={busy}
-                onPress={() => setReviewed(!reviewed)}
-              />
-              <Button
-                label="Confirmar combinação e liberar envio"
-                disabled={busy || !reviewed || !!status.quarantine.length}
-                onPress={() => act((c) => c.confirmCombination())}
-              />
-            </>
-          )}
           <Button label={advanced ? 'Ocultar detalhes avançados' : 'Detalhes avançados e dispositivos'} onPress={() => setAdvanced(!advanced)} />
           {status.owner && advanced && (
             <>
@@ -452,63 +411,19 @@ export function SyncPanel({
               ))}
             </View>
           ))}
-          {series.map((s) => (
-            <SeriesReviewForm
-              key={s.localId}
-              series={s}
-              busy={busy}
-              submit={(slots) =>
-                act((c) => c.reviewSeries(s.entityType, s.localId, slots))
-              }
-            />
-          ))}
-          {!!catalogs.length && (
-            <CatalogBatchReview
-              catalogs={catalogs}
-              busy={busy}
-              submit={(suffix) =>
-                act((c) => c.preserveCatalogBatch(suffix, true))
-              }
-            />
-          )}
-          {catalogs.map((c) => (
-            <CatalogReviewForm
-              key={c.commitId + c.objectId}
-              review={c}
-              busy={busy}
-              submit={(name) =>
-                act((controller) =>
-                  controller.preserveBothCatalogs(c.commitId, c.objectId, name),
-                )
-              }
-            />
-          ))}
           {status.reviews
-            .filter(
-              (r) =>
-                r.reason === 'import_provenance_review' ||
-                (r.reason === 'legacy_delete_review'||r.reason==='restored_missing_record'),
-            )
+            .filter(r => r.reason === 'restored_missing_record')
             .map((r) => (
               <View key={String(r.review_id)}>
                 <Text style={styles.text}>
-                  {r.reason === 'import_provenance_review'
-                    ? 'Origem importada antiga sem proveniência verificável. A conversão manual conserva a origem anterior na auditoria.'
-                    : 'Exclusão antiga sem data verificável.'}{' '}
-                  {String(r.object_id)}
+                  A cópia restaurada não contém este registro. Confirme a exclusão somente se deseja removê-lo dos outros aparelhos.
                 </Text>
                 <Button
                   disabled={busy}
-                  label={
-                    r.reason === 'import_provenance_review'
-                      ? 'Confirmar conversão para lançamento manual'
-                      : 'Confirmar exclusão agora'
-                  }
+                  label="Confirmar exclusão agora"
                   onPress={() =>
                     act((c) =>
-                      r.reason === 'import_provenance_review'
-                        ? c.reviewLegacyImport(String(r.object_id), true)
-                        : c.confirmLegacyDeletion(String(r.object_id), true),
+                      c.confirmLegacyDeletion(String(r.object_id), true),
                     )
                   }
                 />
@@ -547,187 +462,6 @@ export function SyncPanel({
       </View>}
       {status.compatibilityMessage && <Text accessibilityRole="alert">{status.compatibilityMessage}</Text>}
       {!!error && <Text accessibilityRole="alert">{error}</Text>}
-    </View>
-  );
-}
-
-function CatalogReviewForm({
-  review,
-  busy,
-  submit,
-}: {
-  review: CatalogReview;
-  busy: boolean;
-  submit: (name: string) => void;
-}) {
-  const styles = useStyles();
-  const [name, setName] = useState('');
-  return (
-    <View>
-      <Text style={styles.text}>
-        Cadastros distintos: {review.entityType} · {review.remoteName}. Escolha
-        um nome local distinto para conservar ambos com suas referências.
-      </Text>
-      <TextInput
-        style={styles.input}
-        accessibilityLabel="Novo nome local"
-        value={name}
-        onChangeText={setName}
-      />
-      <Button
-        label="Conservar ambos separadamente"
-        disabled={busy || !name.trim() || name.trim() === review.remoteName}
-        onPress={() => submit(name)}
-      />
-    </View>
-  );
-}
-function SeriesReviewForm({
-  series,
-  busy,
-  submit,
-}: {
-  series: SeriesReview;
-  busy: boolean;
-  submit: (slots: ReviewedSlot[]) => void;
-}) {
-  const styles = useStyles();
-  const [choices, setChoices] = useState<ReviewedSlot[]>(() =>
-      series.slots.map((t) => ({
-        localId: t.localId,
-        originalDate: '',
-        slotKey: '',
-        originalIndex: null,
-        publish: false,
-      })),
-    ),
-    [confirmed, setConfirmed] = useState(false);
-  const change = (i: number, patch: Partial<ReviewedSlot>) =>
-    setChoices((old) => old.map((c, n) => (n === i ? { ...c, ...patch } : c)));
-  return (
-    <View>
-      <Text style={styles.text}>
-        Revisar série antiga: {series.description}
-      </Text>
-      <Text style={styles.text}>
-        Confira as datas originais no histórico. Slots mensais usam
-        monthly:AAAA-MM; outros exigem chave única. Parcelas exigem a posição
-        original antes da renumeração.
-      </Text>
-      {series.slots.map((t, i) => (
-        <View key={t.localId}>
-          <Text style={styles.text}>
-            {t.description} · {t.status} · atual {t.currentDate} · parcela atual{' '}
-            {t.installmentNumber ?? '—'}
-          </Text>
-          <TextInput
-            style={styles.input}
-            accessibilityLabel="Data original AAAA-MM-DD"
-            placeholder="Data original AAAA-MM-DD"
-            value={choices[i].originalDate}
-            onChangeText={(v) => change(i, { originalDate: v })}
-          />
-          <TextInput
-            style={styles.input}
-            accessibilityLabel="Chave original do slot"
-            placeholder="Chave original do slot"
-            value={choices[i].slotKey}
-            onChangeText={(v) => change(i, { slotKey: v })}
-          />
-          {series.entityType === 'installmentPurchase' && (
-            <TextInput
-              style={styles.input}
-              accessibilityLabel="Posição original"
-              placeholder="Posição original"
-              keyboardType="number-pad"
-              value={
-                choices[i].originalIndex === null
-                  ? ''
-                  : String(choices[i].originalIndex)
-              }
-              onChangeText={(v) => change(i, { originalIndex: Number(v) })}
-            />
-          )}
-          <Button
-            label={
-              choices[i].publish
-                ? 'Enviar esta ocorrência: sim'
-                : 'Enviar esta ocorrência editada ou realizada: não'
-            }
-            disabled={busy}
-            onPress={() => change(i, { publish: !choices[i].publish })}
-          />
-        </View>
-      ))}
-      <Button
-        label={
-          confirmed
-            ? 'Identidades conferidas'
-            : 'Conferi todas as identidades no histórico'
-        }
-        disabled={busy}
-        onPress={() => setConfirmed(!confirmed)}
-      />
-      <Button
-        label="Confirmar identidades e liberar série"
-        disabled={
-          busy ||
-          !confirmed ||
-          choices.some(
-            (c) =>
-              !c.originalDate ||
-              !c.slotKey ||
-              (series.entityType === 'installmentPurchase' && !c.originalIndex),
-          )
-        }
-        onPress={() => submit(choices)}
-      />
-    </View>
-  );
-}
-
-function CatalogBatchReview({
-  catalogs,
-  busy,
-  submit,
-}: {
-  catalogs: CatalogReview[];
-  busy: boolean;
-  submit: (suffix: string) => void;
-}) {
-  const styles = useStyles();
-  const [suffix, setSuffix] = useState(''),
-    [confirmed, setConfirmed] = useState(false);
-  return (
-    <View>
-      <Text style={styles.text}>
-        Revisar cadastros:{' '}
-        {catalogs.map((c) => c.entityType + ': ' + c.localName).join(' · ')}
-      </Text>
-      <Text style={styles.text}>
-        Conservar ambos mantém identidades e referências distintas. Os cadastros
-        locais desta lista receberão o sufixo informado.
-      </Text>
-      <TextInput
-        style={styles.input}
-        accessibilityLabel="Sufixo para nomes locais"
-        value={suffix}
-        onChangeText={setSuffix}
-      />
-      <Button
-        label={
-          confirmed
-            ? 'Lista conferida'
-            : 'Conferi a lista e desejo conservar ambos'
-        }
-        disabled={busy}
-        onPress={() => setConfirmed(!confirmed)}
-      />
-      <Button
-        label="Conservar a lista separadamente"
-        disabled={busy || !confirmed || !suffix.trim()}
-        onPress={() => submit(suffix)}
-      />
     </View>
   );
 }

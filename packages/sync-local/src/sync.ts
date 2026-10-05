@@ -54,9 +54,7 @@ import { updateRegistry } from './transport-state';
 import {
   captureFinancial,
   reconnectFinancial,
-  reviewLegacySeries,
   startFinancialBaseline,
-  type ReviewedSlot,
 } from './financial';
 import type { LocalSyncDatabase, ProjectionDialect } from './transport-state';
 import type { SecretStore } from './secrets';
@@ -712,7 +710,7 @@ export class SyncController {
     if (this.options.requireRecoveryConfirmation !== false && !s.recoveryVersion) {
       s.phase = 'recovery';
       await this.options.storage.save(s);
-    } else await this.bind(s, false);
+    } else await this.bind(s);
   }
   invitation(saved: SyncSaved): string {
     if (!saved.profile) return '';
@@ -782,7 +780,7 @@ export class SyncController {
     await this.control(s, 'pairings', s.request, session);
     return this.status();
   }
-  private async bind(s: SyncSaved, joining: boolean) {
+  private async bind(s: SyncSaved) {
     const [state] = await this.options.db.read(
       'SELECT * FROM sync_local_state WHERE id=1',
     );
@@ -793,14 +791,6 @@ export class SyncController {
           this.crypto().uuid(),
         ),
       );
-      if (joining)
-        await this.options.db.run(
-          (function* () {
-            yield {
-              sql: "UPDATE sync_bootstrap SET state='joining_review' WHERE id=1",
-            };
-          })(),
-        );
     }
     s.phase = 'bound';
     await this.options.storage.save(s);
@@ -816,7 +806,7 @@ export class SyncController {
     await acceptKeyCheckpoints(d, response);
     s.profile = d.profile;
     await this.options.storage.save(s);
-    await this.bind(s, true);
+    await this.bind(s);
     return this.status();
   }
   private async engine(s: SyncSaved, signal?: AbortSignal) {
@@ -1086,7 +1076,7 @@ export class SyncController {
     s.recoveryVersion = s.pendingRecovery.envelope.recoveryVersion;
     delete s.pendingRecovery;
     await this.options.storage.save(s);
-    if (s.phase === 'recovery') await this.bind(s, false);
+    if (s.phase === 'recovery') await this.bind(s);
     return this.status();
   }
   async recover(
@@ -1187,7 +1177,7 @@ export class SyncController {
     s.recoveryVersion = bundle.recoveryVersion;
     await this.options.storage.save(s);
     await this.rotate(s, session, true);
-    await this.bind(s, true);
+    await this.bind(s);
     return this.status();
   }
   async reconnectRestored(confirm: boolean) {
@@ -1222,105 +1212,6 @@ export class SyncController {
     );
     if (paused) this.coordinator.cancel();
     else this.coordinator.request('foreground');
-    return this.status();
-  }
-  async seriesReviews() {
-    const result: {
-      entityType: 'recurring' | 'installmentPurchase';
-      localId: string;
-      description: string;
-      frequency: string;
-      scheduleEpoch: string;
-      slots: {
-        localId: string;
-        description: string;
-        status: string;
-        currentDate: string;
-        installmentNumber: number | null;
-      }[];
-    }[] = [];
-    for (const meta of await this.options.db.read(
-      "SELECT * FROM sync_series WHERE identity_status='identity_unresolved'",
-    )) {
-      const type = String(meta.entity_type) as
-          'recurring' | 'installmentPurchase',
-        table =
-          type === 'recurring' ? 'recurring_expenses' : 'installment_purchases',
-        [row] = await this.options.db.read(
-          `SELECT * FROM ${table} WHERE id=?`,
-          [meta.local_id],
-        );
-      const slots = await this.options.db.read(
-        'SELECT * FROM transactions WHERE source_type=? AND source_id=? ORDER BY due_date,id',
-        [type === 'recurring' ? 'recurring' : 'installment', meta.local_id],
-      );
-      result.push({
-        entityType: type,
-        localId: String(meta.local_id),
-        description: String(row.description),
-        frequency: String(row.frequency ?? 'installment'),
-        scheduleEpoch: String(meta.schedule_epoch),
-        slots: slots.map((t) => ({
-          localId: String(t.id),
-          description: String(t.description),
-          status: String(t.status),
-          currentDate: String(
-            t.occurrence_date ?? t.purchase_date ?? t.due_date,
-          ),
-          installmentNumber: t.installment_number as number | null,
-        })),
-      });
-    }
-    return result;
-  }
-  async reviewSeries(
-    type: 'recurring' | 'installmentPurchase',
-    localId: string,
-    slots: ReviewedSlot[],
-  ) {
-    if (
-      !['recurring', 'installmentPurchase'].includes(type) ||
-      !Array.isArray(slots)
-    )
-      throw new Error('invalid_series_review');
-    await this.options.db.run(
-      reviewLegacySeries(type, localId, slots, () => this.crypto().uuid()),
-    );
-    this.localWriteCommitted();
-    return this.status();
-  }
-  async reviewLegacyImport(objectId: string, confirm: boolean) {
-    if (!confirm) throw new Error('Confirme a origem manual do registro.');
-    const [identity] = await this.options.db.read(
-      "SELECT local_id FROM sync_identity WHERE object_id=? AND entity_type='transaction'",
-      [objectId],
-    );
-    if (!identity) throw new Error('identity_missing');
-    const uuid = () => this.crypto().uuid();
-    await this.options.db.run(
-      (function* (): SqlWorkflow {
-        const [tx] = yield {
-          sql: "SELECT * FROM transactions WHERE id=? AND source_type='imported'",
-          params: [identity.local_id],
-        };
-        if (!tx) throw new Error('import_review_missing');
-        yield {
-          sql: 'INSERT INTO sync_review VALUES(?,?,?,?)',
-          params: [
-            uuid(),
-            objectId,
-            'legacy_import_review_provenance',
-            canonicalStringify(tx),
-          ],
-        };
-        yield {
-          sql: "UPDATE transactions SET source_type='manual',source_id=NULL WHERE id=?",
-          params: [identity.local_id],
-        };
-        yield* captureFinancial(uuid);
-      })(),
-    );
-    this.localWriteCommitted();
     return this.status();
   }
   async confirmLegacyDeletion(objectId: string, confirm: boolean) {
@@ -1372,133 +1263,7 @@ export class SyncController {
           };
           return;
         }
-        if (!row.deleted_at) throw new Error('delete_review_missing');
-        yield {
-          sql: "INSERT INTO sync_dirty VALUES(?,?,'update',?) ON CONFLICT(table_name,local_id) DO UPDATE SET operation='update',row_json=excluded.row_json",
-          params: [table, identity.local_id, canonicalStringify(row)],
-        };
-        yield* captureFinancial(uuid);
-      })(),
-    );
-    this.localWriteCommitted();
-    return this.status();
-  }
-  async catalogReviews() {
-    const s = await this.saved(),
-      engine = await this.engine(s),
-      rows = await this.options.db.read(
-        "SELECT commit_id FROM sync_inbox WHERE state='quarantined' AND last_error='catalog_identity_review'",
-      );
-    const result: {
-      commitId: string;
-      objectId: string;
-      entityType: string;
-      localId: string;
-      localName: string;
-      remoteName: string;
-    }[] = [];
-    for (const row of rows)
-      for (const op of await engine.inspectInbox(String(row.commit_id))) {
-        if (
-          op.revision.action !== 'put' ||
-          !['category', 'paymentMethod', 'card'].includes(
-            op.revision.entityType,
-          )
-        )
-          continue;
-        const value = op.revision.snapshot as { name: string; kind?: string },
-          table =
-            op.revision.entityType === 'category'
-              ? 'categories'
-              : op.revision.entityType === 'card'
-                ? 'cards'
-                : 'payment_methods';
-        const matches = await this.options.db.read(
-          `SELECT id,name FROM ${table} WHERE name=?${op.revision.entityType === 'category' ? ' AND kind=?' : ''}`,
-          op.revision.entityType === 'category'
-            ? [value.name, value.kind!]
-            : [value.name],
-        );
-        for (const match of matches)
-          result.push({
-            commitId: String(row.commit_id),
-            objectId: op.objectId,
-            entityType: op.revision.entityType,
-            localId: String(match.id),
-            localName: String(match.name),
-            remoteName: value.name,
-          });
-      }
-    return result;
-  }
-  async preserveBothCatalogs(
-    commitId: string,
-    objectId: string,
-    newLocalName: string,
-  ) {
-    const review = (await this.catalogReviews()).find(
-      (r) => r.commitId === commitId && r.objectId === objectId,
-    );
-    if (
-      !review ||
-      !newLocalName.trim() ||
-      newLocalName.trim() === review.remoteName
-    )
-      throw new Error('Revise o cadastro e escolha um nome distinto.');
-    const table =
-      review.entityType === 'category'
-        ? 'categories'
-        : review.entityType === 'card'
-          ? 'cards'
-          : 'payment_methods';
-    await this.options.db.run(
-      (function* () {
-        yield {
-          sql: `UPDATE ${table} SET name=? WHERE id=?`,
-          params: [newLocalName.trim(), review.localId],
-        };
-      })(),
-    );
-    const s = await this.saved();
-    await (await this.engine(s)).applyInbox();
-    return this.status();
-  }
-  async preserveCatalogBatch(suffix: string, confirmed: boolean) {
-    if (!confirmed || !suffix.trim() || suffix.length > 60)
-      throw new Error('Confira a lista e escolha um sufixo local.');
-    const reviews = await this.catalogReviews(),
-      unique = new Map(reviews.map((r) => [r.entityType + ':' + r.localId, r]));
-    await this.options.db.run(
-      (function* (): SqlWorkflow {
-        for (const r of unique.values()) {
-          const table =
-            r.entityType === 'category'
-              ? 'categories'
-              : r.entityType === 'card'
-                ? 'cards'
-                : 'payment_methods';
-          yield {
-            sql: `UPDATE ${table} SET name=? WHERE id=?`,
-            params: [`${r.localName} (${suffix.trim()})`, r.localId],
-          };
-        }
-      })(),
-    );
-    const s = await this.saved();
-    await (await this.engine(s)).applyInbox();
-    return this.status();
-  }
-  async confirmCombination() {
-    const [n] = await this.options.db.read(
-      "SELECT count(*) AS n FROM sync_inbox WHERE state='quarantined'",
-    );
-    if (n.n)
-      throw new Error(
-        'Revise os cadastros e a quarentena antes de enviar a base.',
-      );
-    await this.options.db.run(
-      (function* () {
-        yield { sql: "UPDATE sync_bootstrap SET state='confirmed' WHERE id=1" };
+        throw new Error('delete_review_missing');
       })(),
     );
     this.localWriteCommitted();
@@ -1542,14 +1307,11 @@ export class SyncController {
       counts[table] = Number(
         (await this.options.db.read(`SELECT count(*) AS n FROM ${table}`))[0].n,
       );
-    const [bootstrap] = await this.options.db.read(
-      'SELECT * FROM sync_bootstrap WHERE id=1',
-    );
     const [control] = await this.options.db.read(
       'SELECT * FROM sync_control WHERE id=1',
     );
     const reviews = await this.options.db.read(
-      "SELECT * FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance') AND reason NOT LIKE 'import_receipt:%'",
+      "SELECT * FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance','catalog_projection_audit','restore_reconnect_backup') AND reason NOT LIKE 'import_receipt:%'",
     );
     const quarantine = await this.options.db.read(
       "SELECT commit_id,last_error FROM sync_inbox WHERE state='quarantined'",
@@ -1606,7 +1368,6 @@ export class SyncController {
       quarantine.length ||
       sync?.conflicts.length ||
       blocked.length ||
-      bootstrap?.state === 'joining_review' ||
       (state.mode === 'disabled' && state.binding_id)
     );
     const activity = this.coordinator.running
@@ -1664,7 +1425,6 @@ export class SyncController {
         ).values(),
       ],
       paused: !!control.paused,
-      joiningReview: bootstrap?.state === 'joining_review',
       counts,
       sync,
       reviews,
@@ -1673,12 +1433,6 @@ export class SyncController {
     };
   }
 }
-export type SeriesReview = Awaited<
-  ReturnType<SyncController['seriesReviews']>
->[number];
-export type CatalogReview = Awaited<
-  ReturnType<SyncController['catalogReviews']>
->[number];
 export type SyncStatus = Awaited<ReturnType<SyncController['status']>>;
 
 export type SyncActivity =

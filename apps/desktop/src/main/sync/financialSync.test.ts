@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   startFinancialBaseline,
-  reviewLegacySeries,
   reconnectFinancial,
   type ProvisionedProfile,
 } from '@lionpocket/sync-local';
@@ -139,79 +138,19 @@ describe('financial writers', () => {
     ).toHaveLength(1);
     bank.db.close();
   });
-  it('requires explicit legacy slot dates, preserves local keys and never infers from edited due dates', async () => {
+  it('adopts edited legacy dates without changing financial rows or asking for historic slots', async () => {
     const bank = new LionPocketDatabase(':memory:');
-    bank.saveRecurringExpense({
-      kind: 'expense',
-      active: true,
-      description: 'Legada',
-      plannedAmount: 10,
-      startMonth: '2026-10',
-      dueDay: 10,
-    });
+    bank.saveRecurringExpense({ kind: 'expense', active: true, description: 'Legada', plannedAmount: 10, startMonth: '2026-10', dueDay: 10 });
     bank.listTransactions({ month: '2026-10' });
-    const tx = bank.db
-      .prepare("SELECT * FROM transactions WHERE description='Legada'")
-      .get()!;
-    bank.db
-      .prepare("UPDATE transactions SET due_date='2026-11-03' WHERE id=?")
-      .run(tx.id);
+    const tx = bank.db.prepare("SELECT * FROM transactions WHERE description='Legada'").get()!;
+    bank.db.prepare("UPDATE transactions SET due_date='2026-11-03' WHERE id=?").run(tx.id);
+    const before = bank.db.prepare('SELECT * FROM transactions').all();
     await activate(bank);
-    expect(
-      bank.db
-        .prepare("SELECT * FROM sync_review WHERE reason='identity_unresolved'")
-        .all().length,
-    ).toBeGreaterThan(0);
-    await expect(
-      bank.syncDatabase().run(
-        reviewLegacySeries(
-          'recurring',
-          String(tx.source_id),
-          [
-            {
-              localId: String(tx.id),
-              originalDate: 'wrong',
-              slotKey: 'monthly:2026-10',
-              originalIndex: null,
-              publish: true,
-            },
-          ],
-          randomUUID,
-        ),
-      ),
-    ).rejects.toThrow();
-    await bank.syncDatabase().run(
-      reviewLegacySeries(
-        'recurring',
-        String(tx.source_id),
-        [
-          {
-            localId: String(tx.id),
-            originalDate: '2026-10-10',
-            slotKey: 'monthly:2026-10',
-            originalIndex: null,
-            publish: true,
-          },
-        ],
-        randomUUID,
-      ),
-    );
-    expect(
-      bank.db
-        .prepare('SELECT id,due_date FROM transactions WHERE id=?')
-        .get(tx.id),
-    ).toMatchObject({ id: tx.id, due_date: '2026-11-03' });
-    const snapshot = JSON.parse(
-      String(
-        bank.db
-          .prepare(
-            "SELECT payload_json FROM sync_revisions WHERE object_id=(SELECT object_id FROM sync_identity WHERE entity_type='transaction' AND local_id=?)",
-          )
-          .get(tx.id)?.payload_json,
-      ),
-    ).snapshot;
-    expect(snapshot.occurrenceDate).toBe('2026-10-10');
-    expect(snapshot.source.slotKey).toBe('monthly:2026-10');
+    expect(bank.db.prepare('SELECT * FROM transactions').all()).toEqual(before);
+    expect(bank.db.prepare('SELECT * FROM sync_review').all()).toEqual([]);
+    const slot = bank.db.prepare('SELECT * FROM sync_slots WHERE local_id=?').get(tx.id)!;
+    expect(slot.slot_key).toBe(`legacy:${slot.object_id}`);
+    expect(bank.db.prepare('SELECT identity_status FROM sync_series').get()?.identity_status).toBe('resolved');
     expect(bank.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     bank.db.close();
   });
@@ -281,7 +220,7 @@ describe('financial writers', () => {
     expect(bank.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     bank.db.close();
   });
-  it('keeps restored edits as new branches and blocks sending until remote combination review', async () => {
+  it('keeps restored edits as new branches without a global combination gate', async () => {
     const bank = new LionPocketDatabase(':memory:'),
       p = profile();
     const tx = bank.saveTransaction({
@@ -335,7 +274,7 @@ describe('financial writers', () => {
     ).toBe(Number(before) + 1);
     expect(
       bank.db.prepare('SELECT state FROM sync_bootstrap').get()?.state,
-    ).toBe('joining_review');
+    ).toBe('captured');
     expect(
       bank.db
         .prepare('SELECT description FROM transactions WHERE id=?')

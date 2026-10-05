@@ -238,6 +238,23 @@ describe('financial foreground sync boundaries', () => {
       'only-in-memory',
     );
   });
+  it('sends without legacy combination approval and leaves real restore decisions specific to their records', async () => {
+    const s = await setup();
+    s.bank.saveTransaction(input);
+    s.bank.db.exec("UPDATE sync_bootstrap SET state='joining_review'");
+    await foreground(s.beta);
+    await manual(s.beta);
+    expect(s.posts).toHaveLength(1);
+    expect((await s.beta.status()).sync?.pending).toBe(0);
+    expect((await s.beta.status()).activity).toBe('synced');
+    const missingObject = randomUUID();
+    s.bank.db.prepare('INSERT INTO sync_review VALUES(?,?,?,?)').run(randomUUID(), missingObject, 'restored_missing_record', '{}');
+    s.bank.saveTransaction({ ...input, description: 'Independente da recuperação' });
+    await manual(s.beta);
+    expect(s.posts).toHaveLength(2);
+    expect((await s.beta.status()).reviews).toHaveLength(1);
+    expect(s.bank.db.prepare('SELECT * FROM sync_tombstones WHERE object_id=?').all(missingObject)).toEqual([]);
+  });
   it('four rapid financial commits remain immutable and share one debounced network pass', async () => {
     const s = await setup();
     await foreground(s.beta);

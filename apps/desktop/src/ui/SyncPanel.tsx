@@ -24,9 +24,6 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type {
   SyncStatus,
-  SeriesReview,
-  CatalogReview,
-  ReviewedSlot,
 } from '@lionpocket/sync-local';
 import type { PairingRequest } from '@lionpocket/sync-protocol';
 
@@ -54,28 +51,13 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const [revokeId, setRevokeId] = useState('');
   const [setup, setSetup] = useState(false);
   const [path, setPath] = useState<'create' | 'pair' | ''>('');
-  const [series, setSeries] = useState<SeriesReview[]>([]);
-  const [catalogs, setCatalogs] = useState<CatalogReview[]>([]);
 
   const refresh = async () => {
     const s = await window.lionPocket.syncStatus?.();
     if (s) {
       setStatus(s);
       setEndpoint(s.endpoint);
-      if (s.phase === 'bound') {
-        setSeries(
-          (await window.lionPocket.syncCommand!(
-            'series-reviews',
-            [],
-          )) as SeriesReview[],
-        );
-        setCatalogs(
-          (await window.lionPocket.syncCommand!(
-            'catalog-reviews',
-            [],
-          )) as CatalogReview[],
-        );
-      }
+
     }
   };
   useEffect(() => {
@@ -599,20 +581,6 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                       )}
                     </>
                   )}
-                  <label className="sync-consent">
-                    <input
-                      type="checkbox"
-                      checked={reviewed}
-                      onChange={(e) => setReviewed(e.target.checked)}
-                    />
-                    <span>
-                      <strong>Revisei os dados deste aparelho</strong>
-                      <small>
-                        Autorizo a cópia de segurança anterior à vinculação e o
-                        envio dos dados elegíveis, com criptografia.
-                      </small>
-                    </span>
-                  </label>
                   <div className="sync-section__footer">
                     <span>
                       <LockKeyhole size={14} aria-hidden="true" />
@@ -621,7 +589,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                     {path === 'create' ? (
                       <button
                         className="button button--primary"
-                        disabled={busy || !reviewed}
+                        disabled={busy}
                         onClick={() => void run('create')}
                       >
                         Entrar e criar cofre
@@ -632,7 +600,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                         <button
                           className="button button--primary"
                           disabled={
-                            busy || !reviewed || fingerprint !== authority
+                            busy || fingerprint !== authority
                           }
                           onClick={() =>
                             void run('pair', [invitation, fingerprint])
@@ -809,34 +777,6 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                   onClick={() => void run('reconnect', [true])}
                 >
                   Reconectar para revisão
-                </button>
-              </div>
-            </SyncSection>
-          )}
-          {status.joiningReview && (
-            <SyncSection
-              icon={Link2}
-              title="Combine as bases com cuidado"
-              description="Sincronize para receber a base remota. Cadastros com o mesmo nome exigem sua decisão; registros locais distintos serão conservados."
-            >
-              <label className="sync-consent">
-                <input
-                  type="checkbox"
-                  checked={reviewed}
-                  onChange={(e) => setReviewed(e.target.checked)}
-                />
-                <span>
-                  Revisei as duas bases e desejo conservar seus registros
-                  distintos.
-                </span>
-              </label>
-              <div className="sync-actions">
-                <button
-                  className="button button--primary"
-                  disabled={busy || !reviewed || !!status.quarantine.length}
-                  onClick={() => void run('confirm')}
-                >
-                  Confirmar combinação e liberar envio
                 </button>
               </div>
             </SyncSection>
@@ -1110,55 +1050,16 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
               </div>
             </SyncSection>
           ))}
-          {series.map((s) => (
-            <SeriesReviewForm
-              key={s.localId}
-              series={s}
-              busy={busy}
-              submit={(slots) =>
-                run('series-review', [s.entityType, s.localId, slots])
-              }
-            />
-          ))}
-          {!!catalogs.length && (
-            <CatalogBatchReview
-              catalogs={catalogs}
-              busy={busy}
-              submit={(suffix) => run('catalog-batch', [suffix, true])}
-            />
-          )}
-          {catalogs.map((c) => (
-            <CatalogReviewForm
-              key={c.commitId + c.objectId}
-              review={c}
-              busy={busy}
-              submit={(name) =>
-                run('catalog-separate', [c.commitId, c.objectId, name])
-              }
-            />
-          ))}
           {status.reviews
-            .filter((r) =>
-              [
-                'import_provenance_review',
-                'legacy_delete_review',
-                'restored_missing_record',
-              ].includes(String(r.reason)),
-            )
+            .filter((r) => r.reason === 'restored_missing_record')
             .map((r) => (
               <SyncSection
                 key={String(r.review_id)}
                 icon={CircleAlert}
-                title={
-                  r.reason === 'import_provenance_review'
-                    ? 'Confira a origem deste lançamento'
-                    : 'Confira esta exclusão antiga'
-                }
+                title="Confira um registro ausente na cópia restaurada"
               >
                 <p>
-                  {r.reason === 'import_provenance_review'
-                    ? 'A origem importada não tem proveniência verificável. A conversão manual conserva a origem anterior na auditoria.'
-                    : 'A exclusão antiga não tem data verificável.'}
+                  A cópia restaurada não contém este registro. Confirme a exclusão somente se você deseja removê-lo também dos outros aparelhos.
                 </p>
                 <details className="sync-technical">
                   <summary>Identificador do registro</summary>
@@ -1170,16 +1071,12 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                     disabled={busy}
                     onClick={() =>
                       void run(
-                        r.reason === 'import_provenance_review'
-                          ? 'import-review'
-                          : 'delete-review',
+                        'delete-review',
                         [r.object_id, true],
                       )
                     }
                   >
-                    {r.reason === 'import_provenance_review'
-                      ? 'Converter para lançamento manual'
-                      : 'Confirmar exclusão agora'}
+                    Confirmar exclusão agora
                   </button>
                 </div>
               </SyncSection>
@@ -1378,184 +1275,6 @@ function RecoveryCode({
           {confirmLabel}
         </button>
       </div>
-    </div>
-  );
-}
-
-function CatalogReviewForm({
-  review,
-  busy,
-  submit,
-}: {
-  review: CatalogReview;
-  busy: boolean;
-  submit: (name: string) => Promise<void>;
-}) {
-  const [name, setName] = useState('');
-  return (
-    <div className="sync-review">
-      <h4>Cadastros distintos com o mesmo nome</h4>
-      <p>
-        {review.entityType}: {review.remoteName}. Confira os cadastros. Escolha
-        um nome distinto para o local; o remoto conserva o nome recebido e suas
-        referências.
-      </p>
-      <label>
-        Novo nome local
-        <input value={name} onChange={(e) => setName(e.target.value)} />
-      </label>
-      <button
-        className="button button--soft"
-        disabled={busy || !name.trim() || name.trim() === review.remoteName}
-        onClick={() => void submit(name)}
-      >
-        Conservar ambos separadamente
-      </button>
-    </div>
-  );
-}
-function SeriesReviewForm({
-  series,
-  busy,
-  submit,
-}: {
-  series: SeriesReview;
-  busy: boolean;
-  submit: (slots: ReviewedSlot[]) => Promise<void>;
-}) {
-  const [choices, setChoices] = useState<ReviewedSlot[]>(() =>
-      series.slots.map((t) => ({
-        localId: t.localId,
-        originalDate: '',
-        slotKey: '',
-        originalIndex: null,
-        publish: false,
-      })),
-    ),
-    [confirmed, setConfirmed] = useState(false);
-  const change = (i: number, patch: Partial<ReviewedSlot>) =>
-    setChoices((old) => old.map((c, n) => (n === i ? { ...c, ...patch } : c)));
-  return (
-    <div className="sync-review">
-      <h4>Revisar série antiga: {series.description}</h4>
-      <p>
-        Confira no histórico a data original de cada ocorrência. A data atual
-        pode ter sido editada. Slots mensais usam monthly:AAAA-MM; outros usam
-        uma chave única escolhida após conferir o histórico. Parcelas exigem a
-        posição original, antes de qualquer renumeração.
-      </p>
-      {series.slots.map((t, i) => (
-        <div className="sync-review__slot" key={t.localId}>
-          <p>
-            {t.description} · {t.status} · data atual {t.currentDate} · parcela
-            atual {t.installmentNumber ?? '—'}
-          </p>
-          <label>
-            Data original
-            <input
-              type="date"
-              value={choices[i].originalDate}
-              onChange={(e) => change(i, { originalDate: e.target.value })}
-            />
-          </label>
-          <label>
-            Chave original do slot
-            <input
-              value={choices[i].slotKey}
-              onChange={(e) => change(i, { slotKey: e.target.value })}
-            />
-          </label>
-          {series.entityType === 'installmentPurchase' && (
-            <label>
-              Posição original
-              <input
-                type="number"
-                min="1"
-                value={choices[i].originalIndex ?? ''}
-                onChange={(e) =>
-                  change(i, { originalIndex: Number(e.target.value) })
-                }
-              />
-            </label>
-          )}
-          <label>
-            <input
-              type="checkbox"
-              checked={choices[i].publish}
-              onChange={(e) => change(i, { publish: e.target.checked })}
-            />{' '}
-            Enviar também esta ocorrência editada ou realizada
-          </label>
-        </div>
-      ))}
-      <label>
-        <input
-          type="checkbox"
-          checked={confirmed}
-          onChange={(e) => setConfirmed(e.target.checked)}
-        />{' '}
-        Conferi todas as identidades no histórico
-      </label>
-      <button
-        className="button button--soft"
-        disabled={
-          busy ||
-          !confirmed ||
-          choices.some(
-            (c) =>
-              !c.originalDate ||
-              !c.slotKey ||
-              (series.entityType === 'installmentPurchase' && !c.originalIndex),
-          )
-        }
-        onClick={() => void submit(choices)}
-      >
-        Confirmar identidades e liberar série
-      </button>
-    </div>
-  );
-}
-
-function CatalogBatchReview({
-  catalogs,
-  busy,
-  submit,
-}: {
-  catalogs: CatalogReview[];
-  busy: boolean;
-  submit: (suffix: string) => Promise<void>;
-}) {
-  const [suffix, setSuffix] = useState(''),
-    [confirmed, setConfirmed] = useState(false);
-  return (
-    <div className="sync-review">
-      <h4>Revisar a lista de cadastros</h4>
-      <p>
-        {catalogs.map((c) => c.entityType + ': ' + c.localName).join(' · ')}
-      </p>
-      <p>
-        Conservar ambos mantém identidades e referências distintas. Todos os
-        cadastros locais desta lista receberão o sufixo informado.
-      </p>
-      <label>
-        Sufixo para nomes locais
-        <input value={suffix} onChange={(e) => setSuffix(e.target.value)} />
-      </label>
-      <label>
-        <input
-          type="checkbox"
-          checked={confirmed}
-          onChange={(e) => setConfirmed(e.target.checked)}
-        />{' '}
-        Conferi a lista e desejo conservar os cadastros distintos
-      </label>
-      <button
-        className="button button--soft"
-        disabled={busy || !confirmed || !suffix.trim()}
-        onClick={() => void submit(suffix)}
-      >
-        Conservar a lista separadamente
-      </button>
     </div>
   );
 }

@@ -121,7 +121,7 @@ describe.skipIf(!enabled)(
       await old.sync.approve(request.deviceId, request.fingerprint);
       await current.sync.receive();
       await current.sync.sync();
-      await current.sync.confirmCombination();
+
       old.bank.saveTransaction({ kind: "expense", description: "Previous client zero", plannedAmount: 0, actualAmount: 0, dueDate: "2026-10-02", settledDate: "2026-10-02", status: "paid" });
       await old.sync.sync(); await current.sync.sync();
       expect(current.bank.listTransactions({ month: "2026-10" })).toMatchObject([{ description: "Previous client zero", plannedAmount: 0, actualAmount: 0 }]);
@@ -154,7 +154,7 @@ describe.skipIf(!enabled)(
         await pool.query('UPDATE sync_environment SET server_epoch=$1', [oldEpoch]);
       }
     }, 30000);
-    it("creates, pairs, reviews, synchronizes, rotates/reemits and recovers through the app commands", async () => {
+    it("creates, pairs, automatically adopts, synchronizes, rotates/reemits and recovers through the app commands", async () => {
       const a = client(),
         b = client(1);
       await a.sync.configure(endpoint);
@@ -165,9 +165,9 @@ describe.skipIf(!enabled)(
       const request = (await a.sync.requests()).requests[0];
       await a.sync.approve(request.deviceId, request.fingerprint);
       await b.sync.receive();
-      expect((await b.sync.status()).joiningReview).toBe(true);
+      expect((await b.sync.status()).reviews).toEqual([]);
       await b.sync.sync();
-      await b.sync.confirmCombination();
+
       a.bank.createCatalogItem({
         type: "category",
         name: "Beta 🦁",
@@ -247,7 +247,7 @@ describe.skipIf(!enabled)(
       expect(recovered.owner).toBe(true);
       await c.sync.sync();
       expect(c.bank.listTransactions({ month: "2026-10" })).toHaveLength(2);
-      await c.sync.confirmCombination();
+
       await c.sync.revoke(
         b.profile()!.profile!.deviceId,
         b.profile()!.profile!.deviceId,

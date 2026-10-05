@@ -817,6 +817,11 @@ export class LionPocketDatabase {
           (purchase_date IS NOT NULL AND substr(purchase_date, 1, 7) = ?)
           OR (? = 1 AND purchase_date IS NULL AND substr(due_date, 1, 7) = ?)
           OR due_date = ?
+          OR EXISTS (
+            SELECT 1 FROM sync_slots s
+            WHERE s.local_id=transactions.id AND s.slot_key LIKE 'legacy:%'
+              AND substr(s.original_date,1,7)=?
+          )
         )
       LIMIT 1
     `);
@@ -862,6 +867,7 @@ export class LionPocketDatabase {
             item.card_id ? 0 : 1,
             scheduledDate.slice(0, 7),
             occurrence.dueDate,
+            scheduledDate.slice(0, 7),
           )
         ) continue;
         if (occurrence.dueDate.slice(0, 7) !== month) continue;

@@ -1,4 +1,3 @@
-import { isValidDate } from '@lionpocket/core';
 import { sha1 } from '@noble/hashes/sha1';
 import { sha256 } from '@noble/hashes/sha256';
 import {
@@ -10,7 +9,12 @@ import {
   type RevisionPlaintext,
   type Snapshots,
 } from '@lionpocket/sync-protocol';
-import { incrementDecimal64, type SqlRow, type SqlWorkflow } from './manual';
+import {
+  incrementDecimal64,
+  type SqlRow,
+  type SqlWorkflow,
+  type SqlRequest,
+} from './manual';
 import { financialTableTypes } from './schema';
 import type { ProvisionedProfile } from './provisioning';
 const sql = (sql: string, params?: (string | number | null)[]) => ({
@@ -142,7 +146,6 @@ export function* ensureSeries(
   type: 'recurring' | 'installmentPurchase',
   row: SqlRow,
   uuid: () => string,
-  legacy = false,
 ): Generator<ReturnType<typeof sql>, SqlRow, SqlRow[]> {
   const [saved] = yield sql(
     'SELECT * FROM sync_series WHERE entity_type=? AND local_id=?',
@@ -155,7 +158,7 @@ export function* ensureSeries(
       row.id,
       uuid(),
       signature,
-      legacy ? 'identity_unresolved' : 'resolved',
+      'resolved',
     ]);
   } else if (saved.structure_json !== signature) {
     yield sql(
@@ -167,6 +170,140 @@ export function* ensureSeries(
     'SELECT * FROM sync_series WHERE entity_type=? AND local_id=?',
     [type, row.id],
   ))[0];
+}
+/** Historical installment membership is encoded in existing UUID fields; no wire/schema extension. */
+export const isLegacyInstallmentSlot = (slotId: string, objectId: string) =>
+  slotId === derivedId(objectId, 'legacy-installment-slot:v1');
+/** Synthetic legacy import keys identify the adopted row, not an unverifiable old file. */
+function* legacyImport(
+  row: SqlRow,
+): Generator<ReturnType<typeof sql>, SqlRow, SqlRow[]> {
+  const [known] = yield sql(
+    'SELECT * FROM sync_import_provenance WHERE local_id=?',
+    [row.id],
+  );
+  if (known) return known;
+  const [state] = yield sql('SELECT vault_id FROM sync_local_state WHERE id=1');
+  const key = importDigest({
+    context: 'LionPocket/legacy-import-row/v1',
+    vaultId: state.vault_id,
+    id: row.id,
+  });
+  yield sql('INSERT INTO sync_import_provenance VALUES(?,?,?)', [
+    row.id,
+    key,
+    row.source_id ?? null,
+  ]);
+  return { import_key: key };
+}
+/** Historical slots name existing rows. Their present dates/numbers are not claims about history. */
+function* adoptSeriesSlots(
+  type: 'recurring' | 'installmentPurchase',
+  series: SqlRow,
+  uuid: () => string,
+): SqlWorkflow {
+  const seriesId = yield* identityFor(type, String(series.id), uuid);
+  const rows = yield sql(
+    'SELECT * FROM transactions WHERE source_type=? AND source_id=? ORDER BY id',
+    [type === 'recurring' ? 'recurring' : 'installment', series.id],
+  );
+  for (const [index, row] of rows.entries()) {
+    if (
+      (yield sql('SELECT local_id FROM sync_slots WHERE local_id=?', [row.id]))
+        .length
+    )
+      continue;
+    const [state] = yield sql(
+      'SELECT vault_id FROM sync_local_state WHERE id=1',
+    );
+    const objectId = yield* identityFor(
+      'transaction',
+      String(row.id),
+      uuid,
+      String(state.vault_id),
+    );
+    const slotId =
+      type === 'installmentPurchase'
+        ? derivedId(objectId, 'legacy-installment-slot:v1')
+        : null;
+    const currentIndex =
+      Number(row.installment_number) - Number(series.starting_installment) + 1;
+    yield sql('INSERT INTO sync_slots VALUES(?,?,?,?,?,?,?)', [
+      row.id,
+      seriesId,
+      slotId ? `installment:${slotId}` : `legacy:${objectId}`,
+      slotId,
+      objectId,
+      row.occurrence_date ?? row.purchase_date ?? row.due_date,
+      slotId
+        ? currentIndex >= 1
+          ? currentIndex
+          : Number(series.total_installments) + index + 1
+        : null,
+    ]);
+  }
+}
+/** Resume sidecars captured by older clients without asking users to repair protocol identity. */
+function* adoptUnresolvedSeries(
+  uuid: () => string,
+): Generator<SqlRequest, boolean, SqlRow[]> {
+  const unresolved = yield sql(
+    "SELECT * FROM sync_series WHERE identity_status='identity_unresolved'",
+  );
+  let adopted = false;
+  for (const meta of unresolved) {
+    const type = String(meta.entity_type) as
+      'recurring' | 'installmentPurchase';
+    const [row] = yield sql(`SELECT * FROM ${tableFor(type)} WHERE id=?`, [
+      meta.local_id,
+    ]);
+    if (!row) continue;
+    adopted = true;
+    yield* adoptSeriesSlots(type, row, uuid);
+    yield sql(
+      "UPDATE sync_series SET identity_status='resolved' WHERE entity_type=? AND local_id=?",
+      [type, row.id],
+    );
+    for (const tx of [
+      row,
+      ...(yield sql(
+        'SELECT * FROM transactions WHERE source_type=? AND source_id=?',
+        [type === 'recurring' ? 'recurring' : 'installment', row.id],
+      )),
+    ]) {
+      const table = tx === row ? tableFor(type) : 'transactions';
+      yield sql(
+        "INSERT INTO sync_dirty VALUES(?,?,'update',?) ON CONFLICT(table_name,local_id) DO UPDATE SET row_json=excluded.row_json",
+        [table, tx.id, canonicalStringify(tx)],
+      );
+    }
+  }
+  const reviews = yield sql(
+    "SELECT * FROM sync_review WHERE reason IN ('identity_unresolved','import_provenance_review','legacy_delete_review','dependency_review_required')",
+  );
+  for (const review of reviews) {
+    const data = JSON.parse(String(review.payload_json)) as {
+      table: string;
+      localId: string;
+    };
+    if (!(data.table in financialTableTypes)) continue;
+    const type =
+      financialTableTypes[data.table as keyof typeof financialTableTypes];
+    const [row] =
+      type === 'monthlyPriorityList'
+        ? [{ month: data.localId } as SqlRow]
+        : type === 'recurringPriorityList'
+          ? [{ id: 'recurring-priorities' } as SqlRow]
+          : yield sql(`SELECT * FROM ${data.table} WHERE id=?`, [data.localId]);
+    if (row && review.reason !== 'dependency_review_required') adopted = true;
+    if (row)
+      yield sql(
+        "INSERT INTO sync_dirty VALUES(?,?,'update',?) ON CONFLICT(table_name,local_id) DO UPDATE SET row_json=excluded.row_json",
+        [data.table, data.localId, canonicalStringify(row)],
+      );
+    yield sql('DELETE FROM sync_review WHERE review_id=?', [review.review_id]);
+  }
+  return adopted;
 }
 function* ensureSlot(
   row: SqlRow,
@@ -259,8 +396,20 @@ export function* snapshotFor(
   type: EntityType,
   row: SqlRow,
   uuid: () => string,
+  baseline = false,
 ): Generator<ReturnType<typeof sql>, Snapshots[EntityType], SqlRow[]> {
   const refs = yield* references(row, uuid);
+  if (['category', 'paymentMethod', 'card'].includes(type)) {
+    const [audit] = yield sql(
+      "SELECT payload_json FROM sync_review WHERE reason='catalog_projection_audit' AND object_id=(SELECT object_id FROM sync_identity WHERE entity_type=? AND local_id=?)",
+      [type, row.id],
+    );
+    if (audit) {
+      const value = JSON.parse(String(audit.payload_json));
+      if (row.name === value.displayName)
+        row = { ...row, name: value.originalName };
+    }
+  }
   switch (type) {
     case 'category':
       return {
@@ -328,8 +477,17 @@ export function* snapshotFor(
     case 'installmentPurchase': {
       const meta = yield* ensureSeries(type, row, uuid);
       const seriesId = yield* identityFor(type, String(row.id), uuid);
+      const existingSlots = yield sql(
+        'SELECT slot_id,object_id FROM sync_slots WHERE series_id=?',
+        [seriesId],
+      );
+      const adopted = existingSlots.some((s) =>
+        isLegacyInstallmentSlot(String(s.slot_id), String(s.object_id)),
+      );
       for (
         let index = 1;
+        !baseline &&
+        !adopted &&
         meta.identity_status === 'resolved' &&
         index <=
           Number(row.total_installments) - Number(row.starting_installment) + 1;
@@ -399,16 +557,20 @@ export function* snapshotFor(
                 purchaseId: String(slot.series_id),
                 slotId: String(slot.slot_id),
               };
-        occurrenceDate = String(slot.original_date);
+        if (
+          row.source_type === 'recurring' &&
+          !String(slot.slot_key).startsWith('legacy:')
+        )
+          occurrenceDate = String(slot.original_date);
       } else if (row.source_type === 'imported') {
         const [p] = yield sql(
           'SELECT * FROM sync_import_provenance WHERE local_id=?',
           [row.id],
         );
-        if (!p) throw new Error('import_provenance_review');
+        const provenance = p ?? (yield* legacyImport(row));
         source = {
           type: 'imported',
-          importKey: String(p.import_key),
+          importKey: String(provenance.import_key),
           importAlgorithmVersion: 1,
         };
       }
@@ -469,6 +631,26 @@ export function* snapshotFor(
     }
   }
 }
+/** Several identical adoption roots do not represent competing user changes. */
+export function* equivalentMigrationHeads(
+  objectId: string,
+): Generator<ReturnType<typeof sql>, boolean, SqlRow[]> {
+  const rows = yield sql(
+    'SELECT r.payload_json FROM sync_heads h JOIN sync_revisions r USING(revision_id) WHERE h.object_id=?',
+    [objectId],
+  );
+  if (rows.length < 2) return false;
+  const revisions = rows.map(
+    (r) => JSON.parse(String(r.payload_json)) as RevisionPlaintext,
+  );
+  return revisions.every(
+    (r) =>
+      r.action === 'put' &&
+      r.provenance.origin === 'migration' &&
+      canonicalStringify(r.snapshot) ===
+        canonicalStringify(revisions[0].snapshot),
+  );
+}
 export function* recordFinancialRevision(
   type: EntityType,
   localId: string,
@@ -493,7 +675,11 @@ export function* recordFinancialRevision(
     canonicalStringify(expectedHeads) !== canonicalStringify(heads)
   )
     throw new Error('heads_changed');
-  if (heads.length > 1 && !expectedHeads) {
+  if (
+    heads.length > 1 &&
+    !expectedHeads &&
+    !(yield* equivalentMigrationHeads(objectId))
+  ) {
     yield sql('INSERT INTO sync_review VALUES(?,?,?,?)', [
       uuid(),
       objectId,
@@ -567,6 +753,10 @@ export function* captureFinancial(
 ): SqlWorkflow {
   const [state] = yield sql('SELECT * FROM sync_local_state WHERE id=1');
   if (state.mode !== 'financial') return;
+  if (yield* adoptUnresolvedSeries(uuid)) {
+    yield* captureAdoptedBaseline(uuid, authoredAt);
+    return;
+  }
   let dirty = yield sql('SELECT * FROM sync_dirty');
   const order = Object.keys(financialTableTypes);
   dirty.sort(
@@ -619,8 +809,9 @@ export function* captureFinancial(
             tracked.object_id,
           ])
         : [];
-      if (dead && !revisions.length) continue;
+      if (!baseline && dead && !revisions.length) continue;
       if (
+        !baseline &&
         d.operation === 'insert' &&
         r.status === 'planned' &&
         r.actual_cents == null &&
@@ -638,7 +829,10 @@ export function* captureFinancial(
         origin: baseline ? ('migration' as const) : ('local' as const),
         legacyCreatedAt: (r.created_at as string | null) ?? null,
         legacyUpdatedAt: (r.updated_at as string | null) ?? null,
-        legacyDeletedAt: (r.deleted_at as string | null) ?? null,
+        legacyDeletedAt:
+          (r._legacy_deleted_at as string | null) ??
+          (r.deleted_at as string | null) ??
+          null,
       },
       dependencies: [] as RevisionPlaintext['dependencies'],
       restoredFrom: null,
@@ -646,23 +840,23 @@ export function* captureFinancial(
     let revision: RevisionPlaintext;
     try {
       if (dead && !type.endsWith('PriorityList')) {
-        if (
-          baseline &&
-          r.deleted_at &&
-          !/^\d{4}-\d\d-\d\dT/.test(String(r.deleted_at))
-        )
-          throw new Error('legacy_delete_review');
         revision = {
           ...metadata,
           action: 'delete',
           snapshot: null,
-          reason: 'user',
+          reason: baseline ? 'legacy_unknown' : 'user',
           deletedAt: authoredAt,
-          slotKey: null,
+          slotKey:
+            type === 'transaction'
+              ? ((yield sql(
+                  'SELECT slot_key FROM sync_slots WHERE local_id=?',
+                  [id],
+                ))[0]?.slot_key ?? null)
+              : null,
           importKey: null,
         } as RevisionPlaintext;
       } else {
-        const snapshot = yield* snapshotFor(type, r, uuid);
+        const snapshot = yield* snapshotFor(type, r, uuid, baseline);
         if (
           'identityStatus' in snapshot &&
           snapshot.identityStatus === 'identity_unresolved'
@@ -715,7 +909,11 @@ export function* captureFinancial(
             'SELECT revision_id FROM sync_heads WHERE object_id=? ORDER BY revision_id',
             [objectId],
           );
-          if (heads.length !== 1) throw new Error('dependency_review_required');
+          if (
+            heads.length !== 1 &&
+            !(yield* equivalentMigrationHeads(objectId))
+          )
+            throw new Error('dependency_review_required');
           metadata.dependencies.push({
             objectId,
             revisionId: String(heads[0].revision_id),
@@ -736,8 +934,6 @@ export function* captureFinancial(
         !(e instanceof Error) ||
         ![
           'identity_unresolved',
-          'import_provenance_review',
-          'legacy_delete_review',
           'dependency_review_required',
         ].includes(e.message)
       )
@@ -752,43 +948,44 @@ export function* captureFinancial(
     }
   }
   yield sql('DELETE FROM sync_dirty');
-  if (!baseline) {
-    const pending = yield sql(
-      "SELECT * FROM sync_outbox WHERE state='pending' AND (length(local_seq)>length(?) OR (length(local_seq)=length(?) AND local_seq>?)) ORDER BY length(local_seq),local_seq",
-      [state.local_seq, state.local_seq, state.local_seq],
-    );
-    if (pending.length > 1) {
-      if (pending.length > 100) {
-        for (const item of pending)
-          yield sql(
-            "UPDATE sync_outbox SET state='blocked',last_error='batch_too_large' WHERE commit_id=?",
-            [item.commit_id],
-          );
-      } else {
-        const last = pending[pending.length - 1],
-          operations = pending.flatMap(
-            (item) => JSON.parse(String(item.payload_json)).operations,
-          );
-        for (const item of pending) {
-          yield sql('UPDATE sync_revisions SET commit_id=? WHERE commit_id=?', [
-            last.commit_id,
+  const pending = yield sql(
+    "SELECT * FROM sync_outbox WHERE state='pending' AND (length(local_seq)>length(?) OR (length(local_seq)=length(?) AND local_seq>?)) ORDER BY length(local_seq),local_seq",
+    [state.local_seq, state.local_seq, state.local_seq],
+  );
+  if (pending.length > 100 && !baseline) {
+    // User mutations retain their atomic boundary. Only adoption may span multiple commits.
+    for (const item of pending)
+      yield sql(
+        "UPDATE sync_outbox SET state='blocked',last_error='batch_too_large' WHERE commit_id=?",
+        [item.commit_id],
+      );
+  } else {
+    for (let offset = 0; offset < pending.length; offset += 100) {
+      const batch = pending.slice(offset, offset + 100);
+      if (batch.length < 2) continue;
+      const last = batch[batch.length - 1];
+      const operations = batch.flatMap(
+        (item) => JSON.parse(String(item.payload_json)).operations,
+      );
+      for (const item of batch) {
+        yield sql('UPDATE sync_revisions SET commit_id=? WHERE commit_id=?', [
+          last.commit_id,
+          item.commit_id,
+        ]);
+        if (item.commit_id !== last.commit_id)
+          yield sql('DELETE FROM sync_outbox WHERE commit_id=?', [
             item.commit_id,
           ]);
-          if (item.commit_id !== last.commit_id)
-            yield sql('DELETE FROM sync_outbox WHERE commit_id=?', [
-              item.commit_id,
-            ]);
-        }
-        yield sql('UPDATE sync_outbox SET payload_json=? WHERE commit_id=?', [
-          canonicalStringify({
-            formatVersion: 1,
-            commitId: last.commit_id,
-            localSeq: last.local_seq,
-            operations,
-          }),
-          last.commit_id,
-        ]);
       }
+      yield sql('UPDATE sync_outbox SET payload_json=? WHERE commit_id=?', [
+        canonicalStringify({
+          formatVersion: 1,
+          commitId: last.commit_id,
+          localSeq: last.local_seq,
+          operations,
+        }),
+        last.commit_id,
+      ]);
     }
   }
 }
@@ -843,8 +1040,32 @@ export function* startFinancialBaseline(
         ]);
     if (type.endsWith('PriorityList')) continue;
     for (const row of rows) {
-      if (type === 'recurring' || type === 'installmentPurchase')
-        yield* ensureSeries(type, row, uuid, true);
+      if (['category', 'paymentMethod', 'card'].includes(type)) {
+        const value = yield* snapshotFor(type, row, uuid);
+        yield* identityFor(type, String(row.id), () =>
+          derivedId(
+            p.vaultId,
+            `catalog:v1:${type}:${canonicalStringify(value)}`,
+          ),
+        );
+      } else yield* identityFor(type, String(row.id), uuid, p.vaultId);
+      if (type === 'recurring' || type === 'installmentPurchase') {
+        const seriesId = yield* identityFor(type, String(row.id), uuid);
+        // The protocol accepts v4-formatted epoch tokens. Adoption hashes existing identity and current structure;
+        // subsequent schedule changes still get a fresh CSPRNG epoch in ensureSeries.
+        const epoch = derivedId(
+          seriesId,
+          `legacy-schedule:v1:${structure(type, row)}`,
+        );
+        yield* ensureSeries(
+          type,
+          row,
+          () => `${epoch.slice(0, 14)}4${epoch.slice(15)}`,
+        );
+        yield* adoptSeriesSlots(type, row, uuid);
+      }
+      if (type === 'transaction' && row.source_type === 'imported')
+        yield* legacyImport(row);
       yield sql("INSERT INTO sync_dirty VALUES(?,?,'insert',?)", [
         table,
         row.id,
@@ -856,92 +1077,51 @@ export function* startFinancialBaseline(
     canonicalStringify(manifest),
     backupPath,
   ]);
-  yield* captureFinancial(uuid, new Date().toISOString(), true);
+  yield* captureAdoptedBaseline(uuid, new Date().toISOString());
 }
-export interface ReviewedSlot {
-  localId: string;
-  originalDate: string;
-  slotKey: string;
-  originalIndex: number | null;
-  publish: boolean;
-}
-/** Dates/keys are explicit user assertions. Legacy PKs, FKs, and existing random identities remain intact. */
-export function* reviewLegacySeries(
-  type: 'recurring' | 'installmentPurchase',
-  localId: string,
-  slots: ReviewedSlot[],
+/** Archive the current deleted rows first; tombstones alone cannot preserve their financial history. */
+function* captureAdoptedBaseline(
   uuid: () => string,
+  authoredAt: string,
 ): SqlWorkflow {
-  const [row] = yield sql(`SELECT * FROM ${tableFor(type)} WHERE id=?`, [
-    localId,
-  ]);
-  if (!row) throw new Error('series_missing');
-  const meta = yield* ensureSeries(type, row, uuid, true);
-  if (meta.identity_status !== 'identity_unresolved')
-    throw new Error('series_already_reviewed');
-  const seriesId = yield* identityFor(type, localId, uuid);
-  const transactions = yield sql(
-    'SELECT * FROM transactions WHERE source_type=? AND source_id=?',
-    [type === 'recurring' ? 'recurring' : 'installment', localId],
-  );
-  if (
-    slots.length !== transactions.length ||
-    new Set(slots.map((s) => s.localId)).size !== slots.length
-  )
-    throw new Error('Revise todos os slots desta série.');
-  const keys = new Set<string>();
-  for (const choice of slots) {
-    const tx = transactions.find((t) => t.id === choice.localId);
-    if (
-      !tx ||
-      !isValidDate(choice.originalDate) ||
-      !choice.slotKey ||
-      keys.has(choice.slotKey)
-    )
-      throw new Error('Datas e slots exigem revisão explícita sem duplicatas.');
-    keys.add(choice.slotKey);
-    const objectId = yield* identityFor('transaction', choice.localId, uuid),
-      slotId = type === 'installmentPurchase' ? uuid() : null;
-    const key =
-      type === 'installmentPurchase' ? `installment:${slotId}` : choice.slotKey;
-    if (
-      type === 'installmentPurchase' &&
-      (!Number.isSafeInteger(choice.originalIndex) ||
-        Number(choice.originalIndex) < 1)
-    )
-      throw new Error('Confira a posição original da parcela.');
-    yield sql('INSERT INTO sync_slots VALUES(?,?,?,?,?,?,?)', [
-      choice.localId,
-      seriesId,
-      key,
-      slotId,
-      objectId,
-      choice.originalDate,
-      choice.originalIndex,
-    ]);
-    if (choice.publish)
-      yield sql(
-        "INSERT INTO sync_dirty VALUES(?,?,'update',?) ON CONFLICT(table_name,local_id) DO UPDATE SET operation='update',row_json=excluded.row_json",
-        ['transactions', choice.localId, canonicalStringify(tx)],
-      );
+  const deleted: SqlRow[] = [];
+  for (const d of yield sql(
+    "SELECT * FROM sync_dirty WHERE json_extract(row_json,'$.deleted_at') IS NOT NULL",
+  )) {
+    const tombstone = yield sql(
+      'SELECT t.object_id FROM sync_tombstones t JOIN sync_identity i USING(object_id) WHERE i.entity_type=? AND i.local_id=?',
+      [
+        financialTableTypes[
+          String(d.table_name) as keyof typeof financialTableTypes
+        ],
+        d.local_id,
+      ],
+    );
+    if (tombstone.length) {
+      yield sql('DELETE FROM sync_dirty WHERE table_name=? AND local_id=?', [
+        d.table_name,
+        d.local_id,
+      ]);
+      continue;
+    }
+    deleted.push(d);
+    const row = JSON.parse(String(d.row_json));
+    row._legacy_deleted_at = row.deleted_at;
+    row.deleted_at = null;
     yield sql(
-      "DELETE FROM sync_review WHERE object_id=? AND reason='identity_unresolved'",
-      [objectId],
+      "UPDATE sync_dirty SET operation='insert',row_json=? WHERE table_name=? AND local_id=?",
+      [canonicalStringify(row), d.table_name, d.local_id],
     );
   }
-  yield sql(
-    "UPDATE sync_series SET identity_status='resolved' WHERE entity_type=? AND local_id=?",
-    [type, localId],
-  );
-  yield sql(
-    "INSERT INTO sync_dirty VALUES(?,?,'update',?) ON CONFLICT(table_name,local_id) DO UPDATE SET operation='update',row_json=excluded.row_json",
-    [tableFor(type), localId, canonicalStringify(row)],
-  );
-  yield sql(
-    "DELETE FROM sync_review WHERE object_id=? AND reason='identity_unresolved'",
-    [seriesId],
-  );
-  yield* captureFinancial(uuid);
+  yield* captureFinancial(uuid, authoredAt, true);
+  for (const d of deleted)
+    yield sql('INSERT INTO sync_dirty VALUES(?,?,?,?)', [
+      d.table_name,
+      d.local_id,
+      d.operation,
+      d.row_json,
+    ]);
+  yield* captureFinancial(uuid, authoredAt, true);
 }
 
 /** Same-device restore: preserve old DAG/outbox, capture only local differences, receive before releasing writes. */
@@ -1072,7 +1252,7 @@ export function* reconnectFinancial(
   }
   yield* captureFinancial(uuid);
   yield sql(
-    "UPDATE sync_bootstrap SET state='joining_review',backup_path=? WHERE id=1",
+    "UPDATE sync_bootstrap SET state='captured',backup_path=? WHERE id=1",
     [backupPath],
   );
   yield sql('UPDATE sync_control SET paused=0 WHERE id=1');

@@ -7,7 +7,11 @@ import {
   type RevisionPlaintext,
   type Snapshots,
 } from '@lionpocket/sync-protocol';
-import { recordFinancialRevision, localReference } from './financial';
+import {
+  recordFinancialRevision,
+  localReference,
+  isLegacyInstallmentSlot,
+} from './financial';
 import { financialTableTypes } from './schema';
 import type { SqlRow, SqlWorkflow } from './manual';
 const sql = (sql: string, params?: (string | number | null)[]) => ({
@@ -53,11 +57,14 @@ export function* projectFinancial(
       yield sql('DELETE FROM recurring_transaction_priorities');
     else {
       yield sql(`UPDATE ${table} SET deleted_at=?,updated_at=? WHERE id=?`, [
-        revision.authoredAt,
-        revision.authoredAt,
+        revision.provenance.legacyDeletedAt ?? revision.authoredAt,
+        revision.provenance.legacyUpdatedAt ?? revision.authoredAt,
         localId,
       ]);
-      if (type === 'recurring' || type === 'installmentPurchase')
+      if (
+        revision.reason !== 'legacy_unknown' &&
+        (type === 'recurring' || type === 'installmentPurchase')
+      )
         yield sql(
           'UPDATE transactions SET deleted_at=?,updated_at=? WHERE source_type=? AND source_id=?',
           [
@@ -158,9 +165,13 @@ export function* projectFinancial(
           'SELECT * FROM sync_slots WHERE object_id=?',
           [a.objectId],
         );
+        const [txIdentity] = yield sql(
+          'SELECT local_id FROM sync_identity WHERE object_id=?',
+          [a.objectId],
+        );
         if (!existing)
           yield sql('INSERT INTO sync_slots VALUES(?,?,?,?,?,?,?)', [
-            a.objectId,
+            txIdentity?.local_id ?? a.objectId,
             identity.object_id,
             a.slotKey,
             null,
@@ -316,13 +327,41 @@ export function* projectFinancial(
     row.updated_at = revision.provenance.legacyUpdatedAt ?? revision.authoredAt;
   }
   if (!['category', 'paymentMethod', 'card'].includes(type))
-    row.deleted_at = null;
+    row.deleted_at =
+      revision.provenance.origin === 'migration'
+        ? revision.provenance.legacyDeletedAt
+        : null;
   if (['category', 'paymentMethod', 'card'].includes(type)) {
     const [collision] = yield sql(
       `SELECT id FROM ${table} WHERE name=?${type === 'category' ? ' AND kind=?' : ''} AND id!=?`,
       type === 'category' ? [row.name, row.kind, localId] : [row.name, localId],
     );
-    if (collision) throw new Error('catalog_identity_review');
+    if (collision) {
+      const [identity] = yield sql(
+        'SELECT object_id FROM sync_identity WHERE entity_type=? AND local_id=?',
+        [type, localId],
+      );
+      row.name = `${s.name} (outro cadastro)`;
+      let index = 2;
+      while (
+        (yield sql(
+          `SELECT id FROM ${table} WHERE name=?${type === 'category' ? ' AND kind=?' : ''} AND id!=?`,
+          type === 'category'
+            ? [row.name, row.kind, localId]
+            : [row.name, localId],
+        )).length
+      )
+        row.name = `${s.name} (outro cadastro ${index++})`;
+      yield sql(
+        'INSERT INTO sync_review VALUES(?,?,?,?) ON CONFLICT(review_id) DO UPDATE SET payload_json=excluded.payload_json',
+        [
+          String(identity.object_id),
+          identity.object_id,
+          'catalog_projection_audit',
+          canonicalStringify({ originalName: s.name, displayName: row.name }),
+        ],
+      );
+    }
   }
   const keys = Object.keys(row);
   yield sql(
@@ -346,7 +385,13 @@ export function* projectFinancial(
       const [known] = yield sql('SELECT * FROM sync_slots WHERE object_id=?', [
         slot.objectId,
       ]);
-      const txId = known ? String(known.local_id) : slot.objectId;
+      const [txIdentity] = yield sql(
+        'SELECT local_id FROM sync_identity WHERE object_id=?',
+        [slot.objectId],
+      );
+      const txId = known
+        ? String(known.local_id)
+        : String(txIdentity?.local_id ?? slot.objectId);
       if (!known)
         yield sql('INSERT INTO sync_slots VALUES(?,?,?,?,?,?,?)', [
           txId,
@@ -357,6 +402,15 @@ export function* projectFinancial(
           row.first_due_date,
           slot.originalIndex,
         ]);
+      // Migration publishes every existing transaction separately. Never recreate history from today's schedule.
+      if (
+        revision.provenance.origin === 'migration' ||
+        isLegacyInstallmentSlot(slot.slotId, slot.objectId) ||
+        (yield sql('SELECT object_id FROM sync_tombstones WHERE object_id=?', [
+          slot.objectId,
+        ])).length
+      )
+        continue;
       const number = Number(row.starting_installment) + slot.originalIndex - 1;
       if (number > Number(row.total_installments)) continue;
       const tx: RevisionPlaintext = {
@@ -447,7 +501,9 @@ function* priorityReference(
   if (known) {
     const reference = yield* localReference(objectId);
     if (reference === null) return null;
-    const [present] = yield sql('SELECT id FROM transactions WHERE id=?', [known.local_id]);
+    const [present] = yield sql('SELECT id FROM transactions WHERE id=?', [
+      known.local_id,
+    ]);
     if (present) return reference;
     // An archived/generated identity can exist before its disposable financial cache.
     // Materialize the same slot below instead of inserting a priority with a dangling FK.
@@ -456,7 +512,8 @@ function* priorityReference(
     objectId,
   ]);
   if (!slot) throw new Error('missing_dependencies');
-  if (known && known.local_id !== slot.local_id) throw new Error('slot_identity_collision');
+  if (known && known.local_id !== slot.local_id)
+    throw new Error('slot_identity_collision');
   const [present] = yield sql('SELECT id FROM transactions WHERE id=?', [
     slot.local_id,
   ]);
@@ -517,9 +574,9 @@ function* priorityReference(
     };
     yield* projectFinancial(String(slot.local_id), tx, dialect);
   }
-  yield sql("INSERT INTO sync_identity VALUES('transaction',?,?) ON CONFLICT(object_id) DO NOTHING", [
-    slot.local_id,
-    objectId,
-  ]);
+  yield sql(
+    "INSERT INTO sync_identity VALUES('transaction',?,?) ON CONFLICT(object_id) DO NOTHING",
+    [slot.local_id, objectId],
+  );
   return String(slot.local_id);
 }

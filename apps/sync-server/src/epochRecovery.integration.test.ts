@@ -150,7 +150,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     const first = await owner.status(), invite = await secondary.inspectInvitation(first.invitation);
     await secondary.pair(first.invitation, invite.fingerprint);
     const pairing = (await owner.requests()).requests[0]; await owner.approve(pairing.deviceId, pairing.fingerprint);
-    await secondary.receive(); await secondary.sync(); await secondary.confirmCombination();
+    await secondary.receive(); await secondary.sync();
     bank.saveTransaction(input); await owner.sync(); await secondary.sync();
     owner.setForeground(false); secondary.setForeground(false);
     // PostgreSQL snapshot/restore in this isolated database; official pg_dump/lpctl is tested by clean-install.
