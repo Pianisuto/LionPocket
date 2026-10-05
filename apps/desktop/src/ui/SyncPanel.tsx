@@ -1110,16 +1110,49 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
               </div>
             </SyncSection>
           ))}
-          {series.map((s) => (
-            <SeriesReviewForm
-              key={s.localId}
-              series={s}
-              busy={busy}
-              submit={(slots) =>
-                run('series-review', [s.entityType, s.localId, slots])
-              }
-            />
-          ))}
+          {!!series.length && (
+            <SyncSection
+              icon={RefreshCw}
+              title="Preparar séries antigas"
+              description="O LionPocket consegue reconstruir automaticamente a maioria das identidades antigas sem alterar seus lançamentos."
+            >
+              <p>
+                {series.length} série(s) ·{' '}
+                {series.reduce((total, item) => total + item.slots.length, 0)} ocorrência(s).
+              </p>
+              {!!series.filter((item) => item.autoResolvable).length && (
+                <div className="sync-actions">
+                  <button
+                    className="button"
+                    disabled={busy}
+                    onClick={() => void run('series-review-suggested', [true])}
+                  >
+                    Resolver automaticamente{' '}
+                    {series.filter((item) => item.autoResolvable).length} série(s)
+                  </button>
+                </div>
+              )}
+              {!!series.filter((item) => !item.autoResolvable).length && (
+                <p>
+                  {series.filter((item) => !item.autoResolvable).length} série(s)
+                  têm ambiguidade real e aparecem abaixo já pré-preenchidas para
+                  uma conferência curta.
+                </p>
+              )}
+            </SyncSection>
+          )}
+          {series
+            .filter((s) => !s.autoResolvable)
+            .map((s) => (
+              <SeriesReviewForm
+                key={s.localId}
+                series={s}
+                busy={busy}
+                submit={(slots) =>
+                  run('series-review', [s.entityType, s.localId, slots])
+                }
+              />
+            ))}
           {!!catalogs.length && (
             <CatalogBatchReview
               catalogs={catalogs}
@@ -1184,10 +1217,13 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                 </div>
               </SyncSection>
             ))}
-          {!!(status.reviews.length || status.quarantine.length) && (
+          {!!(
+            status.reviews.filter((r) => r.reason !== 'identity_unresolved').length ||
+            status.quarantine.length
+          ) && (
             <SyncNotice title="Há informações para revisar" tone="warning">
-              {!!status.reviews.length &&
-                `${status.reviews.length} registro(s) precisam de revisão antes de concluir a sincronização. `}
+              {!!status.reviews.filter((r) => r.reason !== 'identity_unresolved').length &&
+                `${status.reviews.filter((r) => r.reason !== 'identity_unresolved').length} registro(s) precisam de revisão antes de concluir a sincronização. `}
               {!!status.quarantine.length &&
                 'Alguns recebimentos foram preservados para revisão. Seus dados locais continuam disponíveis.'}
             </SyncNotice>
@@ -1424,13 +1460,7 @@ function SeriesReviewForm({
   submit: (slots: ReviewedSlot[]) => Promise<void>;
 }) {
   const [choices, setChoices] = useState<ReviewedSlot[]>(() =>
-      series.slots.map((t) => ({
-        localId: t.localId,
-        originalDate: '',
-        slotKey: '',
-        originalIndex: null,
-        publish: false,
-      })),
+      series.suggestedSlots.map((slot) => ({ ...slot })),
     ),
     [confirmed, setConfirmed] = useState(false);
   const change = (i: number, patch: Partial<ReviewedSlot>) =>
@@ -1439,10 +1469,9 @@ function SeriesReviewForm({
     <div className="sync-review">
       <h4>Revisar série antiga: {series.description}</h4>
       <p>
-        Confira no histórico a data original de cada ocorrência. A data atual
-        pode ter sido editada. Slots mensais usam monthly:AAAA-MM; outros usam
-        uma chave única escolhida após conferir o histórico. Parcelas exigem a
-        posição original, antes de qualquer renumeração.
+        {series.autoReason ??
+          'Os valores foram pré-preenchidos com a melhor informação disponível.'}{' '}
+        Ajuste apenas o que estiver diferente do histórico e confirme a série.
       </p>
       {series.slots.map((t, i) => (
         <div className="sync-review__slot" key={t.localId}>
