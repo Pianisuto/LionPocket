@@ -34,6 +34,7 @@ services:
     volumes:
       - ./keycloak-start.sh:/opt/lionpocket/keycloak-start.sh:ro
       - ./realm.json:/opt/keycloak/data/import/lionpocket-realm.json:ro
+      - ../keycloak-theme/lionpocket:/opt/keycloak/themes/lionpocket:ro
     depends_on:
       postgres: {condition: service_healthy}
     healthcheck:

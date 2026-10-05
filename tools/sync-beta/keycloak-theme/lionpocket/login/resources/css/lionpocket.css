@@ -1,0 +1,283 @@
+:root {
+  --lp-bg: #140d13;
+  --lp-bg-deep: #0d080d;
+  --lp-surface: #1d1420;
+  --lp-surface-2: #271a29;
+  --lp-surface-3: #322035;
+  --lp-text: #f9eff6;
+  --lp-soft: #d8bccd;
+  --lp-muted: #a0849a;
+  --lp-line: #34202f;
+  --lp-line-strong: #482b41;
+  --lp-primary: #ff4d9d;
+  --lp-primary-hover: #ff6cae;
+  --lp-primary-ink: #ff8fc2;
+  --lp-primary-deep: #c2185b;
+  --lp-on-primary: #2f0518;
+  --lp-primary-wash: rgba(255, 77, 157, .13);
+  --lp-alert: #ff5d7e;
+  --lp-alert-wash: rgba(255, 93, 126, .14);
+  --lp-shadow: 0 30px 80px rgba(0, 0, 0, .55);
+  --pf-v5-global--primary-color--100: var(--lp-primary);
+  --pf-v5-global--primary-color--200: var(--lp-primary-hover);
+  --pf-v5-global--BackgroundColor--100: var(--lp-bg);
+  --pf-v5-global--BackgroundColor--200: var(--lp-surface);
+  --pf-v5-global--Color--100: var(--lp-text);
+  --pf-v5-global--Color--200: var(--lp-soft);
+  color-scheme: dark;
+}
+
+html,
+body,
+.login-pf body,
+.pf-v5-c-login {
+  min-height: 100%;
+  color: var(--lp-text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: var(--lp-bg) !important;
+  background-image:
+    radial-gradient(900px 520px at 10% 10%, rgba(255, 77, 157, .13), transparent 62%),
+    radial-gradient(720px 520px at 90% 90%, rgba(194, 24, 91, .16), transparent 68%) !important;
+}
+
+.pf-v5-c-login__container {
+  width: min(460px, calc(100vw - 32px));
+  margin-inline: auto;
+}
+
+#kc-header,
+.pf-v5-c-login__header {
+  margin-bottom: 18px;
+}
+
+#kc-header-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--lp-text) !important;
+  font-size: 24px !important;
+  font-weight: 750;
+  letter-spacing: -.04em;
+  text-shadow: none !important;
+  background: none !important;
+}
+
+#kc-header-wrapper::before {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: url("../img/lionpocket.svg") center / cover no-repeat;
+  box-shadow: 0 10px 28px rgba(194, 24, 91, .3);
+  content: "";
+}
+
+.pf-v5-c-login__main,
+.card-pf,
+#kc-content-wrapper {
+  color: var(--lp-text);
+}
+
+.pf-v5-c-login__main,
+.card-pf {
+  overflow: hidden;
+  border: 1px solid var(--lp-line-strong) !important;
+  border-radius: 24px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .025), transparent 28%),
+    var(--lp-surface) !important;
+  box-shadow: var(--lp-shadow) !important;
+}
+
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body,
+.pf-v5-c-login__main-footer,
+.login-pf-header,
+#kc-form-wrapper,
+#kc-info-wrapper {
+  color: var(--lp-text);
+  background: transparent !important;
+}
+
+.pf-v5-c-login__main-header {
+  border-bottom: 1px solid var(--lp-line);
+}
+
+#kc-page-title,
+.pf-v5-c-title,
+h1,
+h2,
+h3 {
+  color: var(--lp-text) !important;
+  font-weight: 720 !important;
+  letter-spacing: -.025em;
+}
+
+label,
+.pf-v5-c-form__label,
+.pf-v5-c-form__label-text,
+.pf-v5-c-check__label {
+  color: var(--lp-soft) !important;
+}
+
+.pf-v5-c-form-control,
+input[type="text"],
+input[type="password"],
+input[type="email"] {
+  color: var(--lp-text) !important;
+  border-color: var(--lp-line-strong) !important;
+  border-radius: 12px !important;
+  background: var(--lp-surface-2) !important;
+  box-shadow: none !important;
+}
+
+.pf-v5-c-form-control:hover,
+input[type="text"]:hover,
+input[type="password"]:hover,
+input[type="email"]:hover {
+  border-color: color-mix(in srgb, var(--lp-primary) 50%, var(--lp-line-strong)) !important;
+}
+
+.pf-v5-c-form-control:focus,
+.pf-v5-c-form-control:focus-within,
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus {
+  border-color: var(--lp-primary) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--lp-primary-wash) !important;
+}
+
+input::placeholder {
+  color: var(--lp-muted) !important;
+}
+
+.pf-v5-c-button.pf-m-primary,
+#kc-login,
+input[type="submit"] {
+  color: var(--lp-on-primary) !important;
+  font-weight: 700 !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: linear-gradient(135deg, #ff5ca4, #c2185b) !important;
+  box-shadow: 0 10px 28px rgba(194, 24, 91, .32) !important;
+}
+
+.pf-v5-c-button.pf-m-primary:hover,
+#kc-login:hover,
+input[type="submit"]:hover {
+  filter: brightness(1.07);
+}
+
+.pf-v5-c-button.pf-m-control,
+.pf-v5-c-button.pf-m-secondary {
+  color: var(--lp-soft) !important;
+  border-color: var(--lp-line-strong) !important;
+  background: var(--lp-surface-2) !important;
+}
+
+a,
+a:visited,
+.pf-v5-c-button.pf-m-link {
+  color: var(--lp-primary-ink) !important;
+}
+
+a:hover,
+.pf-v5-c-button.pf-m-link:hover {
+  color: var(--lp-primary-hover) !important;
+}
+
+.pf-v5-c-check__input,
+input[type="checkbox"] {
+  accent-color: var(--lp-primary);
+}
+
+.pf-v5-c-alert,
+.alert-error,
+.alert-warning {
+  color: var(--lp-text) !important;
+  border-color: color-mix(in srgb, var(--lp-alert) 36%, transparent) !important;
+  border-radius: 12px !important;
+  background: var(--lp-alert-wash) !important;
+}
+
+.pf-v5-c-alert__title,
+.kc-feedback-text {
+  color: var(--lp-soft) !important;
+}
+
+#kc-info,
+#kc-info-wrapper,
+#kc-registration,
+#kc-form-options,
+.instruction,
+.subtitle {
+  color: var(--lp-muted) !important;
+}
+
+#kc-locale-dropdown a,
+.pf-v5-c-menu__item {
+  color: var(--lp-text) !important;
+  background: var(--lp-surface-2) !important;
+}
+
+.pf-v5-c-menu,
+.pf-v5-c-dropdown__menu {
+  border: 1px solid var(--lp-line-strong) !important;
+  background: var(--lp-surface-2) !important;
+  box-shadow: var(--lp-shadow) !important;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --lp-bg: #fdf5fa;
+    --lp-bg-deep: #f7e8f1;
+    --lp-surface: #ffffff;
+    --lp-surface-2: #fdf1f7;
+    --lp-surface-3: #fae2ef;
+    --lp-text: #2b1523;
+    --lp-soft: #6d4a5d;
+    --lp-muted: #92697f;
+    --lp-line: #f3dbe8;
+    --lp-line-strong: #e8c3d9;
+    --lp-primary: #e11d74;
+    --lp-primary-hover: #c81664;
+    --lp-primary-ink: #c2185b;
+    --lp-primary-deep: #a3004c;
+    --lp-on-primary: #ffffff;
+    --lp-primary-wash: rgba(225, 29, 116, .09);
+    --lp-alert: #d81b52;
+    --lp-alert-wash: rgba(216, 27, 82, .11);
+    --lp-shadow: 0 26px 70px rgba(90, 20, 60, .18);
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  .login-pf body,
+  .pf-v5-c-login {
+    background-color: var(--lp-bg) !important;
+    background-image:
+      radial-gradient(900px 520px at 10% 10%, rgba(225, 29, 116, .08), transparent 62%) !important;
+  }
+}
+
+@media (max-width: 540px) {
+  .pf-v5-c-login__container {
+    width: calc(100vw - 20px);
+  }
+
+  #kc-header-wrapper {
+    font-size: 21px !important;
+  }
+
+  #kc-header-wrapper::before {
+    width: 40px;
+    height: 40px;
+  }
+
+  .pf-v5-c-login__main,
+  .card-pf {
+    border-radius: 20px !important;
+  }
+}

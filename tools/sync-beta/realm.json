@@ -1,5 +1,14 @@
 {
   "realm": "lionpocket-beta",
+  "displayName": "LionPocket Beta",
+  "displayNameHtml": "LionPocket Beta",
+  "loginTheme": "lionpocket",
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "pt-BR",
+    "en"
+  ],
+  "defaultLocale": "pt-BR",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,

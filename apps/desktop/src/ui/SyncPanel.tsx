@@ -89,14 +89,41 @@ export function SyncPanel({
       className="panel settings-panel sync-panel"
       aria-label="Sincronização"
     >
-      <h3>Sincronização</h3>
-      <p>
-        Seus dados ficam neste aparelho. Configure um servidor próprio para sincronizar seus aparelhos com criptografia ponta a ponta.
+      <div className="sync-panel__heading">
+        <span className="sync-panel__mark" aria-hidden="true">LP</span>
+        <div>
+          <span className="eyebrow">Privacidade primeiro</span>
+          <h3>Sincronização</h3>
+        </div>
+      </div>
+      <p className="sync-panel__intro">
+        Seus dados continuam neste aparelho. Quando você configura a sincronização, eles são criptografados aqui antes de seguir para o servidor escolhido.
       </p>
-      <p>
-        <strong>{syncActivityLabel[status.activity]}</strong>{!!status.sync?.pending && ` · ${status.sync.pending} alteração(ões) pendente(s)`}
-      </p>
-      {status.compatibilityMessage && <p role="alert">{status.compatibilityMessage}</p>}
+      <div
+        className={`sync-panel__status ${
+          status.phase === 'local'
+            ? 'is-local'
+            : status.paused
+              ? 'is-paused'
+              : status.sync?.pending
+                ? 'is-pending'
+                : 'is-ready'
+        }`}
+        role="status"
+      >
+        <span className="sync-panel__status-dot" aria-hidden="true" />
+        <div>
+          <strong>{syncActivityLabel[status.activity]}</strong>
+          <small>
+            {status.sync?.pending
+              ? `${status.sync.pending} alteração(ões) aguardando sincronização`
+              : status.phase === 'local'
+                ? 'Somente neste aparelho'
+                : 'Nenhuma alteração aguardando envio'}
+          </small>
+        </div>
+      </div>
+      {status.compatibilityMessage && <p className="sync-panel__alert" role="alert">{status.compatibilityMessage}</p>}
       {(status.recoveryPhase ||
         (status.anchorRecoveryAvailable &&
           status.compatibilityMessage?.includes("histórico"))) && (
@@ -205,9 +232,17 @@ export function SyncPanel({
           )}
         </div>
       )}
-      {status.lastCompletedAt && <p>Último sync concluído: {new Date(status.lastCompletedAt).toLocaleString('pt-BR')}</p>}
-      {status.phase === 'bound' && <p>Seus dados são salvos primeiro neste aparelho. A sincronização acontece enquanto o aplicativo está ativo.</p>}
-      {status.phase === 'local' && !setup && <button className="button button--primary" onClick={() => setSetup(true)}>Configurar sincronização</button>}
+      {status.lastCompletedAt && <p className="sync-panel__meta">Última sincronização concluída: {new Date(status.lastCompletedAt).toLocaleString('pt-BR')}</p>}
+      {status.phase === 'bound' && <p className="sync-panel__meta">O LionPocket sempre salva primeiro neste aparelho. A sincronização acontece enquanto o aplicativo está ativo.</p>}
+      {status.phase === 'local' && !setup && (
+        <div className="sync-panel__onboarding">
+          <div>
+            <strong>Use seus dados em mais de um aparelho</strong>
+            <p>Você escolhe o servidor. Se ele ficar indisponível, o LionPocket continua funcionando localmente.</p>
+          </div>
+          <button className="button button--primary" onClick={() => setSetup(true)}>Configurar sincronização</button>
+        </div>
+      )}
       {status.phase === 'local' && setup && (
         <>
           <label>
