@@ -55,7 +55,16 @@ export const reviewMoney = (cents: number) =>
     currency: 'BRL',
   }).format(cents / 100);
 export function reviewStateLabel(record: LegacyReviewRecord): string {
-  const status =
+  return [
+    reviewStatusLabel(record.status),
+    record.settledDate && `em ${reviewDateLabel(record.settledDate)}`,
+    record.deletedAt && 'Excluído',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+export function reviewStatusLabel(status: string): string {
+  return (
     (
       {
         planned: 'Planejado',
@@ -63,14 +72,8 @@ export function reviewStateLabel(record: LegacyReviewRecord): string {
         received: 'Recebido',
         cancelled: 'Cancelado',
       } as Record<string, string>
-    )[record.status] ?? record.status;
-  return [
-    status,
-    record.settledDate && `em ${reviewDateLabel(record.settledDate)}`,
-    record.deletedAt && 'Excluído',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+    )[status] ?? status
+  );
 }
 const dateOf = (record: LegacyReviewRecord) =>
   record.originalDate ?? record.currentDate;
@@ -290,56 +293,102 @@ export function seriesReviewError(
   }
   return null;
 }
-export function seriesPreservationSummary(
+export function seriesConfirmation(
   series: LegacySeriesReview,
-  choices: ReviewedSlot[] = [],
-): string {
-  const paid = series.slots.filter((record) =>
-    ['paid', 'received'].includes(record.status),
+  choices: ReviewedSlot[],
+  decisions: Record<string, SeriesReviewDecision>,
+) {
+  const groups = seriesDecisionGroups(series);
+  const deletedCount = series.slots.filter(
+    (record) => record.deletedAt,
   ).length;
-  const deleted = series.slots.filter((record) => record.deletedAt).length;
-  const marked = series.slots.filter(
+  const selectedCount = series.slots.filter(
     (record) =>
       !record.deletedAt &&
       choices.some(
         (choice) =>
           choice.localId === record.localId && choice.deleteRecord,
       ),
-  );
-  if (marked.length)
-    return `${series.slots.length - deleted - marked.length} registros ativos mantidos · ${marked.length} ${marked.length === 1 ? 'registro será excluído' : 'registros serão excluídos'} · ${deleted} já excluídos. A exclusão retira os registros selecionados dos lançamentos e totais. O histórico, valores, pagamentos e vínculos permanecem armazenados; as exclusões serão sincronizadas.`;
-  return `${series.slots.length} registros preservados · ${paid} pagos ou recebidos · ${deleted} excluídos. Valores, datas de vencimento, pagamentos e vínculos serão mantidos. As exclusões continuam excluídas.`;
-}
-
-export function seriesAssociationChanges(
-  series: LegacySeriesReview,
-  choices: ReviewedSlot[],
-): string[] {
+  ).length;
   const initial = initialSeriesChoices(series);
-  return choices.flatMap((choice) => {
-    const before = initial.find((item) => item.localId === choice.localId);
-    const record = series.slots.find(
-      (item) => item.localId === choice.localId,
-    );
-    if (!before || !record) return [];
-    const number = series.slots.indexOf(record) + 1;
-    if (choice.deleteRecord && !record.deletedAt)
-      return [
-        `Excluir registro ${number}: ${record.description}, ${reviewDateLabel(record.currentDate)}, ${reviewMoney(record.plannedAmountCents)} · ${reviewStateLabel(record)}${record.actualAmountCents !== null ? ` · realizado ${reviewMoney(record.actualAmountCents)}` : ''}.`,
-      ];
+  const duplicateIds = new Set(
+    groups
+      .filter((group) => group.kind === 'duplicate')
+      .flatMap((group) => group.records.map((record) => record.localId)),
+  );
+  const records = series.slots.flatMap((record, index) => {
+    const choice = choices.find((item) => item.localId === record.localId);
+    const before = initial[index];
+    if (!choice) return [];
+    const associationChanged =
+      before.originalDate !== choice.originalDate ||
+      before.originalIndex !== choice.originalIndex;
     if (
-      before.originalDate === choice.originalDate &&
-      before.originalIndex === choice.originalIndex
+      !duplicateIds.has(record.localId) &&
+      !associationChanged &&
+      !choice.deleteRecord
     )
       return [];
-    const position =
-      series.entityType === 'installmentPurchase'
-        ? ` · posição ${before.originalIndex ?? '—'} → ${choice.originalIndex ?? '—'}`
-        : '';
+    const action = record.deletedAt
+      ? 'alreadyDeleted'
+      : choice.deleteRecord
+        ? 'delete'
+        : associationChanged
+          ? 'associate'
+          : 'keep';
     return [
-      `Registro ${number}: ${reviewDateLabel(before.originalDate)} → ${reviewDateLabel(choice.originalDate)}${position}`,
+      {
+        record,
+        number: index + 1,
+        choice,
+        before,
+        associationChanged,
+        action,
+        actionLabel: {
+          alreadyDeleted: 'Já excluído',
+          delete: 'Excluir',
+          associate: 'Reassociar',
+          keep: 'Manter',
+        }[action],
+      },
     ];
   });
+  return {
+    statistics: [
+      {
+        label: 'Ativos mantidos',
+        value: series.slots.length - deletedCount - selectedCount,
+      },
+      { label: 'A excluir', value: selectedCount },
+      { label: 'Já excluídos', value: deletedCount },
+      {
+        label: 'Pagamentos no histórico',
+        value: series.slots.filter((record) =>
+          ['paid', 'received'].includes(record.status),
+        ).length,
+      },
+    ],
+    decisions: groups.map((group) => ({
+      id: group.id,
+      groupLabel:
+        group.kind === 'duplicate'
+          ? group.title
+              .replace(/^Existem \d+ lançamentos associados (?:a |à )/, '')
+              .replace(/\.$/, '')
+          : {
+              date: 'Datas originais',
+              position: 'Datas e posições das parcelas',
+              schedule: 'Vínculos com pagamentos',
+            }[group.kind],
+      decisionLabel:
+        seriesDecisionOptions(series, group).find(
+          (option) => option.value === decisions[group.id],
+        )?.label ?? '',
+      recordCount: group.records.length,
+    })),
+    records,
+    hasDeletions: selectedCount > 0,
+  };
 }
 
 export type SeriesReviewDecision =

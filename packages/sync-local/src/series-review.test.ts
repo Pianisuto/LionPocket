@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applySeriesDecision,
   markSeriesRecordForDeletion,
-  seriesAssociationChanges,
+  seriesConfirmation,
   seriesDeletionSelectionError,
   seriesDeletionSummary,
   seriesDecisionOptions,
@@ -11,7 +11,6 @@ import {
   keepSeriesRecords,
   seriesDecisionGroups,
   seriesPendingReason,
-  seriesPreservationSummary,
   seriesReviewError,
   type LegacySeriesReview,
   type LegacyReviewRecord,
@@ -103,9 +102,16 @@ describe('decisões de séries antigas', () => {
     );
     expect(choices[2].slotKey).toBe('monthly:2026-02');
     expect(seriesReviewError(review, choices)).toBeNull();
-    expect(seriesPreservationSummary(review)).toContain(
-      '1 pagos ou recebidos · 1 excluídos',
-    );
+    const summary = seriesConfirmation(review, choices, {
+      [group.id]: 'keep',
+    });
+    expect(summary.statistics.map((stat) => stat.value)).toEqual([
+      2, 0, 1, 1,
+    ]);
+    expect(summary.records.map((item) => item.action)).toEqual([
+      'keep',
+      'alreadyDeleted',
+    ]);
     expect(review.slots[0].actualAmountCents).toBe(0);
   });
   it('calcula internamente a associação a outro mês e identifica colisões com a prévia', () => {
@@ -301,12 +307,31 @@ describe('decisões de séries antigas', () => {
     expect(seriesDeletionSummary(review, group, choices)).toContain(
       'excluir: registro 2. Manter: registro 1',
     );
-    expect(seriesPreservationSummary(review, choices)).toContain(
-      '2 registros ativos mantidos · 1 registro será excluído',
-    );
-    expect(seriesAssociationChanges(review, choices)[0]).toContain(
-      'Excluir registro 2: duplicado, 20/01/2026',
-    );
+    const summary = seriesConfirmation(review, choices, {
+      [group.id]: 'delete',
+    });
+    expect(summary.statistics.map((stat) => stat.value)).toEqual([
+      2, 1, 0, 1,
+    ]);
+    expect(summary.decisions).toEqual([
+      {
+        id: group.id,
+        groupLabel: 'janeiro de 2026',
+        decisionLabel: 'Excluir duplicados',
+        recordCount: 2,
+      },
+    ]);
+    expect(
+      summary.records.map((item) => [
+        item.number,
+        item.action,
+        item.record.currentDate,
+      ]),
+    ).toEqual([
+      [1, 'keep', '2026-01-10'],
+      [2, 'delete', '2026-01-20'],
+    ]);
+    expect(summary.hasDeletions).toBe(true);
     expect(
       markSeriesRecordForDeletion(review, choices, group, 'prévia', true),
     ).toEqual(choices);
@@ -320,11 +345,20 @@ describe('decisões de séries antigas', () => {
     expect(seriesDeletionSelectionError(group, choices)).toContain(
       'pelo menos um',
     );
-    expect(seriesAssociationChanges(review, choices)[0]).toContain(
-      'Pago · em 11/01/2026 · realizado R$',
-    );
+    expect(
+      seriesConfirmation(review, choices, { [group.id]: 'delete' })
+        .records[0].record,
+    ).toMatchObject({
+      status: 'paid',
+      settledDate: '2026-01-11',
+      actualAmountCents: 0,
+    });
     choices = applySeriesDecision(review, choices, group, 'keep');
     expect(choices.some((choice) => choice.deleteRecord)).toBe(false);
     expect(review.slots.every((record) => !record.deletedAt)).toBe(true);
+    expect(
+      seriesConfirmation(review, choices, { [group.id]: 'keep' })
+        .hasDeletions,
+    ).toBe(false);
   });
 });

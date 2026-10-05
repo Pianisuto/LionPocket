@@ -8,15 +8,14 @@ import {
   markSeriesRecordForDeletion,
   reviewDateLabel,
   reviewMoney,
-  reviewStateLabel,
-  seriesAssociationChanges,
+  seriesConfirmation,
   seriesDecisionDescription,
   seriesDecisionGroups,
   seriesDecisionOptions,
   seriesDeletionSelectionError,
   seriesDeletionSummary,
   seriesPendingReason,
-  seriesPreservationSummary,
+  reviewStatusLabel,
   seriesReviewError,
   type LegacyReviewRecord,
   type ReviewedSlot,
@@ -76,7 +75,6 @@ export function SeriesReviewForm({
         (decisions[group.id] !== 'delete' ||
           !seriesDeletionSelectionError(group, choices)),
     );
-  const associationChanges = seriesAssociationChanges(series, choices);
   const editorRecord = series.slots.find(
     (record) => record.localId === editing,
   );
@@ -156,7 +154,15 @@ export function SeriesReviewForm({
                     </small>
                   )}
                 </td>
-                <td>{reviewStateLabel(record)}</td>
+                <td>
+                  {reviewStatusLabel(record.status)}
+                  {record.settledDate && (
+                    <small>
+                      Pagamento em {reviewDateLabel(record.settledDate)}
+                    </small>
+                  )}
+                  {record.deletedAt && <small>Excluído</small>}
+                </td>
                 <td>
                   {reviewDateLabel(choice.originalDate)}
                   {series.entityType === 'installmentPurchase' && (
@@ -217,10 +223,10 @@ export function SeriesReviewForm({
       <div className="series-review__header">
         <div>
           <h4>{series.description}</h4>
-          <p>
-            {series.slots.length} ocorrências ·{' '}
-            {seriesPendingReason(series)}
-          </p>
+          <span className="series-review__count">
+            {series.slots.length} ocorrências
+          </span>
+          <p>{seriesPendingReason(series)}</p>
         </div>
         <button
           className="button button--soft"
@@ -343,31 +349,11 @@ export function SeriesReviewForm({
             </>
           ) : (
             <div className="series-review__confirmation">
-              <h5>Confirmar revisão de {series.description}</h5>
-              <p>{seriesPreservationSummary(series, choices)}</p>
-              {groups.map((group) => (
-                <p key={group.id}>
-                  <strong>
-                    {
-                      seriesDecisionOptions(series, group).find(
-                        (option) => option.value === decisions[group.id],
-                      )?.label
-                    }
-                  </strong>{' '}
-                  · {group.records.length} registros.{' '}
-                  {decisions[group.id] === 'delete'
-                    ? seriesDeletionSummary(series, group, choices)
-                    : decisions[group.id] === 'associate'
-                      ? 'As associações abaixo serão usadas.'
-                      : seriesDecisionDescription(
-                          group,
-                          decisions[group.id] ?? '',
-                        )}
-                </p>
-              ))}
-              {associationChanges.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
+              <SeriesReviewSummary
+                series={series}
+                choices={choices}
+                decisions={decisions}
+              />
               <div className="modal__actions">
                 <button
                   className="button button--ghost"
@@ -400,6 +386,157 @@ export function SeriesReviewForm({
         />
       )}
     </section>
+  );
+}
+
+export function SeriesReviewSummary({
+  series,
+  choices,
+  decisions,
+}: {
+  series: SeriesReview;
+  choices: ReviewedSlot[];
+  decisions: Record<string, SeriesReviewDecision>;
+}) {
+  const summary = seriesConfirmation(series, choices, decisions);
+  const changed = summary.records.some((item) => item.associationChanged);
+  return (
+    <>
+      <h5 className="series-review__summary-title">Resumo da revisão</h5>
+      <dl className="series-review__stats">
+        {summary.statistics.map((stat) => (
+          <div key={stat.label}>
+            <dt>{stat.label}</dt>
+            <dd>{stat.value}</dd>
+          </div>
+        ))}
+      </dl>
+      <section className="series-review__summary-section">
+        <h6>Decisões da série</h6>
+        <div className="series-review__table-wrap">
+          <table className="series-review__table series-review__summary-table">
+            <thead>
+              <tr>
+                <th>Grupo</th>
+                <th>Decisão</th>
+                <th>Registros</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.decisions.map((decision) => (
+                <tr key={decision.id}>
+                  <td>{decision.groupLabel}</td>
+                  <td>{decision.decisionLabel}</td>
+                  <td>{decision.recordCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {!!summary.records.length && (
+        <section className="series-review__summary-section">
+          <h6>Registros envolvidos</h6>
+          <div className="series-review__table-wrap">
+            <table className="series-review__table series-review__summary-table">
+              <thead>
+                <tr>
+                  <th>Ação</th>
+                  <th>Registro</th>
+                  <th>Datas</th>
+                  <th>Valores</th>
+                  <th>Estado</th>
+                  {changed && <th>Associação</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {summary.records.map(
+                  ({
+                    record,
+                    number,
+                    actionLabel,
+                    choice,
+                    before,
+                    associationChanged,
+                  }) => (
+                    <tr key={record.localId}>
+                      <td>
+                        <strong>{actionLabel}</strong>
+                      </td>
+                      <td>
+                        {record.description}
+                        <small>Registro {number}</small>
+                      </td>
+                      <td>
+                        <small>Ocorrência</small>
+                        {reviewDateLabel(record.currentDate)}
+                        <small>Vencimento</small>
+                        {reviewDateLabel(record.dueDate)}
+                      </td>
+                      <td>
+                        <small>Previsto</small>
+                        {reviewMoney(record.plannedAmountCents)}
+                        {record.actualAmountCents !== null && (
+                          <>
+                            <small>Realizado</small>
+                            {reviewMoney(record.actualAmountCents)}
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        {reviewStatusLabel(record.status)}
+                        {record.settledDate && (
+                          <>
+                            <small>Pagamento</small>
+                            {reviewDateLabel(record.settledDate)}
+                          </>
+                        )}
+                      </td>
+                      {changed && (
+                        <td>
+                          {associationChanged ? (
+                            <>
+                              <small>Anterior</small>
+                              {reviewDateLabel(before.originalDate)}
+                              {before.originalIndex !== null && (
+                                <small>
+                                  Posição {before.originalIndex}
+                                </small>
+                              )}
+                              <small>Nova</small>
+                              {reviewDateLabel(choice.originalDate)}
+                              {choice.originalIndex !== null && (
+                                <small>
+                                  Posição {choice.originalIndex}
+                                </small>
+                              )}
+                            </>
+                          ) : (
+                            'Sem alteração'
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      <div className="series-review__preservation">
+        {summary.hasDeletions && (
+          <p>
+            Somente os registros marcados para excluir sairão dos
+            lançamentos e totais. As exclusões serão sincronizadas.
+          </p>
+        )}
+        <p>
+          O histórico, valores, vencimentos, pagamentos e vínculos
+          permanecem armazenados.
+        </p>
+      </div>
+    </>
   );
 }
 
@@ -452,11 +589,23 @@ export function SeriesAssociationEditor({
             });
         }}
       >
-        <p className="form-grid__full">
-          {reviewDateLabel(record.currentDate)} ·{' '}
-          {reviewMoney(record.plannedAmountCents)} ·{' '}
-          {reviewStateLabel(record)}
-        </p>
+        <dl className="form-grid__full series-review__record-facts">
+          <div>
+            <dt>Ocorrência</dt>
+            <dd>{reviewDateLabel(record.currentDate)}</dd>
+          </div>
+          <div>
+            <dt>Previsto</dt>
+            <dd>{reviewMoney(record.plannedAmountCents)}</dd>
+          </div>
+          <div>
+            <dt>Estado</dt>
+            <dd>
+              {reviewStatusLabel(record.status)}
+              {record.deletedAt && <small>Excluído</small>}
+            </dd>
+          </div>
+        </dl>
         {monthly ? (
           <MonthField
             className="form-grid__full"

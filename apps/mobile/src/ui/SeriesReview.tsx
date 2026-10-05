@@ -8,15 +8,14 @@ import {
   markSeriesRecordForDeletion,
   reviewDateLabel,
   reviewMoney,
-  reviewStateLabel,
-  seriesAssociationChanges,
+  seriesConfirmation,
   seriesDecisionDescription,
   seriesDecisionGroups,
   seriesDecisionOptions,
   seriesDeletionSelectionError,
   seriesDeletionSummary,
   seriesPendingReason,
-  seriesPreservationSummary,
+  reviewStatusLabel,
   seriesReviewError,
   type LegacyReviewRecord,
   type ReviewedSlot,
@@ -80,7 +79,6 @@ export function SeriesReviewForm({
         (decisions[group.id] !== 'delete' ||
           !seriesDeletionSelectionError(group, choices)),
     );
-  const associationChanges = seriesAssociationChanges(series, choices);
   const editorRecord = series.slots.find(
     (record) => record.localId === editing,
   );
@@ -132,31 +130,66 @@ export function SeriesReviewForm({
           style={[styles.card, { padding: 10, gap: 4 }]}
           key={record.localId}
         >
-          <Text style={styles.text}>
-            Registro {number} · {record.description}
-          </Text>
+          <Text style={styles.text}>{record.description}</Text>
+          <Text style={styles.muted}>Registro {number}</Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <Text style={styles.muted}>
+              Ocorrência{'\n'}
+              {reviewDateLabel(record.currentDate)}
+            </Text>
+            <Text style={styles.muted}>
+              Vencimento{'\n'}
+              {reviewDateLabel(record.dueDate)}
+            </Text>
+          </View>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <Text style={styles.text}>
+              Previsto{'\n'}
+              {reviewMoney(record.plannedAmountCents)}
+            </Text>
+            {record.actualAmountCents !== null && (
+              <Text style={styles.text}>
+                Realizado{'\n'}
+                {reviewMoney(record.actualAmountCents)}
+              </Text>
+            )}
+          </View>
           <Text style={styles.muted}>
-            {reviewDateLabel(record.currentDate)} · vence{' '}
-            {reviewDateLabel(record.dueDate)}
+            {reviewStatusLabel(record.status)}
           </Text>
-          <Text style={styles.text}>
-            {reviewMoney(record.plannedAmountCents)}
-            {record.actualAmountCents !== null
-              ? ` · realizado ${reviewMoney(record.actualAmountCents)}`
-              : ''}
-          </Text>
-          <Text style={styles.muted}>{reviewStateLabel(record)}</Text>
+          {record.settledDate && (
+            <Text style={styles.muted}>
+              Pagamento em {reviewDateLabel(record.settledDate)}
+            </Text>
+          )}
+          {record.deletedAt && <Text style={styles.muted}>Excluído</Text>}
           <Text style={styles.muted}>
             Associação: {reviewDateLabel(choice.originalDate)}
-            {series.entityType === 'installmentPurchase'
-              ? ` · posição ${choice.originalIndex ?? '—'}`
-              : ''}
-            {choice.slotKey.includes(':legacy:')
-              ? choice.deleteRecord
-                ? ' · será excluído ao confirmar'
-                : ' · preservado separadamente'
-              : ''}
           </Text>
+          {series.entityType === 'installmentPurchase' && (
+            <Text style={styles.muted}>
+              Posição: {choice.originalIndex ?? '—'}
+            </Text>
+          )}
+          {choice.slotKey.includes(':legacy:') && (
+            <Text style={styles.muted}>
+              {choice.deleteRecord
+                ? 'Será excluído ao confirmar'
+                : 'Preservado separadamente'}
+            </Text>
+          )}
           {group && decisions[group.id] === 'delete' ? (
             record.deletedAt ? (
               <Text style={styles.muted}>Já excluído</Text>
@@ -197,9 +230,8 @@ export function SeriesReviewForm({
   return (
     <View style={[styles.card, { padding: 12, gap: 6 }]}>
       <Text style={styles.heading}>{series.description}</Text>
-      <Text style={styles.muted}>
-        {series.slots.length} ocorrências · {seriesPendingReason(series)}
-      </Text>
+      <Text style={styles.muted}>{series.slots.length} ocorrências</Text>
+      <Text style={styles.muted}>{seriesPendingReason(series)}</Text>
       <Button
         compact
         label={open ? 'Recolher revisão' : 'Revisar'}
@@ -322,35 +354,11 @@ export function SeriesReviewForm({
             </>
           ) : (
             <View style={{ gap: 12 }}>
-              <Text style={styles.heading}>
-                Confirmar revisão de {series.description}
-              </Text>
-              <Text style={styles.text}>
-                {seriesPreservationSummary(series, choices)}
-              </Text>
-              {groups.map((group) => (
-                <Text style={styles.text} key={group.id}>
-                  {
-                    seriesDecisionOptions(series, group).find(
-                      (option) => option.value === decisions[group.id],
-                    )?.label
-                  }{' '}
-                  · {group.records.length} registros.{' '}
-                  {decisions[group.id] === 'delete'
-                    ? seriesDeletionSummary(series, group, choices)
-                    : decisions[group.id] === 'associate'
-                      ? 'As associações abaixo serão usadas.'
-                      : seriesDecisionDescription(
-                          group,
-                          decisions[group.id] ?? '',
-                        )}
-                </Text>
-              ))}
-              {associationChanges.map((line) => (
-                <Text style={styles.muted} key={line}>
-                  {line}
-                </Text>
-              ))}
+              <SeriesReviewSummary
+                series={series}
+                choices={choices}
+                decisions={decisions}
+              />
               <View style={{ gap: 8 }}>
                 <Button
                   label="Voltar à revisão"
@@ -379,6 +387,141 @@ export function SeriesReviewForm({
           onSave={saveAssociation}
         />
       )}
+    </View>
+  );
+}
+
+export function SeriesReviewSummary({
+  series,
+  choices,
+  decisions,
+}: {
+  series: SeriesReview;
+  choices: ReviewedSlot[];
+  decisions: Record<string, SeriesReviewDecision>;
+}) {
+  const styles = useStyles();
+  const summary = seriesConfirmation(series, choices, decisions);
+  const field = (label: string, value: string) => (
+    <View
+      style={{
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        gap: 12,
+      }}
+    >
+      <Text style={styles.muted}>{label}</Text>
+      <Text style={[styles.text, { flexShrink: 1, textAlign: 'right' }]}>
+        {value}
+      </Text>
+    </View>
+  );
+  return (
+    <View style={{ gap: 16 }}>
+      <Text style={styles.heading}>Resumo da revisão</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {summary.statistics.map((stat) => (
+          <View
+            key={stat.label}
+            style={[
+              styles.card,
+              { flexBasis: '47%', flexGrow: 1, padding: 12, gap: 4 },
+            ]}
+          >
+            <Text style={[styles.heading, { fontSize: 24 }]}>
+              {stat.value}
+            </Text>
+            <Text style={styles.muted}>{stat.label}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={{ gap: 8 }}>
+        <Text style={styles.heading}>Decisões da série</Text>
+        {summary.decisions.map((decision) => (
+          <View
+            key={decision.id}
+            style={[styles.card, { padding: 12, gap: 6 }]}
+          >
+            <Text style={styles.text}>{decision.groupLabel}</Text>
+            {field('Decisão', decision.decisionLabel)}
+            {field('Registros', String(decision.recordCount))}
+          </View>
+        ))}
+      </View>
+      {!!summary.records.length && (
+        <View style={{ gap: 8 }}>
+          <Text style={styles.heading}>Registros envolvidos</Text>
+          {summary.records.map(
+            ({
+              record,
+              number,
+              actionLabel,
+              choice,
+              before,
+              associationChanged,
+            }) => (
+              <View
+                key={record.localId}
+                style={[styles.card, { padding: 12, gap: 8 }]}
+              >
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <Text style={styles.heading}>{record.description}</Text>
+                  <Text style={styles.heading}>{actionLabel}</Text>
+                </View>
+                <Text style={styles.muted}>Registro {number}</Text>
+                {field('Ocorrência', reviewDateLabel(record.currentDate))}
+                {field('Vencimento', reviewDateLabel(record.dueDate))}
+                {field('Previsto', reviewMoney(record.plannedAmountCents))}
+                {record.actualAmountCents !== null &&
+                  field(
+                    'Realizado',
+                    reviewMoney(record.actualAmountCents),
+                  )}
+                {field('Estado', reviewStatusLabel(record.status))}
+                {record.settledDate &&
+                  field('Pagamento', reviewDateLabel(record.settledDate))}
+                {associationChanged && (
+                  <>
+                    {field(
+                      'Associação anterior',
+                      reviewDateLabel(before.originalDate),
+                    )}
+                    {before.originalIndex !== null &&
+                      field(
+                        'Posição anterior',
+                        String(before.originalIndex),
+                      )}
+                    {field(
+                      'Nova associação',
+                      reviewDateLabel(choice.originalDate),
+                    )}
+                    {choice.originalIndex !== null &&
+                      field('Nova posição', String(choice.originalIndex))}
+                  </>
+                )}
+              </View>
+            ),
+          )}
+        </View>
+      )}
+      <View style={{ gap: 8 }}>
+        {summary.hasDeletions && (
+          <Text style={styles.muted}>
+            Somente os registros marcados para excluir sairão dos
+            lançamentos e totais. As exclusões serão sincronizadas.
+          </Text>
+        )}
+        <Text style={styles.muted}>
+          O histórico, valores, vencimentos, pagamentos e vínculos
+          permanecem armazenados.
+        </Text>
+      </View>
     </View>
   );
 }
@@ -438,11 +581,18 @@ export function SeriesAssociationEditor({
       }
     >
       <Text style={styles.heading}>{record.description}</Text>
-      <Text style={styles.muted}>
-        {reviewDateLabel(record.currentDate)} ·{' '}
-        {reviewMoney(record.plannedAmountCents)} ·{' '}
-        {reviewStateLabel(record)}
-      </Text>
+      <View style={{ gap: 4 }}>
+        <Text style={styles.muted}>
+          Ocorrência: {reviewDateLabel(record.currentDate)}
+        </Text>
+        <Text style={styles.muted}>
+          Previsto: {reviewMoney(record.plannedAmountCents)}
+        </Text>
+        <Text style={styles.muted}>
+          Estado: {reviewStatusLabel(record.status)}
+        </Text>
+        {record.deletedAt && <Text style={styles.muted}>Excluído</Text>}
+      </View>
       <View pointerEvents={busy ? 'none' : 'auto'}>
         {monthly ? (
           <MonthField
