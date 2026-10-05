@@ -5,6 +5,8 @@ import {
   applySeriesDecision,
   editSeriesChoice,
   initialSeriesChoices,
+  prepareSeriesReview,
+  seriesGroupsRequiringInput,
   markSeriesRecordForDeletion,
   reviewDateLabel,
   reviewMoney,
@@ -44,30 +46,35 @@ export function SeriesReviewForm({
 }) {
   const styles = useStyles();
   const [open, setOpen] = useState(false);
-  const [choices, setChoices] = useState(() =>
-    initialSeriesChoices(series),
+  const [choices, setChoices] = useState(
+    () => prepareSeriesReview(series).choices,
   );
   const [decisions, setDecisions] = useState<
     Record<string, SeriesReviewDecision>
-  >({});
+  >(() => prepareSeriesReview(series).decisions);
   const [editing, setEditing] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const signature = JSON.stringify(series);
   useEffect(() => {
-    setChoices(initialSeriesChoices(series));
-    setDecisions({});
+    const prepared = prepareSeriesReview(series);
+    setChoices(prepared.choices);
+    setDecisions(prepared.decisions);
     setEditing(null);
+    setPreview(false);
     setConfirming(false);
   }, [signature]);
   const groups = seriesDecisionGroups(series);
-  const duplicates = groups.filter((group) => group.kind === 'duplicate');
+  const decisionGroups = seriesGroupsRequiringInput(series, choices);
+  const duplicates = decisionGroups.filter(
+    (group) => group.kind === 'duplicate',
+  );
   const involved = new Set(
-    groups.flatMap((group) =>
+    decisionGroups.flatMap((group) =>
       group.records.map((record) => record.localId),
     ),
   );
-  const unambiguous = series.slots.filter(
+  const preparedRecords = series.slots.filter(
     (record) => !involved.has(record.localId),
   );
   const error = seriesReviewError(series, choices);
@@ -281,23 +288,25 @@ export function SeriesReviewForm({
                   />
                 </View>
               )}
-              {groups.map((group) => (
+              {decisionGroups.map((group) => (
                 <View key={group.id} style={{ gap: 8 }}>
                   <Text style={styles.heading}>{group.title}</Text>
                   <Text style={styles.text}>{group.explanation}</Text>
                   {recordsCards(group.records, group)}
                   <View pointerEvents={busy ? 'none' : 'auto'}>
-                    <Choice
-                      label={`Decisão para este grupo (${group.records.length} registros)`}
-                      value={decisions[group.id] ?? ''}
-                      options={[
-                        { value: '', label: 'Selecione uma decisão' },
-                        ...seriesDecisionOptions(series, group),
-                      ]}
-                      onChange={(value) =>
-                        decide(group, value as SeriesReviewDecision)
-                      }
-                    />
+                    {seriesDecisionOptions(series, group).length > 1 && (
+                      <Choice
+                        label={`Decisão para este grupo (${group.records.length} registros)`}
+                        value={decisions[group.id] ?? ''}
+                        options={[
+                          { value: '', label: 'Selecione uma decisão' },
+                          ...seriesDecisionOptions(series, group),
+                        ]}
+                        onChange={(value) =>
+                          decide(group, value as SeriesReviewDecision)
+                        }
+                      />
+                    )}
                   </View>
                   <Text style={styles.muted}>
                     {seriesDecisionDescription(
@@ -319,30 +328,44 @@ export function SeriesReviewForm({
                   )}
                 </View>
               ))}
-              {!!unambiguous.length && (
+              {!!preparedRecords.length && (
                 <View>
                   <Button
                     compact
                     label={
                       preview
                         ? 'Recolher prévia'
-                        : `Prévia: ${unambiguous.length} ocorrências sem ambiguidade`
+                        : `Ocorrências preparadas (${preparedRecords.length})`
                     }
                     onPress={() => setPreview(!preview)}
                   />
-                  {preview && recordsCards(unambiguous)}
+                  {preview && (
+                    <>
+                      <Text style={styles.muted}>
+                        Registros sem decisão pendente. Você pode ajustar
+                        as associações pela edição individual.
+                      </Text>
+                      {recordsCards(preparedRecords)}
+                    </>
+                  )}
                 </View>
               )}
-              {error && Object.values(decisions).some(Boolean) && (
-                <Text style={styles.error} accessibilityRole="alert">
-                  {error}
-                </Text>
-              )}
+              {error &&
+                (decisionGroups.length === 0 ||
+                  decisionGroups.some(
+                    (group) =>
+                      seriesDecisionOptions(series, group).length === 1 ||
+                      decisions[group.id],
+                  )) && (
+                  <Text style={styles.error} accessibilityRole="alert">
+                    {error}
+                  </Text>
+                )}
               <View style={{ gap: 8 }}>
                 <Text style={styles.muted}>
                   {ready
-                    ? 'Decisões preparadas. Confira o resumo antes de confirmar.'
-                    : 'Selecione as decisões dos grupos acima para continuar.'}
+                    ? 'Revisão preparada. Confira o resumo antes de confirmar.'
+                    : 'Resolva os grupos indicados para continuar.'}
                 </Text>
                 <Button
                   tone="primary"
@@ -444,6 +467,9 @@ export function SeriesReviewSummary({
           >
             <Text style={styles.text}>{decision.groupLabel}</Text>
             {field('Decisão', decision.decisionLabel)}
+            {decision.automatic && (
+              <Text style={styles.muted}>Aplicada automaticamente</Text>
+            )}
             {field('Registros', String(decision.recordCount))}
           </View>
         ))}

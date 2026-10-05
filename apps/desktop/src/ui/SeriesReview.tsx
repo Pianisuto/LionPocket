@@ -5,6 +5,8 @@ import {
   applySeriesDecision,
   editSeriesChoice,
   initialSeriesChoices,
+  prepareSeriesReview,
+  seriesGroupsRequiringInput,
   markSeriesRecordForDeletion,
   reviewDateLabel,
   reviewMoney,
@@ -41,29 +43,33 @@ export function SeriesReviewForm({
   submit: (slots: ReviewedSlot[]) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [choices, setChoices] = useState(() =>
-    initialSeriesChoices(series),
+  const [choices, setChoices] = useState(
+    () => prepareSeriesReview(series).choices,
   );
   const [decisions, setDecisions] = useState<
     Record<string, SeriesReviewDecision>
-  >({});
+  >(() => prepareSeriesReview(series).decisions);
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const signature = JSON.stringify(series);
   useEffect(() => {
-    setChoices(initialSeriesChoices(series));
-    setDecisions({});
+    const prepared = prepareSeriesReview(series);
+    setChoices(prepared.choices);
+    setDecisions(prepared.decisions);
     setEditing(null);
     setConfirming(false);
   }, [signature]);
   const groups = seriesDecisionGroups(series);
-  const duplicates = groups.filter((group) => group.kind === 'duplicate');
+  const decisionGroups = seriesGroupsRequiringInput(series, choices);
+  const duplicates = decisionGroups.filter(
+    (group) => group.kind === 'duplicate',
+  );
   const involved = new Set(
-    groups.flatMap((group) =>
+    decisionGroups.flatMap((group) =>
       group.records.map((record) => record.localId),
     ),
   );
-  const unambiguous = series.slots.filter(
+  const preparedRecords = series.slots.filter(
     (record) => !involved.has(record.localId),
   );
   const error = seriesReviewError(series, choices);
@@ -281,24 +287,26 @@ export function SeriesReviewForm({
                   </span>
                 </label>
               )}
-              {groups.map((group) => (
+              {decisionGroups.map((group) => (
                 <section className="series-review__group" key={group.id}>
                   <h5>{group.title}</h5>
                   <p>{group.explanation}</p>
                   {recordsTable(group.records, group)}
                   <div className="series-review__decision">
-                    <SelectField
-                      label={`Decisão para este grupo (${group.records.length} registros)`}
-                      value={decisions[group.id] ?? ''}
-                      options={[
-                        { value: '', label: 'Selecione uma decisão' },
-                        ...seriesDecisionOptions(series, group),
-                      ]}
-                      disabled={busy}
-                      onChange={(value) =>
-                        decide(group, value as SeriesReviewDecision)
-                      }
-                    />
+                    {seriesDecisionOptions(series, group).length > 1 && (
+                      <SelectField
+                        label={`Decisão para este grupo (${group.records.length} registros)`}
+                        value={decisions[group.id] ?? ''}
+                        options={[
+                          { value: '', label: 'Selecione uma decisão' },
+                          ...seriesDecisionOptions(series, group),
+                        ]}
+                        disabled={busy}
+                        onChange={(value) =>
+                          decide(group, value as SeriesReviewDecision)
+                        }
+                      />
+                    )}
                     <p>
                       {seriesDecisionDescription(
                         group,
@@ -320,23 +328,30 @@ export function SeriesReviewForm({
                   </div>
                 </section>
               ))}
-              {!!unambiguous.length && (
+              {!!preparedRecords.length && (
                 <details className="series-review__preview">
                   <summary>
-                    Prévia: {unambiguous.length} ocorrências sem
-                    ambiguidade
+                    Ocorrências preparadas ({preparedRecords.length})
                   </summary>
-                  {recordsTable(unambiguous)}
+                  <p>
+                    Registros sem decisão pendente. Você pode ajustar as
+                    associações pela edição individual.
+                  </p>
+                  {recordsTable(preparedRecords)}
                 </details>
               )}
-              {error && Object.values(decisions).some(Boolean) && (
-                <p role="alert">{error}</p>
-              )}
+              {error &&
+                (decisionGroups.length === 0 ||
+                  decisionGroups.some(
+                    (group) =>
+                      seriesDecisionOptions(series, group).length === 1 ||
+                      decisions[group.id],
+                  )) && <p role="alert">{error}</p>}
               <div className="series-review__footer">
                 <span>
                   {ready
-                    ? 'Decisões preparadas. Confira o resumo antes de confirmar.'
-                    : 'Selecione as decisões dos grupos acima para continuar.'}
+                    ? 'Revisão preparada. Confira o resumo antes de confirmar.'
+                    : 'Resolva os grupos indicados para continuar.'}
                 </span>
                 <button
                   className="button button--primary"
@@ -426,7 +441,12 @@ export function SeriesReviewSummary({
               {summary.decisions.map((decision) => (
                 <tr key={decision.id}>
                   <td>{decision.groupLabel}</td>
-                  <td>{decision.decisionLabel}</td>
+                  <td>
+                    {decision.decisionLabel}
+                    {decision.automatic && (
+                      <small>Aplicada automaticamente</small>
+                    )}
+                  </td>
                   <td>{decision.recordCount}</td>
                 </tr>
               ))}

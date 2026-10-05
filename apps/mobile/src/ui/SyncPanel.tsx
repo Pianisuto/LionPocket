@@ -470,7 +470,8 @@ export function SyncPanel({
               {!!series.filter((item) => !item.autoResolvable).length && (
                 <Text style={styles.muted}>
                   {series.filter((item) => !item.autoResolvable).length} série(s)
-                  precisam de decisões nos grupos indicados. Abra uma revisão para conferir os registros envolvidos.
+                  aguardam revisão. As opções únicas são preparadas automaticamente;
+                  escolha somente onde houver alternativas.
                 </Text>
               )}
             </View>

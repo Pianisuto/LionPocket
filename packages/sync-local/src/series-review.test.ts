@@ -8,6 +8,8 @@ import {
   seriesDecisionOptions,
   editSeriesChoice,
   initialSeriesChoices,
+  prepareSeriesReview,
+  seriesGroupsRequiringInput,
   keepSeriesRecords,
   seriesDecisionGroups,
   seriesPendingReason,
@@ -49,6 +51,124 @@ const series = (
   ...patch,
 });
 describe('decisões de séries antigas', () => {
+  it('prepara 22 opções únicas sem exigir escolhas e conserva a decisão dos dois duplicados', () => {
+    const review = series([
+      record('pago', '2026-01-10', {
+        status: 'paid',
+        actualAmountCents: 0,
+        settledDate: '2026-01-11',
+      }),
+      record('duplicado', '2026-01-20'),
+      ...Array.from({ length: 22 }, (_, i) =>
+        record(
+          `auto-${i}`,
+          `${2026 + Math.floor((i + 1) / 12)}-${String(((i + 1) % 12) + 1).padStart(2, '0')}-10`,
+          {
+            originalDate: null,
+            dateNeedsReview: true,
+            deletedAt: i === 0 ? '2026-02-11' : null,
+          },
+        ),
+      ),
+    ]);
+    const before = structuredClone(review);
+    const prepared = prepareSeriesReview(review);
+    expect(prepared.decisions).toEqual({ dates: 'current' });
+    const pending = seriesGroupsRequiringInput(review, prepared.choices);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].kind).toBe('duplicate');
+    expect(pending[0].records).toHaveLength(2);
+    expect(seriesReviewError(review, prepared.choices)).toContain(
+      'mesma associação',
+    );
+    expect(prepared.choices).toHaveLength(24);
+    expect(
+      prepared.choices.every(
+        (choice) => choice.publish && !choice.deleteRecord,
+      ),
+    ).toBe(true);
+    const resolved = applySeriesDecision(
+      review,
+      prepared.choices,
+      pending[0],
+      'keep',
+    );
+    expect(seriesReviewError(review, resolved)).toBeNull();
+    expect(new Set(resolved.map((choice) => choice.slotKey)).size).toBe(
+      24,
+    );
+    expect(
+      seriesConfirmation(review, resolved, {
+        ...prepared.decisions,
+        [pending[0].id]: 'keep',
+      }).decisions.find((item) => item.id === 'dates'),
+    ).toMatchObject({
+      automatic: true,
+      recordCount: 22,
+      decisionLabel: 'Usar datas exibidas',
+    });
+    expect(seriesPendingReason(review)).not.toContain('sem data original');
+    expect(review).toEqual(before);
+  });
+  it('prepara a opção única de parcelas e de séries baseadas em pagamentos, mantendo a edição disponível', () => {
+    const reviews = [
+      series(
+        [
+          record('parcela', '2026-01-10', {
+            dateNeedsReview: true,
+            positionNeedsReview: true,
+            installmentNumber: 3,
+          }),
+        ],
+        { entityType: 'installmentPurchase', startingInstallment: 3 },
+      ),
+      series([record('um', '2026-01-10'), record('dois', '2026-02-10')], {
+        frequency: 'custom',
+        anchorToActual: true,
+      }),
+    ];
+    for (const review of reviews) {
+      const prepared = prepareSeriesReview(review);
+      expect(Object.keys(prepared.decisions)).toHaveLength(1);
+      expect(seriesGroupsRequiringInput(review, prepared.choices)).toEqual(
+        [],
+      );
+      expect(seriesReviewError(review, prepared.choices)).toBeNull();
+      const edited = editSeriesChoice(
+        review,
+        prepared.choices,
+        review.slots[0].localId,
+        { originalDate: '2026-03-10' },
+      );
+      expect(edited[0].originalDate).toBe('2026-03-10');
+      expect(seriesPendingReason(review)).toContain(
+        'preparada automaticamente',
+      );
+    }
+  });
+  it('mantém somente os dados inválidos visíveis para correção e bloqueia a confirmação até corrigir', () => {
+    const review = series([
+      record('válido', '2026-01-10', { dateNeedsReview: true }),
+      record('inválido', 'wrong', { dateNeedsReview: true }),
+    ]);
+    const prepared = prepareSeriesReview(review);
+    expect(seriesReviewError(review, prepared.choices)).toContain(
+      'data válida',
+    );
+    expect(
+      seriesGroupsRequiringInput(review, prepared.choices)[0].records.map(
+        (item) => item.localId,
+      ),
+    ).toEqual(['inválido']);
+    const corrected = editSeriesChoice(
+      review,
+      prepared.choices,
+      'inválido',
+      { originalDate: '2026-02-10' },
+    );
+    expect(seriesGroupsRequiringInput(review, corrected)).toEqual([]);
+    expect(seriesReviewError(review, corrected)).toBeNull();
+  });
   it('reduz 127 ocorrências de cinco séries a cinco grupos de conflito, deixando o restante na prévia', () => {
     const reviews = [26, 26, 25, 25, 25].map((count, index) =>
       series(
@@ -318,6 +438,7 @@ describe('decisões de séries antigas', () => {
         id: group.id,
         groupLabel: 'janeiro de 2026',
         decisionLabel: 'Excluir duplicados',
+        automatic: false,
         recordCount: 2,
       },
     ]);

@@ -203,7 +203,10 @@ export function seriesDecisionGroups(
   return groups;
 }
 export function seriesPendingReason(series: LegacySeriesReview): string {
-  const groups = seriesDecisionGroups(series);
+  const groups = seriesGroupsRequiringInput(
+    series,
+    prepareSeriesReview(series).choices,
+  );
   const duplicates = groups.filter((group) => group.kind === 'duplicate');
   const reasons = groups
     .filter((group) => group.kind !== 'duplicate')
@@ -216,7 +219,7 @@ export function seriesPendingReason(series: LegacySeriesReview): string {
     );
   return reasons.length
     ? reasons.join(' ')
-    : 'Associações sem conflito; falta confirmar a preservação da série.';
+    : 'Revisão preparada automaticamente. Confira o resumo para concluir.';
 }
 export function keepSeriesRecords(
   series: LegacySeriesReview,
@@ -384,6 +387,7 @@ export function seriesConfirmation(
         seriesDecisionOptions(series, group).find(
           (option) => option.value === decisions[group.id],
         )?.label ?? '',
+      automatic: seriesDecisionOptions(series, group).length === 1,
       recordCount: group.records.length,
     })),
     records,
@@ -454,6 +458,64 @@ export function applySeriesDecision(
   return decision === 'keep' || decision === 'delete'
     ? keepSeriesRecords(series, next, group.records)
     : next;
+}
+export function prepareSeriesReview(series: LegacySeriesReview) {
+  let choices = initialSeriesChoices(series);
+  const decisions: Record<string, SeriesReviewDecision> = {};
+  for (const group of seriesDecisionGroups(series)) {
+    const options = seriesDecisionOptions(series, group);
+    if (options.length !== 1) continue;
+    decisions[group.id] = options[0].value;
+    choices = applySeriesDecision(
+      series,
+      choices,
+      group,
+      options[0].value,
+    );
+  }
+  return { choices, decisions };
+}
+export function seriesGroupNeedsCorrection(
+  series: LegacySeriesReview,
+  group: SeriesDecisionGroup,
+  choices: ReviewedSlot[],
+): boolean {
+  return group.records.some((record) => {
+    const choice = choices.find((item) => item.localId === record.localId);
+    return (
+      !choice ||
+      !isValidDate(choice.originalDate) ||
+      (series.entityType === 'installmentPurchase' &&
+        (!Number.isSafeInteger(choice.originalIndex) ||
+          Number(choice.originalIndex) < 1))
+    );
+  });
+}
+export function seriesGroupsRequiringInput(
+  series: LegacySeriesReview,
+  choices: ReviewedSlot[],
+): SeriesDecisionGroup[] {
+  return seriesDecisionGroups(series).flatMap((group) => {
+    if (seriesDecisionOptions(series, group).length > 1) return [group];
+    const records = group.records.filter((record) =>
+      seriesGroupNeedsCorrection(
+        series,
+        { ...group, records: [record] },
+        choices,
+      ),
+    );
+    return records.length
+      ? [
+          {
+            ...group,
+            records,
+            title: `Corrigir os dados de ${records.length} ${records.length === 1 ? 'registro' : 'registros'}.`,
+            explanation:
+              'Há datas ou posições inválidas. Abra a edição dos registros abaixo para corrigir os campos indicados.',
+          },
+        ]
+      : [];
+  });
 }
 export function markSeriesRecordForDeletion(
   series: LegacySeriesReview,

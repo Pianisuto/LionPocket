@@ -1135,8 +1135,8 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
               {!!series.filter((item) => !item.autoResolvable).length && (
                 <p>
                   {series.filter((item) => !item.autoResolvable).length} série(s)
-                  precisam de decisões nos grupos indicados. Abra uma revisão
-                  para conferir somente os registros envolvidos.
+                  aguardam revisão. As opções únicas são preparadas automaticamente;
+                  escolha somente onde houver alternativas.
                 </p>
               )}
             </SyncSection>
