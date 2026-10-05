@@ -11,6 +11,22 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('./components', () => ({
   useStyles: () => ({}),
+  Choice: () => <select />,
+  MonthField: () => <input />,
+  DateField: () => <input />,
+  Field: () => <input />,
+  Sheet: ({
+    children,
+    footer,
+  }: {
+    children: React.ReactNode;
+    footer: React.ReactNode;
+  }) => (
+    <div role="dialog">
+      {children}
+      {footer}
+    </div>
+  ),
   Button: ({ label }: { label: string }) => <button>{label}</button>,
 }));
 import { SeriesReviewForm } from './SeriesReview';

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applySeriesDecision,
+  seriesDecisionOptions,
   editSeriesChoice,
   initialSeriesChoices,
   keepSeriesRecords,
@@ -202,6 +204,34 @@ describe('decisões de séries antigas', () => {
     );
     expect(seriesDecisionGroups(review)).toEqual([]);
     expect(seriesReviewError(review, initialSeriesChoices(review))).toBeNull();
+  });
+  it('troca a decisão de manter ambos para reassociar sem conservar separações escondidas', () => {
+    const review = series([
+      record('um', '2026-01-10'),
+      record('dois', '2026-01-20'),
+    ]);
+    const group = seriesDecisionGroups(review)[0];
+    expect(
+      seriesDecisionOptions(review, group).map((option) => option.label),
+    ).toEqual(['Manter ambos', 'Associar a outro mês']);
+    let choices = applySeriesDecision(
+      review,
+      initialSeriesChoices(review),
+      group,
+      'keep',
+    );
+    expect(seriesReviewError(review, choices)).toBeNull();
+    choices = applySeriesDecision(review, choices, group, 'associate');
+    expect(
+      choices.every((choice) => !choice.slotKey.includes(':legacy:')),
+    ).toBe(true);
+    expect(seriesReviewError(review, choices)).toContain('mesma associação');
+    choices = editSeriesChoice(review, choices, 'dois', {
+      originalDate: '2026-02-20',
+    });
+    expect(seriesReviewError(review, choices)).toBeNull();
+    choices = applySeriesDecision(review, choices, group, '');
+    expect(choices[1].originalDate).toBe('2026-02-20');
   });
   it('mantém o motivo compacto mesmo com muitos grupos repetidos e rejeita registros faltantes', () => {
     const review = series(

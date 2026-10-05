@@ -1,20 +1,33 @@
 import { useEffect, useState } from 'react';
+import { Pencil } from 'lucide-react';
+import { dateForMonthDay, isValidDate } from '@lionpocket/core';
 import {
+  applySeriesDecision,
   editSeriesChoice,
   initialSeriesChoices,
-  keepSeriesRecords,
   reviewDateLabel,
   reviewMoney,
   reviewStateLabel,
   seriesAssociationChanges,
+  seriesDecisionDescription,
   seriesDecisionGroups,
+  seriesDecisionOptions,
   seriesPendingReason,
   seriesPreservationSummary,
   seriesReviewError,
   type LegacyReviewRecord,
   type ReviewedSlot,
+  type SeriesDecisionGroup,
   type SeriesReview,
+  type SeriesReviewDecision,
 } from '@lionpocket/sync-local';
+import {
+  DateField,
+  Modal,
+  MonthField,
+  NumberField,
+  SelectField,
+} from './components';
 
 export function SeriesReviewForm({
   series,
@@ -27,9 +40,10 @@ export function SeriesReviewForm({
 }) {
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState(() => initialSeriesChoices(series));
-  const [decisions, setDecisions] = useState<Record<string, string>>({});
+  const [decisions, setDecisions] = useState<
+    Record<string, SeriesReviewDecision>
+  >({});
   const [editing, setEditing] = useState<string | null>(null);
-  const [preview, setPreview] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const signature = JSON.stringify(series);
   useEffect(() => {
@@ -40,7 +54,6 @@ export function SeriesReviewForm({
   }, [signature]);
   const groups = seriesDecisionGroups(series);
   const duplicates = groups.filter((group) => group.kind === 'duplicate');
-  const duplicateRecords = duplicates.flatMap((group) => group.records);
   const involved = new Set(
     groups.flatMap((group) => group.records.map((record) => record.localId)),
   );
@@ -48,27 +61,38 @@ export function SeriesReviewForm({
     (record) => !involved.has(record.localId),
   );
   const error = seriesReviewError(series, choices);
-  const associationChanges = seriesAssociationChanges(series, choices);
   const ready = !error && groups.every((group) => decisions[group.id]);
-  const decide = (id: string, label: string) => {
-    setDecisions((old) => ({ ...old, [id]: label }));
+  const associationChanges = seriesAssociationChanges(series, choices);
+  const editorRecord = series.slots.find(
+    (record) => record.localId === editing,
+  );
+  const editorChoice = choices.find((choice) => choice.localId === editing);
+  const decide = (
+    group: SeriesDecisionGroup,
+    decision: SeriesReviewDecision,
+  ) => {
+    setChoices((old) => applySeriesDecision(series, old, group, decision));
+    setDecisions((old) => ({ ...old, [group.id]: decision }));
     setConfirming(false);
   };
-  const change = (
-    localId: string,
-    patch: Pick<Partial<ReviewedSlot>, 'originalDate' | 'originalIndex'>,
+  const saveAssociation = (
+    patch: Pick<ReviewedSlot, 'originalDate' | 'originalIndex'>,
   ) => {
-    setChoices((old) => editSeriesChoice(series, old, localId, patch));
-    setDecisions((old) =>
-      Object.fromEntries(
-        Object.entries(old).filter(
-          ([id]) =>
-            !groups
-              .find((group) => group.id === id)
-              ?.records.some((record) => record.localId === localId),
-        ),
-      ),
+    if (!editing) return;
+    const group = groups.find((item) =>
+      item.records.some((record) => record.localId === editing),
     );
+    setChoices((old) => {
+      const next = editSeriesChoice(series, old, editing, patch);
+      return group?.kind === 'duplicate'
+        ? applySeriesDecision(series, next, group, 'associate')
+        : group && decisions[group.id] === 'keep'
+          ? applySeriesDecision(series, next, group, 'keep')
+          : next;
+    });
+    if (group?.kind === 'duplicate')
+      setDecisions((old) => ({ ...old, [group.id]: 'associate' }));
+    setEditing(null);
     setConfirming(false);
   };
   const recordsTable = (records: LegacyReviewRecord[]) => (
@@ -81,23 +105,23 @@ export function SeriesReviewForm({
             <th>Valores</th>
             <th>Estado</th>
             <th>Associação</th>
-            <th>
-              <span className="sr-only">Editar</span>
-            </th>
+            <th aria-label="Ações" />
           </tr>
         </thead>
         <tbody>
-          {records.map((record, i) => {
+          {records.map((record) => {
             const choice =
               choices.find((item) => item.localId === record.localId) ??
               initialSeriesChoices(series).find(
                 (item) => item.localId === record.localId,
-              )!;
+              );
+            if (!choice) return null;
+            const number = series.slots.indexOf(record) + 1;
             return (
               <tr key={record.localId}>
                 <td>
                   {record.description}
-                  <small>Registro {series.slots.indexOf(record) + 1}</small>
+                  <small>Registro {number}</small>
                 </td>
                 <td>
                   {reviewDateLabel(record.currentDate)}
@@ -118,60 +142,19 @@ export function SeriesReviewForm({
                     <small>Posição {choice.originalIndex ?? '—'}</small>
                   )}
                   {choice.slotKey.includes(':legacy:') && (
-                    <small>Identidade separada</small>
+                    <small>Preservado separadamente</small>
                   )}
                 </td>
-                <td>
+                <td className="series-review__row-actions">
                   <button
-                    className="button button--ghost"
+                    className="icon-button"
                     disabled={busy}
-                    aria-label={`Editar registro ${series.slots.indexOf(record) + 1}`}
-                    onClick={() =>
-                      setEditing(
-                        editing === record.localId ? null : record.localId,
-                      )
-                    }
+                    title="Editar associação"
+                    aria-label={`Editar associação do registro ${number}`}
+                    onClick={() => setEditing(record.localId)}
                   >
-                    {editing === record.localId ? 'Fechar edição' : 'Editar'}
+                    <Pencil size={16} />
                   </button>
-                  {editing === record.localId && (
-                    <div className="series-review__editor">
-                      <label>
-                        Data original / mês de associação
-                        <input
-                          aria-label={`Data original do registro ${i + 1}`}
-                          type="date"
-                          value={choice.originalDate}
-                          disabled={busy}
-                          onChange={(event) =>
-                            change(record.localId, {
-                              originalDate: event.target.value,
-                            })
-                          }
-                        />
-                      </label>
-                      {series.entityType === 'installmentPurchase' && (
-                        <label>
-                          Posição original
-                          <input
-                            type="number"
-                            min="1"
-                            value={choice.originalIndex ?? ''}
-                            disabled={busy}
-                            onChange={(event) =>
-                              change(record.localId, {
-                                originalIndex: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                      )}
-                      <small>
-                        Altera somente a associação; o lançamento e seu
-                        pagamento permanecem como estão.
-                      </small>
-                    </div>
-                  )}
                 </td>
               </tr>
             );
@@ -200,152 +183,122 @@ export function SeriesReviewForm({
       </div>
       {open && (
         <div className="series-review__body">
-          {duplicates.length > 1 && (
-            <div className="series-review__group">
-              <p>
-                O mesmo problema aparece em {duplicates.length} grupos. Manter
-                todos afeta {duplicateRecords.length} registros; cada um terá
-                identidade própria.
-              </p>
-              <button
-                className="button button--soft"
-                disabled={busy}
-                onClick={() => {
-                  setChoices((old) =>
-                    keepSeriesRecords(series, old, duplicateRecords),
-                  );
-                  duplicates.forEach((group) =>
-                    decide(
-                      group.id,
-                      `Conservar ${group.records.length} registros com identidades separadas`,
-                    ),
-                  );
-                }}
-              >
-                Manter todos separadamente ({duplicateRecords.length} registros)
-              </button>
-            </div>
-          )}
-          {groups.map((group) => (
-            <section className="series-review__group" key={group.id}>
-              <h5>{group.title}</h5>
-              <p>{group.explanation}</p>
-              {recordsTable(group.records)}
-              <p className="series-review__impact">
-                Esta decisão afeta {group.records.length} registros.
-              </p>
-              <div className="series-review__actions">
-                {(group.kind === 'duplicate' || group.kind === 'schedule') && (
-                  <button
-                    className="button button--soft"
-                    disabled={busy}
-                    onClick={() => {
-                      setChoices((old) =>
-                        keepSeriesRecords(series, old, group.records),
-                      );
-                      decide(
-                        group.id,
-                        `Conservar ${group.records.length} registros com identidades separadas`,
-                      );
-                    }}
-                  >
-                    {group.kind === 'duplicate'
-                      ? group.records.length === 2
-                        ? 'Manter ambos'
-                        : `Manter os ${group.records.length} registros`
-                      : `Conservar separadamente (${group.records.length} registros)`}
-                  </button>
-                )}
-                <button
-                  className="button button--ghost"
-                  disabled={busy}
-                  onClick={() => setEditing(group.records[0].localId)}
-                >
-                  {group.kind === 'duplicate'
-                    ? series.entityType === 'installmentPurchase'
-                      ? 'Associar a outra parcela'
-                      : ['monthly', 'manual'].includes(series.frequency)
-                        ? 'Associar a outro mês'
-                        : 'Associar a outra data'
-                    : 'Corrigir um registro'}
-                </button>
-                {group.kind !== 'schedule' && (
-                  <button
-                    className="button button--soft"
-                    disabled={busy || !!error}
-                    onClick={() =>
-                      decide(
-                        group.id,
-                        `Usar as associações exibidas em ${group.records.length} registros`,
-                      )
-                    }
-                  >
-                    {group.kind === 'duplicate'
-                      ? 'Aplicar associações corrigidas'
-                      : group.kind === 'position'
-                        ? `Usar posições exibidas (${group.records.length} registros)`
-                        : `Usar datas exibidas (${group.records.length} registros)`}
-                  </button>
-                )}
-              </div>
-              {decisions[group.id] && (
-                <p role="status">Decisão preparada: {decisions[group.id]}.</p>
-              )}
-            </section>
-          ))}
-          {!!unambiguous.length && (
-            <div className="series-review__preview">
-              <button
-                className="button button--ghost"
-                aria-expanded={preview}
-                onClick={() => setPreview(!preview)}
-              >
-                {preview
-                  ? 'Recolher prévia'
-                  : `Prévia: ${unambiguous.length} ocorrências sem ambiguidade`}
-              </button>
-              {preview && recordsTable(unambiguous)}
-            </div>
-          )}
-          {error && <p role="alert">{error}</p>}
-          {!ready && (
-            <p>Resolva os grupos indicados para conferir o resumo da série.</p>
-          )}
           {!confirming ? (
-            <button
-              className="button button--primary"
-              disabled={busy || !ready}
-              onClick={() => {
-                setConfirming(true);
-                setEditing(null);
-              }}
-            >
-              Conferir resumo da série
-            </button>
+            <>
+              {duplicates.length > 1 && (
+                <label className="series-review__batch">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={duplicates.every(
+                      (group) => decisions[group.id] === 'keep',
+                    )}
+                    onChange={(event) => {
+                      const decision = event.target.checked ? 'keep' : '';
+                      setChoices((old) =>
+                        duplicates.reduce(
+                          (next, group) =>
+                            applySeriesDecision(series, next, group, decision),
+                          old,
+                        ),
+                      );
+                      setDecisions((old) => ({
+                        ...old,
+                        ...Object.fromEntries(
+                          duplicates.map((group) => [group.id, decision]),
+                        ),
+                      }));
+                    }}
+                  />
+                  <span>
+                    Manter separados os{' '}
+                    {duplicates.reduce(
+                      (count, group) => count + group.records.length,
+                      0,
+                    )}{' '}
+                    registros dos {duplicates.length} grupos repetidos.
+                  </span>
+                </label>
+              )}
+              {groups.map((group) => (
+                <section className="series-review__group" key={group.id}>
+                  <h5>{group.title}</h5>
+                  <p>{group.explanation}</p>
+                  {recordsTable(group.records)}
+                  <div className="series-review__decision">
+                    <SelectField
+                      label={`Decisão para este grupo (${group.records.length} registros)`}
+                      value={decisions[group.id] ?? ''}
+                      options={[
+                        { value: '', label: 'Selecione uma decisão' },
+                        ...seriesDecisionOptions(series, group),
+                      ]}
+                      disabled={busy}
+                      onChange={(value) =>
+                        decide(group, value as SeriesReviewDecision)
+                      }
+                    />
+                    <p>
+                      {seriesDecisionDescription(
+                        group,
+                        decisions[group.id] ?? '',
+                      )}
+                    </p>
+                  </div>
+                </section>
+              ))}
+              {!!unambiguous.length && (
+                <details className="series-review__preview">
+                  <summary>
+                    Prévia: {unambiguous.length} ocorrências sem ambiguidade
+                  </summary>
+                  {recordsTable(unambiguous)}
+                </details>
+              )}
+              {error && Object.values(decisions).some(Boolean) && (
+                <p role="alert">{error}</p>
+              )}
+              <div className="series-review__footer">
+                <span>
+                  {ready
+                    ? 'Decisões preparadas. Confira o resumo antes de confirmar.'
+                    : 'Selecione as decisões dos grupos acima para continuar.'}
+                </span>
+                <button
+                  className="button button--primary"
+                  disabled={busy || !ready}
+                  onClick={() => setConfirming(true)}
+                >
+                  Conferir resumo da série
+                </button>
+              </div>
+            </>
           ) : (
             <div className="series-review__confirmation">
               <h5>Confirmar revisão de {series.description}</h5>
               <p>{seriesPreservationSummary(series)}</p>
-              {!!associationChanges.length && (
-                <details className="series-review__changes">
-                  <summary>
-                    {associationChanges.length}{' '}
-                    {associationChanges.length === 1
-                      ? 'associação alterada'
-                      : 'associações alteradas'}{' '}
-                    — conferir antes de confirmar
-                  </summary>
-                  {associationChanges.map((line) => (
-                    <p key={line}>{line}</p>
-                  ))}
-                </details>
-              )}
-              {Object.entries(decisions).map(([id, decision]) => (
-                <p key={id}>
-                  {groups.find((group) => group.id === id)?.title} {decision}.
+              {groups.map((group) => (
+                <p key={group.id}>
+                  <strong>
+                    {
+                      seriesDecisionOptions(series, group).find(
+                        (option) => option.value === decisions[group.id],
+                      )?.label
+                    }
+                  </strong>{' '}
+                  · {group.records.length} registros.{' '}
+                  {decisions[group.id] === 'associate'
+                    ? 'As associações abaixo serão usadas.'
+                    : seriesDecisionDescription(
+                        group,
+                        decisions[group.id] ?? '',
+                      )}
                 </p>
               ))}
-              <div className="series-review__actions">
+              {associationChanges.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+              <div className="modal__actions">
                 <button
                   className="button button--ghost"
                   disabled={busy}
@@ -365,6 +318,122 @@ export function SeriesReviewForm({
           )}
         </div>
       )}
+      {editorRecord && editorChoice && (
+        <SeriesAssociationEditor
+          key={editorRecord.localId}
+          series={series}
+          record={editorRecord}
+          choice={editorChoice}
+          busy={busy}
+          onClose={() => setEditing(null)}
+          onSave={saveAssociation}
+        />
+      )}
     </section>
+  );
+}
+
+export function SeriesAssociationEditor({
+  series,
+  record,
+  choice,
+  busy,
+  onClose,
+  onSave,
+}: {
+  series: SeriesReview;
+  record: LegacyReviewRecord;
+  choice: ReviewedSlot;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (patch: Pick<ReviewedSlot, 'originalDate' | 'originalIndex'>) => void;
+}) {
+  const [date, setDate] = useState(choice.originalDate);
+  const [index, setIndex] = useState(
+    choice.originalIndex === null ? '' : String(choice.originalIndex),
+  );
+  const monthly =
+    series.entityType === 'recurring' &&
+    ['monthly', 'manual'].includes(series.frequency);
+  const valid =
+    isValidDate(date) &&
+    (series.entityType !== 'installmentPurchase' ||
+      (Number.isSafeInteger(Number(index)) && Number(index) > 0));
+  return (
+    <Modal
+      title="Editar associação"
+      description={record.description}
+      onClose={onClose}
+      closeDisabled={busy}
+    >
+      <form
+        className="form-grid"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid && !busy)
+            onSave({
+              originalDate: date,
+              originalIndex:
+                series.entityType === 'installmentPurchase'
+                  ? Number(index)
+                  : null,
+            });
+        }}
+      >
+        <p className="form-grid__full">
+          {reviewDateLabel(record.currentDate)} ·{' '}
+          {reviewMoney(record.plannedAmountCents)} · {reviewStateLabel(record)}
+        </p>
+        {monthly ? (
+          <MonthField
+            className="form-grid__full"
+            label="Mês original"
+            value={date.slice(0, 7)}
+            onChange={(month) =>
+              setDate(dateForMonthDay(month, Number(date.slice(8, 10)) || 1))
+            }
+          />
+        ) : (
+          <DateField
+            className="form-grid__full"
+            label="Data original"
+            value={date}
+            onChange={setDate}
+            required
+          />
+        )}
+        {series.entityType === 'installmentPurchase' && (
+          <NumberField
+            className="form-grid__full"
+            label="Posição original"
+            value={index}
+            onChange={setIndex}
+            min={1}
+            required
+          />
+        )}
+        <p className="form-grid__full">
+          Altera somente a associação nesta revisão. Valores, vencimentos,
+          pagamentos e vínculos permanecem como estão.
+        </p>
+        <div className="modal__actions form-grid__full">
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="button button--primary"
+            disabled={busy || !valid}
+          >
+            Salvar associação
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

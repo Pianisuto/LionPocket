@@ -318,3 +318,75 @@ export function seriesAssociationChanges(
     ];
   });
 }
+
+export type SeriesReviewDecision = '' | 'keep' | 'associate' | 'current';
+export function seriesDecisionOptions(
+  series: LegacySeriesReview,
+  group: SeriesDecisionGroup,
+): { value: SeriesReviewDecision; label: string }[] {
+  if (group.kind === 'duplicate')
+    return [
+      {
+        value: 'keep',
+        label:
+          group.records.length === 2
+            ? 'Manter ambos'
+            : 'Manter todos separados',
+      },
+      {
+        value: 'associate',
+        label:
+          series.entityType === 'installmentPurchase'
+            ? 'Associar a outra parcela'
+            : ['monthly', 'manual'].includes(series.frequency)
+              ? 'Associar a outro mês'
+              : 'Associar a outra data',
+      },
+    ];
+  if (group.kind === 'schedule')
+    return [{ value: 'keep', label: 'Preservar separadamente' }];
+  return [
+    {
+      value: 'current',
+      label:
+        group.kind === 'position'
+          ? 'Usar posições e datas exibidas'
+          : 'Usar datas exibidas',
+    },
+  ];
+}
+export function applySeriesDecision(
+  series: LegacySeriesReview,
+  choices: ReviewedSlot[],
+  group: SeriesDecisionGroup,
+  decision: SeriesReviewDecision,
+): ReviewedSlot[] {
+  if (decision === 'keep')
+    return keepSeriesRecords(series, choices, group.records);
+  const ids = new Set(group.records.map((record) => record.localId));
+  return choices.map((choice) =>
+    ids.has(choice.localId)
+      ? {
+          ...choice,
+          slotKey: positionKey(
+            series,
+            choice.originalDate,
+            choice.originalIndex,
+          ),
+        }
+      : choice,
+  );
+}
+export function seriesDecisionDescription(
+  group: SeriesDecisionGroup,
+  decision: SeriesReviewDecision,
+): string {
+  const count = group.records.length;
+  if (decision === 'keep')
+    return `Os ${count} registros serão preservados separadamente, nas associações exibidas, com identidades próprias.`;
+  if (decision === 'associate')
+    return 'Abra a edição do registro que deseja reassociar. A nova associação entra na revisão ao escolher Salvar associação; valores, vencimentos e pagamentos permanecem como estão.';
+  if (decision === 'current')
+    return `As associações exibidas serão usadas nos ${count} registros. Se precisar ajustar alguma, abra a edição desse registro.`;
+  return `Escolha como resolver este grupo de ${count} registros.`;
+}
