@@ -863,13 +863,15 @@ export interface ReviewedSlot {
   slotKey: string;
   originalIndex: number | null;
   publish: boolean;
+  deleteRecord?: boolean;
 }
-/** Dates/keys are explicit user assertions. Legacy PKs, FKs, and existing random identities remain intact. */
+/** Dates/keys and optional soft deletions are explicit user assertions. PKs, FKs and identities remain intact. */
 export function* reviewLegacySeries(
   type: 'recurring' | 'installmentPurchase',
   localId: string,
   slots: ReviewedSlot[],
   uuid: () => string,
+  reviewedAt = new Date().toISOString(),
 ): SqlWorkflow {
   const [row] = yield sql(`SELECT * FROM ${tableFor(type)} WHERE id=?`, [
     localId,
@@ -895,14 +897,25 @@ export function* reviewLegacySeries(
       !tx ||
       !isValidDate(choice.originalDate) ||
       !choice.slotKey ||
+      (choice.deleteRecord !== undefined &&
+        typeof choice.deleteRecord !== 'boolean') ||
+      (choice.deleteRecord && !choice.publish) ||
       keys.has(choice.slotKey)
     )
-      throw new Error('Datas e slots exigem revisão explícita sem duplicatas.');
+      throw new Error(
+        'Datas e slots exigem revisão explícita sem duplicatas.',
+      );
     keys.add(choice.slotKey);
-    const objectId = yield* identityFor('transaction', choice.localId, uuid),
+    const objectId = yield* identityFor(
+        'transaction',
+        choice.localId,
+        uuid,
+      ),
       slotId = type === 'installmentPurchase' ? uuid() : null;
     const key =
-      type === 'installmentPurchase' ? `installment:${slotId}` : choice.slotKey;
+      type === 'installmentPurchase'
+        ? `installment:${slotId}`
+        : choice.slotKey;
     if (
       type === 'installmentPurchase' &&
       (!Number.isSafeInteger(choice.originalIndex) ||
@@ -918,6 +931,14 @@ export function* reviewLegacySeries(
       choice.originalDate,
       choice.originalIndex,
     ]);
+    if (choice.deleteRecord && !tx.deleted_at) {
+      yield sql(
+        'UPDATE transactions SET deleted_at=?,updated_at=? WHERE id=?',
+        [reviewedAt, reviewedAt, choice.localId],
+      );
+      tx.deleted_at = reviewedAt;
+      tx.updated_at = reviewedAt;
+    }
     if (choice.publish)
       yield sql(
         "INSERT INTO sync_dirty VALUES(?,?,'update',?) ON CONFLICT(table_name,local_id) DO UPDATE SET operation='update',row_json=excluded.row_json",

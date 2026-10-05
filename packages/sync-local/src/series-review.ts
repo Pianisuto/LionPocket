@@ -50,9 +50,10 @@ const months = [
 export const reviewDateLabel = (date: string) =>
   date.split('-').reverse().join('/');
 export const reviewMoney = (cents: number) =>
-  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
-    cents / 100,
-  );
+  new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(cents / 100);
 export function reviewStateLabel(record: LegacyReviewRecord): string {
   const status =
     (
@@ -78,7 +79,8 @@ function positionKey(
   date: string,
   index: number | null,
 ): string {
-  if (series.entityType === 'installmentPurchase') return `position:${index}`;
+  if (series.entityType === 'installmentPurchase')
+    return `position:${index}`;
   if (series.frequency === 'monthly') return `monthly:${date.slice(0, 7)}`;
   if (series.frequency === 'manual')
     return `manual:${series.scheduleEpoch}:${date.slice(0, 7)}`;
@@ -136,7 +138,7 @@ export function seriesDecisionGroups(
       kind: 'duplicate',
       title: `Existem ${records.length} lançamentos associados ${position}.`,
       explanation:
-        'Confira também a data e a posição exibidas: o histórico antigo pode não comprovar a associação original. Usar a mesma posição para esses registros faria um substituir o outro. Manter ambos conserva cada registro com uma identidade própria; associar a outra posição muda apenas a associação, sem alterar datas, valores ou pagamentos.',
+        'Confira as datas, valores e pagamentos: a posição repetida pode ser uma associação incorreta ou um lançamento duplicado. Manter ambos conserva os registros separados; associar a outra posição corrige somente a associação. Se for uma duplicação real, escolha Excluir duplicados e marque exatamente quais registros excluir.',
       records,
     });
   }
@@ -249,7 +251,8 @@ export function seriesReviewError(
 ): string | null {
   if (
     choices.length !== series.slots.length ||
-    new Set(choices.map((choice) => choice.localId)).size !== choices.length ||
+    new Set(choices.map((choice) => choice.localId)).size !==
+      choices.length ||
     choices.some(
       (choice) =>
         !series.slots.some((record) => record.localId === choice.localId),
@@ -270,7 +273,8 @@ export function seriesReviewError(
   const collision = choices.find((choice) =>
     choices.some(
       (other) =>
-        other.localId !== choice.localId && other.slotKey === choice.slotKey,
+        other.localId !== choice.localId &&
+        other.slotKey === choice.slotKey,
     ),
   );
   if (collision) {
@@ -286,11 +290,24 @@ export function seriesReviewError(
   }
   return null;
 }
-export function seriesPreservationSummary(series: LegacySeriesReview): string {
+export function seriesPreservationSummary(
+  series: LegacySeriesReview,
+  choices: ReviewedSlot[] = [],
+): string {
   const paid = series.slots.filter((record) =>
     ['paid', 'received'].includes(record.status),
   ).length;
   const deleted = series.slots.filter((record) => record.deletedAt).length;
+  const marked = series.slots.filter(
+    (record) =>
+      !record.deletedAt &&
+      choices.some(
+        (choice) =>
+          choice.localId === record.localId && choice.deleteRecord,
+      ),
+  );
+  if (marked.length)
+    return `${series.slots.length - deleted - marked.length} registros ativos mantidos · ${marked.length} ${marked.length === 1 ? 'registro será excluído' : 'registros serão excluídos'} · ${deleted} já excluídos. A exclusão retira os registros selecionados dos lançamentos e totais. O histórico, valores, pagamentos e vínculos permanecem armazenados; as exclusões serão sincronizadas.`;
   return `${series.slots.length} registros preservados · ${paid} pagos ou recebidos · ${deleted} excluídos. Valores, datas de vencimento, pagamentos e vínculos serão mantidos. As exclusões continuam excluídas.`;
 }
 
@@ -301,14 +318,20 @@ export function seriesAssociationChanges(
   const initial = initialSeriesChoices(series);
   return choices.flatMap((choice) => {
     const before = initial.find((item) => item.localId === choice.localId);
+    const record = series.slots.find(
+      (item) => item.localId === choice.localId,
+    );
+    if (!before || !record) return [];
+    const number = series.slots.indexOf(record) + 1;
+    if (choice.deleteRecord && !record.deletedAt)
+      return [
+        `Excluir registro ${number}: ${record.description}, ${reviewDateLabel(record.currentDate)}, ${reviewMoney(record.plannedAmountCents)} · ${reviewStateLabel(record)}${record.actualAmountCents !== null ? ` · realizado ${reviewMoney(record.actualAmountCents)}` : ''}.`,
+      ];
     if (
-      !before ||
-      (before.originalDate === choice.originalDate &&
-        before.originalIndex === choice.originalIndex)
+      before.originalDate === choice.originalDate &&
+      before.originalIndex === choice.originalIndex
     )
       return [];
-    const number =
-      series.slots.findIndex((record) => record.localId === choice.localId) + 1;
     const position =
       series.entityType === 'installmentPurchase'
         ? ` · posição ${before.originalIndex ?? '—'} → ${choice.originalIndex ?? '—'}`
@@ -319,7 +342,8 @@ export function seriesAssociationChanges(
   });
 }
 
-export type SeriesReviewDecision = '' | 'keep' | 'associate' | 'current';
+export type SeriesReviewDecision =
+  '' | 'keep' | 'associate' | 'current' | 'delete';
 export function seriesDecisionOptions(
   series: LegacySeriesReview,
   group: SeriesDecisionGroup,
@@ -342,6 +366,9 @@ export function seriesDecisionOptions(
               ? 'Associar a outro mês'
               : 'Associar a outra data',
       },
+      ...(group.records.filter((record) => !record.deletedAt).length > 1
+        ? [{ value: 'delete' as const, label: 'Excluir duplicados' }]
+        : []),
     ];
   if (group.kind === 'schedule')
     return [{ value: 'keep', label: 'Preservar separadamente' }];
@@ -361,13 +388,12 @@ export function applySeriesDecision(
   group: SeriesDecisionGroup,
   decision: SeriesReviewDecision,
 ): ReviewedSlot[] {
-  if (decision === 'keep')
-    return keepSeriesRecords(series, choices, group.records);
   const ids = new Set(group.records.map((record) => record.localId));
-  return choices.map((choice) =>
+  const next = choices.map((choice) =>
     ids.has(choice.localId)
       ? {
           ...choice,
+          deleteRecord: false,
           slotKey: positionKey(
             series,
             choice.originalDate,
@@ -376,6 +402,67 @@ export function applySeriesDecision(
         }
       : choice,
   );
+  return decision === 'keep' || decision === 'delete'
+    ? keepSeriesRecords(series, next, group.records)
+    : next;
+}
+export function markSeriesRecordForDeletion(
+  series: LegacySeriesReview,
+  choices: ReviewedSlot[],
+  group: SeriesDecisionGroup,
+  localId: string,
+  deleted: boolean,
+): ReviewedSlot[] {
+  if (
+    group.kind !== 'duplicate' ||
+    !group.records.some(
+      (record) => record.localId === localId && !record.deletedAt,
+    )
+  )
+    return choices;
+  return keepSeriesRecords(
+    series,
+    choices.map((choice) =>
+      choice.localId === localId
+        ? { ...choice, deleteRecord: deleted }
+        : choice,
+    ),
+    group.records,
+  );
+}
+export function seriesDeletionSelectionError(
+  group: SeriesDecisionGroup,
+  choices: ReviewedSlot[],
+): string | null {
+  const active = group.records.filter((record) => !record.deletedAt);
+  const selected = active.filter((record) =>
+    choices.some(
+      (choice) => choice.localId === record.localId && choice.deleteRecord,
+    ),
+  );
+  if (!selected.length)
+    return 'Marque quais registros duplicados excluir. Nenhum está selecionado automaticamente.';
+  if (selected.length === active.length)
+    return 'Mantenha pelo menos um dos registros deste grupo.';
+  return null;
+}
+export function seriesDeletionSummary(
+  series: LegacySeriesReview,
+  group: SeriesDecisionGroup,
+  choices: ReviewedSlot[],
+): string {
+  const active = group.records.filter((record) => !record.deletedAt);
+  const selected = active.filter((record) =>
+    choices.some(
+      (choice) => choice.localId === record.localId && choice.deleteRecord,
+    ),
+  );
+  const retained = active.filter((record) => !selected.includes(record));
+  const labels = (records: LegacyReviewRecord[]) =>
+    records
+      .map((record) => `registro ${series.slots.indexOf(record) + 1}`)
+      .join(', ');
+  return `${selected.length} ${selected.length === 1 ? 'selecionado' : 'selecionados'} para excluir${selected.length ? `: ${labels(selected)}` : ''}. Manter: ${labels(retained)}.`;
 }
 export function seriesDecisionDescription(
   group: SeriesDecisionGroup,
@@ -388,5 +475,7 @@ export function seriesDecisionDescription(
     return 'Abra a edição do registro que deseja reassociar. A nova associação entra na revisão ao escolher Salvar associação; valores, vencimentos e pagamentos permanecem como estão.';
   if (decision === 'current')
     return `As associações exibidas serão usadas nos ${count} registros. Se precisar ajustar alguma, abra a edição desse registro.`;
+  if (decision === 'delete')
+    return 'Marque os registros duplicados que deseja excluir. Eles sairão dos lançamentos e totais após a confirmação da série. O histórico, pagamentos e vínculos permanecerão armazenados; os demais registros serão mantidos.';
   return `Escolha como resolver este grupo de ${count} registros.`;
 }

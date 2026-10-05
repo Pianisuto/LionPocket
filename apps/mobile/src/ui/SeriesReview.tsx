@@ -5,6 +5,7 @@ import {
   applySeriesDecision,
   editSeriesChoice,
   initialSeriesChoices,
+  markSeriesRecordForDeletion,
   reviewDateLabel,
   reviewMoney,
   reviewStateLabel,
@@ -12,6 +13,8 @@ import {
   seriesDecisionDescription,
   seriesDecisionGroups,
   seriesDecisionOptions,
+  seriesDeletionSelectionError,
+  seriesDeletionSummary,
   seriesPendingReason,
   seriesPreservationSummary,
   seriesReviewError,
@@ -42,7 +45,9 @@ export function SeriesReviewForm({
 }) {
   const styles = useStyles();
   const [open, setOpen] = useState(false);
-  const [choices, setChoices] = useState(() => initialSeriesChoices(series));
+  const [choices, setChoices] = useState(() =>
+    initialSeriesChoices(series),
+  );
   const [decisions, setDecisions] = useState<
     Record<string, SeriesReviewDecision>
   >({});
@@ -59,18 +64,29 @@ export function SeriesReviewForm({
   const groups = seriesDecisionGroups(series);
   const duplicates = groups.filter((group) => group.kind === 'duplicate');
   const involved = new Set(
-    groups.flatMap((group) => group.records.map((record) => record.localId)),
+    groups.flatMap((group) =>
+      group.records.map((record) => record.localId),
+    ),
   );
   const unambiguous = series.slots.filter(
     (record) => !involved.has(record.localId),
   );
   const error = seriesReviewError(series, choices);
-  const ready = !error && groups.every((group) => decisions[group.id]);
+  const ready =
+    !error &&
+    groups.every(
+      (group) =>
+        decisions[group.id] &&
+        (decisions[group.id] !== 'delete' ||
+          !seriesDeletionSelectionError(group, choices)),
+    );
   const associationChanges = seriesAssociationChanges(series, choices);
   const editorRecord = series.slots.find(
     (record) => record.localId === editing,
   );
-  const editorChoice = choices.find((choice) => choice.localId === editing);
+  const editorChoice = choices.find(
+    (choice) => choice.localId === editing,
+  );
   const decide = (
     group: SeriesDecisionGroup,
     decision: SeriesReviewDecision,
@@ -99,7 +115,10 @@ export function SeriesReviewForm({
     setEditing(null);
     setConfirming(false);
   };
-  const recordsCards = (records: LegacyReviewRecord[]) =>
+  const recordsCards = (
+    records: LegacyReviewRecord[],
+    group?: SeriesDecisionGroup,
+  ) =>
     records.map((record) => {
       const choice =
         choices.find((item) => item.localId === record.localId) ??
@@ -133,15 +152,45 @@ export function SeriesReviewForm({
               ? ` · posição ${choice.originalIndex ?? '—'}`
               : ''}
             {choice.slotKey.includes(':legacy:')
-              ? ' · preservado separadamente'
+              ? choice.deleteRecord
+                ? ' · será excluído ao confirmar'
+                : ' · preservado separadamente'
               : ''}
           </Text>
-          <Button
-            compact
-            label={`Editar associação do registro ${number}`}
-            disabled={busy}
-            onPress={() => setEditing(record.localId)}
-          />
+          {group && decisions[group.id] === 'delete' ? (
+            record.deletedAt ? (
+              <Text style={styles.muted}>Já excluído</Text>
+            ) : (
+              <View pointerEvents={busy ? 'none' : 'auto'}>
+                <Choice
+                  label={`Destino do registro ${number}`}
+                  value={choice.deleteRecord ? 'delete' : 'keep'}
+                  options={[
+                    { value: 'keep', label: 'Manter registro' },
+                    { value: 'delete', label: 'Excluir na confirmação' },
+                  ]}
+                  onChange={(value) =>
+                    setChoices((old) =>
+                      markSeriesRecordForDeletion(
+                        series,
+                        old,
+                        group,
+                        record.localId,
+                        value === 'delete',
+                      ),
+                    )
+                  }
+                />
+              </View>
+            )
+          ) : (
+            <Button
+              compact
+              label={`Editar associação do registro ${number}`}
+              disabled={busy}
+              onPress={() => setEditing(record.localId)}
+            />
+          )}
         </View>
       );
     });
@@ -181,7 +230,12 @@ export function SeriesReviewForm({
                       setChoices((old) =>
                         duplicates.reduce(
                           (next, group) =>
-                            applySeriesDecision(series, next, group, decision),
+                            applySeriesDecision(
+                              series,
+                              next,
+                              group,
+                              decision,
+                            ),
                           old,
                         ),
                       );
@@ -199,7 +253,7 @@ export function SeriesReviewForm({
                 <View key={group.id} style={{ gap: 8 }}>
                   <Text style={styles.heading}>{group.title}</Text>
                   <Text style={styles.text}>{group.explanation}</Text>
-                  {recordsCards(group.records)}
+                  {recordsCards(group.records, group)}
                   <View pointerEvents={busy ? 'none' : 'auto'}>
                     <Choice
                       label={`Decisão para este grupo (${group.records.length} registros)`}
@@ -219,6 +273,18 @@ export function SeriesReviewForm({
                       decisions[group.id] ?? '',
                     )}
                   </Text>
+                  {decisions[group.id] === 'delete' && (
+                    <>
+                      <Text style={styles.text}>
+                        {seriesDeletionSummary(series, group, choices)}
+                      </Text>
+                      {seriesDeletionSelectionError(group, choices) && (
+                        <Text style={styles.muted}>
+                          {seriesDeletionSelectionError(group, choices)}
+                        </Text>
+                      )}
+                    </>
+                  )}
                 </View>
               ))}
               {!!unambiguous.length && (
@@ -260,7 +326,7 @@ export function SeriesReviewForm({
                 Confirmar revisão de {series.description}
               </Text>
               <Text style={styles.text}>
-                {seriesPreservationSummary(series)}
+                {seriesPreservationSummary(series, choices)}
               </Text>
               {groups.map((group) => (
                 <Text style={styles.text} key={group.id}>
@@ -270,12 +336,14 @@ export function SeriesReviewForm({
                     )?.label
                   }{' '}
                   · {group.records.length} registros.{' '}
-                  {decisions[group.id] === 'associate'
-                    ? 'As associações abaixo serão usadas.'
-                    : seriesDecisionDescription(
-                        group,
-                        decisions[group.id] ?? '',
-                      )}
+                  {decisions[group.id] === 'delete'
+                    ? seriesDeletionSummary(series, group, choices)
+                    : decisions[group.id] === 'associate'
+                      ? 'As associações abaixo serão usadas.'
+                      : seriesDecisionDescription(
+                          group,
+                          decisions[group.id] ?? '',
+                        )}
                 </Text>
               ))}
               {associationChanges.map((line) => (
@@ -328,7 +396,9 @@ export function SeriesAssociationEditor({
   choice: ReviewedSlot;
   busy: boolean;
   onClose: () => void;
-  onSave: (patch: Pick<ReviewedSlot, 'originalDate' | 'originalIndex'>) => void;
+  onSave: (
+    patch: Pick<ReviewedSlot, 'originalDate' | 'originalIndex'>,
+  ) => void;
 }) {
   const styles = useStyles();
   const [date, setDate] = useState(choice.originalDate);
@@ -370,7 +440,8 @@ export function SeriesAssociationEditor({
       <Text style={styles.heading}>{record.description}</Text>
       <Text style={styles.muted}>
         {reviewDateLabel(record.currentDate)} ·{' '}
-        {reviewMoney(record.plannedAmountCents)} · {reviewStateLabel(record)}
+        {reviewMoney(record.plannedAmountCents)} ·{' '}
+        {reviewStateLabel(record)}
       </Text>
       <View pointerEvents={busy ? 'none' : 'auto'}>
         {monthly ? (
@@ -378,11 +449,17 @@ export function SeriesAssociationEditor({
             label="Mês original"
             value={date.slice(0, 7)}
             onChange={(month) =>
-              setDate(dateForMonthDay(month, Number(date.slice(8, 10)) || 1))
+              setDate(
+                dateForMonthDay(month, Number(date.slice(8, 10)) || 1),
+              )
             }
           />
         ) : (
-          <DateField label="Data original" value={date} onChange={setDate} />
+          <DateField
+            label="Data original"
+            value={date}
+            onChange={setDate}
+          />
         )}
         {series.entityType === 'installmentPurchase' && (
           <Field

@@ -7,6 +7,9 @@ import {
   type ProvisionedProfile,
   initialSeriesChoices,
   keepSeriesRecords,
+  applySeriesDecision,
+  markSeriesRecordForDeletion,
+  SyncController,
   seriesDecisionGroups,
   type LegacySeriesReview,
 } from '@lionpocket/sync-local';
@@ -43,6 +46,164 @@ async function activate(bank: LionPocketDatabase) {
     );
 }
 describe('financial writers', () => {
+  it.each(['paid', 'planned'] as const)(
+    'exclui somente o duplicado %s escolhido e publica a exclusão sem apagar o histórico',
+    async (selectedStatus) => {
+      const bank = new LionPocketDatabase(':memory:');
+      try {
+        const parent = bank.saveRecurringExpense({
+          kind: 'expense',
+          active: true,
+          description: 'Duplicados',
+          plannedAmount: 10,
+          startMonth: '2026-01',
+          dueDay: 10,
+        });
+        const categoryId = String(
+          bank.db.prepare('SELECT id FROM categories LIMIT 1').get()!.id,
+        );
+        const paymentMethodId = String(
+          bank.db.prepare('SELECT id FROM payment_methods LIMIT 1').get()!
+            .id,
+        );
+        for (const [index, status] of (
+          ['paid', 'planned'] as const
+        ).entries()) {
+          const date = `2026-01-${index === 0 ? '10' : '20'}`;
+          const tx = bank.saveTransaction({
+            kind: 'expense',
+            description: status,
+            plannedAmount: 10,
+            actualAmount: status === 'paid' ? 0 : undefined,
+            dueDate: date,
+            purchaseDate: date,
+            settledDate: status === 'paid' ? '2026-01-11' : undefined,
+            status,
+            categoryId,
+            paymentMethodId,
+            notes: 'Histórico preservado',
+          });
+          bank.db
+            .prepare(
+              "UPDATE transactions SET source_type='recurring',source_id=? WHERE id=?",
+            )
+            .run(parent.id, tx.id);
+        }
+        await activate(bank);
+        const controller = Object.create(
+          SyncController.prototype,
+        ) as SyncController;
+        (controller as unknown as { options: unknown }).options = {
+          db: bank.syncDatabase(),
+        };
+        const review = (await controller.seriesReviews())[0];
+        const group = seriesDecisionGroups(review)[0];
+        const selected = review.slots.find(
+          (record) => record.status === selectedStatus,
+        )!;
+        const before = bank.db
+          .prepare('SELECT * FROM transactions ORDER BY id')
+          .all();
+        const identities = bank.db
+          .prepare(
+            "SELECT * FROM sync_identity WHERE entity_type='transaction' ORDER BY local_id",
+          )
+          .all();
+        const choices = markSeriesRecordForDeletion(
+          review,
+          applySeriesDecision(
+            review,
+            initialSeriesChoices(review),
+            group,
+            'delete',
+          ),
+          group,
+          selected.localId,
+          true,
+        );
+        const reviewedAt = '2026-10-05T20:00:00.000Z';
+        bank.db.exec(
+          "CREATE TRIGGER fail_review BEFORE INSERT ON sync_outbox BEGIN SELECT RAISE(ABORT,'disk-full'); END",
+        );
+        await expect(
+          bank
+            .syncDatabase()
+            .run(
+              reviewLegacySeries(
+                'recurring',
+                parent.id,
+                choices,
+                randomUUID,
+                reviewedAt,
+              ),
+            ),
+        ).rejects.toThrow('disk-full');
+        expect(
+          bank.db.prepare('SELECT * FROM transactions ORDER BY id').all(),
+        ).toEqual(before);
+        expect(
+          bank.db.prepare('SELECT * FROM sync_slots').all(),
+        ).toHaveLength(0);
+        bank.db.exec('DROP TRIGGER fail_review');
+        await bank
+          .syncDatabase()
+          .run(
+            reviewLegacySeries(
+              'recurring',
+              parent.id,
+              choices,
+              randomUUID,
+              reviewedAt,
+            ),
+          );
+        expect(
+          bank.db.prepare('SELECT * FROM transactions ORDER BY id').all(),
+        ).toEqual(
+          before.map((row) =>
+            row.id === selected.localId
+              ? { ...row, deleted_at: reviewedAt, updated_at: reviewedAt }
+              : row,
+          ),
+        );
+        const afterIdentities = bank.db
+          .prepare("SELECT * FROM sync_identity WHERE entity_type='transaction' ORDER BY local_id")
+          .all();
+        for (const identity of identities)
+          expect(afterIdentities.find((item) => item.local_id === identity.local_id)).toEqual(identity);
+        const slots = bank.db.prepare('SELECT * FROM sync_slots').all();
+        expect(new Set(slots.map((slot) => slot.object_id)).size).toBe(2);
+        expect(new Set(slots.map((slot) => slot.slot_key)).size).toBe(2);
+        const identity = afterIdentities.find(
+          (item) => item.local_id === selected.localId,
+        )!;
+        expect(
+          bank.db
+            .prepare('SELECT * FROM sync_tombstones WHERE object_id=?')
+            .all(identity.object_id),
+        ).toHaveLength(1);
+        expect(
+          JSON.parse(
+            String(
+              bank.db
+                .prepare(
+                  'SELECT payload_json FROM sync_revisions WHERE object_id=? ORDER BY length(local_seq) DESC,local_seq DESC LIMIT 1',
+                )
+                .get(identity.object_id)!.payload_json,
+            ),
+          ).action,
+        ).toBe('delete');
+        bank.listTransactions({ month: '2026-01' });
+        expect(
+          bank.db.prepare('SELECT id FROM transactions').all(),
+        ).toHaveLength(2);
+        expect(bank.db.prepare('PRAGMA foreign_key_check').all()).toEqual(
+          [],
+        );
+      } finally {
+        bank.db.close();
+      }
+    },
+  );
   it('preserva 127 registros, pagamentos, exclusões e vínculos ao revisar uma série grande com posição repetida', async () => {
     const bank = new LionPocketDatabase(':memory:');
     try {

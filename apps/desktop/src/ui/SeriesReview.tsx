@@ -5,6 +5,7 @@ import {
   applySeriesDecision,
   editSeriesChoice,
   initialSeriesChoices,
+  markSeriesRecordForDeletion,
   reviewDateLabel,
   reviewMoney,
   reviewStateLabel,
@@ -12,6 +13,8 @@ import {
   seriesDecisionDescription,
   seriesDecisionGroups,
   seriesDecisionOptions,
+  seriesDeletionSelectionError,
+  seriesDeletionSummary,
   seriesPendingReason,
   seriesPreservationSummary,
   seriesReviewError,
@@ -39,7 +42,9 @@ export function SeriesReviewForm({
   submit: (slots: ReviewedSlot[]) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [choices, setChoices] = useState(() => initialSeriesChoices(series));
+  const [choices, setChoices] = useState(() =>
+    initialSeriesChoices(series),
+  );
   const [decisions, setDecisions] = useState<
     Record<string, SeriesReviewDecision>
   >({});
@@ -55,18 +60,29 @@ export function SeriesReviewForm({
   const groups = seriesDecisionGroups(series);
   const duplicates = groups.filter((group) => group.kind === 'duplicate');
   const involved = new Set(
-    groups.flatMap((group) => group.records.map((record) => record.localId)),
+    groups.flatMap((group) =>
+      group.records.map((record) => record.localId),
+    ),
   );
   const unambiguous = series.slots.filter(
     (record) => !involved.has(record.localId),
   );
   const error = seriesReviewError(series, choices);
-  const ready = !error && groups.every((group) => decisions[group.id]);
+  const ready =
+    !error &&
+    groups.every(
+      (group) =>
+        decisions[group.id] &&
+        (decisions[group.id] !== 'delete' ||
+          !seriesDeletionSelectionError(group, choices)),
+    );
   const associationChanges = seriesAssociationChanges(series, choices);
   const editorRecord = series.slots.find(
     (record) => record.localId === editing,
   );
-  const editorChoice = choices.find((choice) => choice.localId === editing);
+  const editorChoice = choices.find(
+    (choice) => choice.localId === editing,
+  );
   const decide = (
     group: SeriesDecisionGroup,
     decision: SeriesReviewDecision,
@@ -95,7 +111,10 @@ export function SeriesReviewForm({
     setEditing(null);
     setConfirming(false);
   };
-  const recordsTable = (records: LegacyReviewRecord[]) => (
+  const recordsTable = (
+    records: LegacyReviewRecord[],
+    group?: SeriesDecisionGroup,
+  ) => (
     <div className="series-review__table-wrap">
       <table className="series-review__table">
         <thead>
@@ -105,7 +124,9 @@ export function SeriesReviewForm({
             <th>Valores</th>
             <th>Estado</th>
             <th>Associação</th>
-            <th aria-label="Ações" />
+            <th aria-label="Ações">
+              {group && decisions[group.id] === 'delete' ? 'Excluir' : ''}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -142,19 +163,47 @@ export function SeriesReviewForm({
                     <small>Posição {choice.originalIndex ?? '—'}</small>
                   )}
                   {choice.slotKey.includes(':legacy:') && (
-                    <small>Preservado separadamente</small>
+                    <small>
+                      {choice.deleteRecord
+                        ? 'Será excluído ao confirmar'
+                        : 'Preservado separadamente'}
+                    </small>
                   )}
                 </td>
                 <td className="series-review__row-actions">
-                  <button
-                    className="icon-button"
-                    disabled={busy}
-                    title="Editar associação"
-                    aria-label={`Editar associação do registro ${number}`}
-                    onClick={() => setEditing(record.localId)}
-                  >
-                    <Pencil size={16} />
-                  </button>
+                  {group && decisions[group.id] === 'delete' ? (
+                    record.deletedAt ? (
+                      <small>Já excluído</small>
+                    ) : (
+                      <input
+                        type="checkbox"
+                        disabled={busy}
+                        checked={!!choice.deleteRecord}
+                        aria-label={`Excluir registro ${number} na confirmação`}
+                        onChange={(event) =>
+                          setChoices((old) =>
+                            markSeriesRecordForDeletion(
+                              series,
+                              old,
+                              group,
+                              record.localId,
+                              event.target.checked,
+                            ),
+                          )
+                        }
+                      />
+                    )
+                  ) : (
+                    <button
+                      className="icon-button"
+                      disabled={busy}
+                      title="Editar associação"
+                      aria-label={`Editar associação do registro ${number}`}
+                      onClick={() => setEditing(record.localId)}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  )}
                 </td>
               </tr>
             );
@@ -169,7 +218,8 @@ export function SeriesReviewForm({
         <div>
           <h4>{series.description}</h4>
           <p>
-            {series.slots.length} ocorrências · {seriesPendingReason(series)}
+            {series.slots.length} ocorrências ·{' '}
+            {seriesPendingReason(series)}
           </p>
         </div>
         <button
@@ -198,7 +248,12 @@ export function SeriesReviewForm({
                       setChoices((old) =>
                         duplicates.reduce(
                           (next, group) =>
-                            applySeriesDecision(series, next, group, decision),
+                            applySeriesDecision(
+                              series,
+                              next,
+                              group,
+                              decision,
+                            ),
                           old,
                         ),
                       );
@@ -224,7 +279,7 @@ export function SeriesReviewForm({
                 <section className="series-review__group" key={group.id}>
                   <h5>{group.title}</h5>
                   <p>{group.explanation}</p>
-                  {recordsTable(group.records)}
+                  {recordsTable(group.records, group)}
                   <div className="series-review__decision">
                     <SelectField
                       label={`Decisão para este grupo (${group.records.length} registros)`}
@@ -244,13 +299,26 @@ export function SeriesReviewForm({
                         decisions[group.id] ?? '',
                       )}
                     </p>
+                    {decisions[group.id] === 'delete' && (
+                      <>
+                        <p>
+                          {seriesDeletionSummary(series, group, choices)}
+                        </p>
+                        {seriesDeletionSelectionError(group, choices) && (
+                          <p>
+                            {seriesDeletionSelectionError(group, choices)}
+                          </p>
+                        )}
+                      </>
+                    )}
                   </div>
                 </section>
               ))}
               {!!unambiguous.length && (
                 <details className="series-review__preview">
                   <summary>
-                    Prévia: {unambiguous.length} ocorrências sem ambiguidade
+                    Prévia: {unambiguous.length} ocorrências sem
+                    ambiguidade
                   </summary>
                   {recordsTable(unambiguous)}
                 </details>
@@ -276,7 +344,7 @@ export function SeriesReviewForm({
           ) : (
             <div className="series-review__confirmation">
               <h5>Confirmar revisão de {series.description}</h5>
-              <p>{seriesPreservationSummary(series)}</p>
+              <p>{seriesPreservationSummary(series, choices)}</p>
               {groups.map((group) => (
                 <p key={group.id}>
                   <strong>
@@ -287,12 +355,14 @@ export function SeriesReviewForm({
                     }
                   </strong>{' '}
                   · {group.records.length} registros.{' '}
-                  {decisions[group.id] === 'associate'
-                    ? 'As associações abaixo serão usadas.'
-                    : seriesDecisionDescription(
-                        group,
-                        decisions[group.id] ?? '',
-                      )}
+                  {decisions[group.id] === 'delete'
+                    ? seriesDeletionSummary(series, group, choices)
+                    : decisions[group.id] === 'associate'
+                      ? 'As associações abaixo serão usadas.'
+                      : seriesDecisionDescription(
+                          group,
+                          decisions[group.id] ?? '',
+                        )}
                 </p>
               ))}
               {associationChanges.map((line) => (
@@ -346,7 +416,9 @@ export function SeriesAssociationEditor({
   choice: ReviewedSlot;
   busy: boolean;
   onClose: () => void;
-  onSave: (patch: Pick<ReviewedSlot, 'originalDate' | 'originalIndex'>) => void;
+  onSave: (
+    patch: Pick<ReviewedSlot, 'originalDate' | 'originalIndex'>,
+  ) => void;
 }) {
   const [date, setDate] = useState(choice.originalDate);
   const [index, setIndex] = useState(
@@ -382,7 +454,8 @@ export function SeriesAssociationEditor({
       >
         <p className="form-grid__full">
           {reviewDateLabel(record.currentDate)} ·{' '}
-          {reviewMoney(record.plannedAmountCents)} · {reviewStateLabel(record)}
+          {reviewMoney(record.plannedAmountCents)} ·{' '}
+          {reviewStateLabel(record)}
         </p>
         {monthly ? (
           <MonthField
@@ -390,7 +463,9 @@ export function SeriesAssociationEditor({
             label="Mês original"
             value={date.slice(0, 7)}
             onChange={(month) =>
-              setDate(dateForMonthDay(month, Number(date.slice(8, 10)) || 1))
+              setDate(
+                dateForMonthDay(month, Number(date.slice(8, 10)) || 1),
+              )
             }
           />
         ) : (

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   applySeriesDecision,
+  markSeriesRecordForDeletion,
+  seriesAssociationChanges,
+  seriesDeletionSelectionError,
+  seriesDeletionSummary,
   seriesDecisionOptions,
   editSeriesChoice,
   initialSeriesChoices,
@@ -116,8 +120,12 @@ describe('decisões de séries antigas', () => {
       'dois',
       { originalDate: '2026-02-20' },
     );
-    expect(seriesReviewError(review, choices)).toContain('registro 2 (dois');
-    expect(seriesReviewError(review, choices)).toContain('registro 3 (três');
+    expect(seriesReviewError(review, choices)).toContain(
+      'registro 2 (dois',
+    );
+    expect(seriesReviewError(review, choices)).toContain(
+      'registro 3 (três',
+    );
     choices = editSeriesChoice(review, choices, 'dois', {
       originalDate: '2026-03-20',
     });
@@ -140,24 +148,26 @@ describe('decisões de séries antigas', () => {
         group.records.length,
       ]),
     ).toEqual([['date', 1]]);
-    expect(initialSeriesChoices(review)[0].originalDate).toBe('2026-01-10');
+    expect(initialSeriesChoices(review)[0].originalDate).toBe(
+      '2026-01-10',
+    );
   });
   it('conserva ocorrências ancoradas separadamente e não inventa um predecessor', () => {
     const review = series(
       [record('um', '2026-01-10'), record('dois', '2026-02-10')],
       { frequency: 'custom', anchorToActual: true },
     );
-    expect(seriesDecisionGroups(review).map((group) => group.kind)).toEqual([
-      'schedule',
-    ]);
+    expect(
+      seriesDecisionGroups(review).map((group) => group.kind),
+    ).toEqual(['schedule']);
     const choices = keepSeriesRecords(
       review,
       initialSeriesChoices(review),
       review.slots,
     );
-    expect(choices.every((choice) => !choice.slotKey.includes(':after:'))).toBe(
-      true,
-    );
+    expect(
+      choices.every((choice) => !choice.slotKey.includes(':after:')),
+    ).toBe(true);
     expect(seriesReviewError(review, choices)).toBeNull();
   });
   it('não repete os mesmos formulários para datas e posições de parcelas', () => {
@@ -176,9 +186,9 @@ describe('decisões de séries antigas', () => {
       ],
       { entityType: 'installmentPurchase', startingInstallment: 3 },
     );
-    expect(seriesDecisionGroups(review).map((group) => group.kind)).toEqual([
-      'position',
-    ]);
+    expect(
+      seriesDecisionGroups(review).map((group) => group.kind),
+    ).toEqual(['position']);
     expect(
       initialSeriesChoices(review).map((choice) => choice.originalIndex),
     ).toEqual([1, 2]);
@@ -203,7 +213,9 @@ describe('decisões de séries antigas', () => {
       { entityType: 'installmentPurchase', startingInstallment: 3 },
     );
     expect(seriesDecisionGroups(review)).toEqual([]);
-    expect(seriesReviewError(review, initialSeriesChoices(review))).toBeNull();
+    expect(
+      seriesReviewError(review, initialSeriesChoices(review)),
+    ).toBeNull();
   });
   it('troca a decisão de manter ambos para reassociar sem conservar separações escondidas', () => {
     const review = series([
@@ -213,7 +225,11 @@ describe('decisões de séries antigas', () => {
     const group = seriesDecisionGroups(review)[0];
     expect(
       seriesDecisionOptions(review, group).map((option) => option.label),
-    ).toEqual(['Manter ambos', 'Associar a outro mês']);
+    ).toEqual([
+      'Manter ambos',
+      'Associar a outro mês',
+      'Excluir duplicados',
+    ]);
     let choices = applySeriesDecision(
       review,
       initialSeriesChoices(review),
@@ -225,7 +241,9 @@ describe('decisões de séries antigas', () => {
     expect(
       choices.every((choice) => !choice.slotKey.includes(':legacy:')),
     ).toBe(true);
-    expect(seriesReviewError(review, choices)).toContain('mesma associação');
+    expect(seriesReviewError(review, choices)).toContain(
+      'mesma associação',
+    );
     choices = editSeriesChoice(review, choices, 'dois', {
       originalDate: '2026-02-20',
     });
@@ -247,5 +265,66 @@ describe('decisões de séries antigas', () => {
     expect(
       seriesReviewError(review, initialSeriesChoices(review).slice(1)),
     ).toContain('Todos os registros');
+  });
+  it('exige escolher as exclusões, preserva identidades e limpa as marcações ao trocar a decisão', () => {
+    const review = series([
+      record('pago', '2026-01-10', {
+        status: 'paid',
+        actualAmountCents: 0,
+        settledDate: '2026-01-11',
+      }),
+      record('duplicado', '2026-01-20'),
+      record('prévia', '2026-02-10'),
+    ]);
+    const group = seriesDecisionGroups(review)[0];
+    let choices = applySeriesDecision(
+      review,
+      initialSeriesChoices(review),
+      group,
+      'delete',
+    );
+    expect(choices.some((choice) => choice.deleteRecord)).toBe(false);
+    expect(seriesDeletionSelectionError(group, choices)).toContain(
+      'Marque',
+    );
+    choices = markSeriesRecordForDeletion(
+      review,
+      choices,
+      group,
+      'duplicado',
+      true,
+    );
+    expect(seriesDeletionSelectionError(group, choices)).toBeNull();
+    expect(seriesReviewError(review, choices)).toBeNull();
+    expect(new Set(choices.map((choice) => choice.slotKey)).size).toBe(3);
+    expect(choices.every((choice) => choice.publish)).toBe(true);
+    expect(seriesDeletionSummary(review, group, choices)).toContain(
+      'excluir: registro 2. Manter: registro 1',
+    );
+    expect(seriesPreservationSummary(review, choices)).toContain(
+      '2 registros ativos mantidos · 1 registro será excluído',
+    );
+    expect(seriesAssociationChanges(review, choices)[0]).toContain(
+      'Excluir registro 2: duplicado, 20/01/2026',
+    );
+    expect(
+      markSeriesRecordForDeletion(review, choices, group, 'prévia', true),
+    ).toEqual(choices);
+    choices = markSeriesRecordForDeletion(
+      review,
+      choices,
+      group,
+      'pago',
+      true,
+    );
+    expect(seriesDeletionSelectionError(group, choices)).toContain(
+      'pelo menos um',
+    );
+    expect(seriesAssociationChanges(review, choices)[0]).toContain(
+      'Pago · em 11/01/2026 · realizado R$',
+    );
+    choices = applySeriesDecision(review, choices, group, 'keep');
+    expect(choices.some((choice) => choice.deleteRecord)).toBe(false);
+    expect(review.slots.every((record) => !record.deletedAt)).toBe(true);
   });
 });
