@@ -1,4 +1,11 @@
 import {
+  initialSeriesChoices,
+  seriesDecisionGroups,
+  seriesPendingReason,
+  seriesReviewError,
+  type LegacySeriesReview,
+} from './series-review';
+import {
   prepareAnchorArchive,
   planAnchorBaseline,
   type AnchorBackupInspection,
@@ -1225,23 +1232,7 @@ export class SyncController {
     return this.status();
   }
   async seriesReviews() {
-    const result: {
-      entityType: 'recurring' | 'installmentPurchase';
-      localId: string;
-      description: string;
-      frequency: string;
-      scheduleEpoch: string;
-      autoResolvable: boolean;
-      autoReason: string | null;
-      suggestedSlots: ReviewedSlot[];
-      slots: {
-        localId: string;
-        description: string;
-        status: string;
-        currentDate: string;
-        installmentNumber: number | null;
-      }[];
-    }[] = [];
+    const result: LegacySeriesReview[] = [];
     for (const meta of await this.options.db.read(
       "SELECT * FROM sync_series WHERE identity_status='identity_unresolved'",
     )) {
@@ -1254,98 +1245,65 @@ export class SyncController {
           [meta.local_id],
         );
       if (!row) continue;
-      const rawSlots = await this.options.db.read(
+      const slots = await this.options.db.read(
         'SELECT * FROM transactions WHERE source_type=? AND source_id=? ORDER BY due_date,id',
         [type === 'recurring' ? 'recurring' : 'installment', meta.local_id],
       );
-      const frequency = String(row.frequency ?? 'installment'),
-        scheduleEpoch = String(meta.schedule_epoch),
-        startingInstallment = Number(row.starting_installment ?? 1),
-        slots = rawSlots.map((t) => ({
-          localId: String(t.id),
-          description: String(t.description),
-          status: String(t.status),
-          currentDate: String(
-            t.occurrence_date ?? t.purchase_date ?? t.due_date,
-          ),
-          installmentNumber:
-            t.installment_number == null ? null : Number(t.installment_number),
-        }));
-      const suggestedSlots: ReviewedSlot[] = rawSlots.map((t) => {
-        const originalDate = String(
-            t.occurrence_date ?? t.purchase_date ?? t.due_date,
-          ),
-          installmentNumber =
-            t.installment_number == null ? null : Number(t.installment_number),
-          originalIndex =
-            type === 'installmentPurchase' && installmentNumber != null
-              ? installmentNumber - startingInstallment + 1
-              : null,
-          slotKey =
-            type === 'installmentPurchase'
-              ? `installment:${originalIndex ?? String(t.id)}`
-              : frequency === 'monthly'
-                ? `monthly:${originalDate.slice(0, 7)}`
-                : frequency === 'manual'
-                  ? `manual:${scheduleEpoch}:${originalDate.slice(0, 7)}`
-                  : `${scheduleEpoch}:${originalDate}`;
-        return {
-          localId: String(t.id),
-          originalDate,
-          slotKey,
-          originalIndex,
-          // Planned generated rows can be recreated from the series. Preserve
-          // completed/cancelled or otherwise materialized history automatically.
-          publish:
-            String(t.status) !== 'planned' ||
-            t.actual_cents != null ||
-            t.actual_amount_cents != null,
-        };
-      });
-      let autoReason: string | null = null;
-      if (
-        type === 'recurring' &&
-        Boolean(row.anchor_to_actual)
-      )
-        autoReason =
-          'A série depende da realização anterior e precisa de uma conferência curta.';
-      else if (
-        suggestedSlots.some(
-          (s) => !/^\d{4}-\d{2}-\d{2}$/.test(s.originalDate),
-        )
-      )
-        autoReason = 'Há uma ocorrência sem data válida.';
-      else if (
-        new Set(suggestedSlots.map((s) => s.slotKey)).size !==
-        suggestedSlots.length
-      )
-        autoReason =
-          'Mais de uma ocorrência cairia na mesma posição da série.';
-      else if (
-        type === 'installmentPurchase' &&
-        (suggestedSlots.some(
-          (s) =>
-            !Number.isSafeInteger(s.originalIndex) ||
-            Number(s.originalIndex) < 1,
-        ) ||
-          new Set(suggestedSlots.map((s) => s.originalIndex)).size !==
-            suggestedSlots.length)
-      )
-        autoReason =
-          'A numeração atual das parcelas não permite reconstrução automática.';
       result.push({
         entityType: type,
         localId: String(meta.local_id),
         description: String(row.description),
-        frequency,
-        scheduleEpoch,
-        autoResolvable: autoReason === null,
-        autoReason,
-        suggestedSlots,
-        slots,
+        frequency: String(row.frequency ?? 'installment'),
+        scheduleEpoch: String(meta.schedule_epoch),
+        startingInstallment: Number(row.starting_installment ?? 1),
+        anchorToActual: !!row.anchor_to_actual,
+        slots: slots.map((t) => ({
+          localId: String(t.id),
+          description: String(t.description),
+          status: String(t.status),
+          currentDate: String(
+            t.occurrence_date ??
+              (type === 'recurring' ? t.purchase_date : null) ??
+              t.due_date,
+          ),
+          dueDate: String(t.due_date),
+          originalDate: t.occurrence_date ? String(t.occurrence_date) : null,
+          dateNeedsReview:
+            !t.occurrence_date &&
+            ((!t.purchase_date && type === 'recurring') ||
+              (!!t.updated_at && t.updated_at !== t.created_at) ||
+              (type === 'installmentPurchase' &&
+                !!row.updated_at &&
+                row.updated_at !== row.created_at)),
+          positionNeedsReview:
+            type === 'installmentPurchase' &&
+            ((!!row.updated_at && row.updated_at !== row.created_at) ||
+              (!!t.updated_at && t.updated_at !== t.created_at)),
+          installmentNumber:
+            t.installment_number == null ? null : Number(t.installment_number),
+          plannedAmountCents: Number(t.planned_cents ?? t.planned_amount_cents),
+          actualAmountCents:
+            t.actual_cents == null && t.actual_amount_cents == null
+              ? null
+              : Number(t.actual_cents ?? t.actual_amount_cents),
+          settledDate: t.settled_date ? String(t.settled_date) : null,
+          deletedAt: t.deleted_at ? String(t.deleted_at) : null,
+        })),
       });
     }
-    return result;
+    return result.map((series) => {
+      const groups = seriesDecisionGroups(series);
+      const suggestedSlots = initialSeriesChoices(series);
+      const autoReason = groups.length
+        ? seriesPendingReason(series)
+        : seriesReviewError(series, suggestedSlots);
+      return {
+        ...series,
+        suggestedSlots,
+        autoReason,
+        autoResolvable: autoReason === null,
+      };
+    });
   }
   async reviewSeries(
     type: 'recurring' | 'installmentPurchase',

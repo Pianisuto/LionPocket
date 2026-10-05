@@ -619,7 +619,12 @@ export function* captureFinancial(
             tracked.object_id,
           ])
         : [];
-      if (dead && !revisions.length) continue;
+      // A reviewed slot is part of the shared series: publish its deletion so
+      // another device cannot regenerate the excluded occurrence as active.
+      if (
+        dead && !revisions.length &&
+        !(yield sql('SELECT local_id FROM sync_slots WHERE local_id=?', [id])).length
+      ) continue;
       if (
         d.operation === 'insert' &&
         r.status === 'planned' &&
@@ -757,38 +762,32 @@ export function* captureFinancial(
       "SELECT * FROM sync_outbox WHERE state='pending' AND (length(local_seq)>length(?) OR (length(local_seq)=length(?) AND local_seq>?)) ORDER BY length(local_seq),local_seq",
       [state.local_seq, state.local_seq, state.local_seq],
     );
-    if (pending.length > 1) {
-      if (pending.length > 100) {
-        for (const item of pending)
-          yield sql(
-            "UPDATE sync_outbox SET state='blocked',last_error='batch_too_large' WHERE commit_id=?",
-            [item.commit_id],
-          );
-      } else {
-        const last = pending[pending.length - 1],
-          operations = pending.flatMap(
-            (item) => JSON.parse(String(item.payload_json)).operations,
-          );
-        for (const item of pending) {
-          yield sql('UPDATE sync_revisions SET commit_id=? WHERE commit_id=?', [
-            last.commit_id,
-            item.commit_id,
-          ]);
-          if (item.commit_id !== last.commit_id)
-            yield sql('DELETE FROM sync_outbox WHERE commit_id=?', [
-              item.commit_id,
-            ]);
-        }
-        yield sql('UPDATE sync_outbox SET payload_json=? WHERE commit_id=?', [
-          canonicalStringify({
-            formatVersion: 1,
-            commitId: last.commit_id,
-            localSeq: last.local_seq,
-            operations,
-          }),
+    // Each newly captured revision starts as a one-operation commit. Keep
+    // large series within the protocol limit instead of blocking the whole review.
+    for (let offset = 0; offset < pending.length; offset += 100) {
+      const batch = pending.slice(offset, offset + 100);
+      if (batch.length < 2) continue;
+      const last = batch[batch.length - 1],
+        operations = batch.flatMap(
+          (item) => JSON.parse(String(item.payload_json)).operations,
+        );
+      for (const item of batch) {
+        yield sql('UPDATE sync_revisions SET commit_id=? WHERE commit_id=?', [
           last.commit_id,
+          item.commit_id,
         ]);
+        if (item.commit_id !== last.commit_id)
+          yield sql('DELETE FROM sync_outbox WHERE commit_id=?', [item.commit_id]);
       }
+      yield sql('UPDATE sync_outbox SET payload_json=? WHERE commit_id=?', [
+        canonicalStringify({
+          formatVersion: 1,
+          commitId: last.commit_id,
+          localSeq: last.local_seq,
+          operations,
+        }),
+        last.commit_id,
+      ]);
     }
   }
 }

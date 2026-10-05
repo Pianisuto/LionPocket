@@ -1,3 +1,4 @@
+import { SeriesReviewForm } from './SeriesReview';
 import { syncActivityLabel, revisionSummary } from '@lionpocket/sync-local';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -26,7 +27,6 @@ import type {
   SyncStatus,
   SeriesReview,
   CatalogReview,
-  ReviewedSlot,
 } from '@lionpocket/sync-local';
 import type { PairingRequest } from '@lionpocket/sync-protocol';
 
@@ -1135,24 +1135,22 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
               {!!series.filter((item) => !item.autoResolvable).length && (
                 <p>
                   {series.filter((item) => !item.autoResolvable).length} série(s)
-                  têm ambiguidade real e aparecem abaixo já pré-preenchidas para
-                  uma conferência curta.
+                  precisam de decisões nos grupos indicados. Abra uma revisão
+                  para conferir somente os registros envolvidos.
                 </p>
               )}
             </SyncSection>
           )}
-          {series
-            .filter((s) => !s.autoResolvable)
-            .map((s) => (
-              <SeriesReviewForm
-                key={s.localId}
-                series={s}
-                busy={busy}
-                submit={(slots) =>
-                  run('series-review', [s.entityType, s.localId, slots])
-                }
-              />
-            ))}
+          {series.map((s) => (
+            <SeriesReviewForm
+              key={s.localId}
+              series={s}
+              busy={busy}
+              submit={(slots) =>
+                run('series-review', [s.entityType, s.localId, slots])
+              }
+            />
+          ))}
           {!!catalogs.length && (
             <CatalogBatchReview
               catalogs={catalogs}
@@ -1446,100 +1444,6 @@ function CatalogReviewForm({
         onClick={() => void submit(name)}
       >
         Conservar ambos separadamente
-      </button>
-    </div>
-  );
-}
-function SeriesReviewForm({
-  series,
-  busy,
-  submit,
-}: {
-  series: SeriesReview;
-  busy: boolean;
-  submit: (slots: ReviewedSlot[]) => Promise<void>;
-}) {
-  const [choices, setChoices] = useState<ReviewedSlot[]>(() =>
-      series.suggestedSlots.map((slot) => ({ ...slot })),
-    ),
-    [confirmed, setConfirmed] = useState(false);
-  const change = (i: number, patch: Partial<ReviewedSlot>) =>
-    setChoices((old) => old.map((c, n) => (n === i ? { ...c, ...patch } : c)));
-  return (
-    <div className="sync-review">
-      <h4>Revisar série antiga: {series.description}</h4>
-      <p>
-        {series.autoReason ??
-          'Os valores foram pré-preenchidos com a melhor informação disponível.'}{' '}
-        Ajuste apenas o que estiver diferente do histórico e confirme a série.
-      </p>
-      {series.slots.map((t, i) => (
-        <div className="sync-review__slot" key={t.localId}>
-          <p>
-            {t.description} · {t.status} · data atual {t.currentDate} · parcela
-            atual {t.installmentNumber ?? '—'}
-          </p>
-          <label>
-            Data original
-            <input
-              type="date"
-              value={choices[i].originalDate}
-              onChange={(e) => change(i, { originalDate: e.target.value })}
-            />
-          </label>
-          <label>
-            Chave original do slot
-            <input
-              value={choices[i].slotKey}
-              onChange={(e) => change(i, { slotKey: e.target.value })}
-            />
-          </label>
-          {series.entityType === 'installmentPurchase' && (
-            <label>
-              Posição original
-              <input
-                type="number"
-                min="1"
-                value={choices[i].originalIndex ?? ''}
-                onChange={(e) =>
-                  change(i, { originalIndex: Number(e.target.value) })
-                }
-              />
-            </label>
-          )}
-          <label>
-            <input
-              type="checkbox"
-              checked={choices[i].publish}
-              onChange={(e) => change(i, { publish: e.target.checked })}
-            />{' '}
-            Enviar também esta ocorrência editada ou realizada
-          </label>
-        </div>
-      ))}
-      <label>
-        <input
-          type="checkbox"
-          checked={confirmed}
-          onChange={(e) => setConfirmed(e.target.checked)}
-        />{' '}
-        Conferi todas as identidades no histórico
-      </label>
-      <button
-        className="button button--soft"
-        disabled={
-          busy ||
-          !confirmed ||
-          choices.some(
-            (c) =>
-              !c.originalDate ||
-              !c.slotKey ||
-              (series.entityType === 'installmentPurchase' && !c.originalIndex),
-          )
-        }
-        onClick={() => void submit(choices)}
-      >
-        Confirmar identidades e liberar série
       </button>
     </div>
   );

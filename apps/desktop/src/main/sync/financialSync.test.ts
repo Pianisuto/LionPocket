@@ -5,6 +5,10 @@ import {
   reviewLegacySeries,
   reconnectFinancial,
   type ProvisionedProfile,
+  initialSeriesChoices,
+  keepSeriesRecords,
+  seriesDecisionGroups,
+  type LegacySeriesReview,
 } from '@lionpocket/sync-local';
 import { LionPocketDatabase } from '../database';
 function profile(): ProvisionedProfile {
@@ -39,6 +43,49 @@ async function activate(bank: LionPocketDatabase) {
     );
 }
 describe('financial writers', () => {
+  it('preserva 127 registros, pagamentos, exclusões e vínculos ao revisar uma série grande com posição repetida', async () => {
+    const bank = new LionPocketDatabase(':memory:');
+    try {
+      const parent = bank.saveRecurringExpense({ kind: 'expense', active: true, description: 'Histórico extenso', plannedAmount: 10, startMonth: '2026-01', dueDay: 10 });
+      const parentId = parent.id;
+      const categoryId = String(bank.db.prepare('SELECT id FROM categories LIMIT 1').get()!.id);
+      const paymentMethodId = String(bank.db.prepare('SELECT id FROM payment_methods LIMIT 1').get()!.id);
+      for (let i = 0; i < 127; i++) {
+        const date = i < 2 ? `2026-01-${i === 0 ? '10' : '20'}` : `${2026 + Math.floor(i / 12)}-${String(i % 12 + 1).padStart(2, '0')}-10`;
+        const tx = bank.saveTransaction({ kind: 'expense', description: `Registro ${i}`, plannedAmount: 10 + i, actualAmount: i === 0 ? 0 : undefined, dueDate: date, purchaseDate: date, settledDate: i === 0 ? '2026-01-11' : undefined, status: i === 0 ? 'paid' : 'planned', paymentMethodId, categoryId, notes: `Nota ${i}` });
+        bank.db.prepare("UPDATE transactions SET source_type='recurring',source_id=?,deleted_at=? WHERE id=?").run(parentId, i === 1 ? '2026-01-21T00:00:00.000Z' : null, tx.id);
+        if (i === 0) bank.setTransactionPriority({ month: '2026-01', transactionId: tx.id, pinned: true });
+      }
+      await activate(bank);
+      const tables = ['transactions', 'recurring_expenses', 'transaction_priority_order', 'payment_methods', 'categories'];
+      const before = tables.map(table => bank.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+      const identities = bank.db.prepare("SELECT * FROM sync_identity WHERE entity_type='transaction' ORDER BY local_id").all();
+      const rows = bank.db.prepare('SELECT * FROM transactions ORDER BY due_date,id').all();
+      const review: LegacySeriesReview = { entityType: 'recurring', localId: parentId, description: 'Histórico extenso', frequency: 'monthly', scheduleEpoch: 'epoch', startingInstallment: 1, anchorToActual: false, slots: rows.map(t => ({
+        localId: String(t.id), description: String(t.description), status: String(t.status), currentDate: String(t.purchase_date), dueDate: String(t.due_date), originalDate: String(t.purchase_date), dateNeedsReview: false, installmentNumber: null,
+        plannedAmountCents: Number(t.planned_cents), actualAmountCents: t.actual_cents as number | null, settledDate: t.settled_date as string | null, deletedAt: t.deleted_at as string | null,
+      })) };
+      const choices = keepSeriesRecords(review, initialSeriesChoices(review), seriesDecisionGroups(review)[0].records);
+      const collision = choices.map(choice => ({ ...choice, slotKey: 'monthly:2026-01' }));
+      await expect(bank.syncDatabase().run(reviewLegacySeries('recurring', parentId, collision, randomUUID))).rejects.toThrow();
+      expect(bank.db.prepare('SELECT * FROM sync_slots').all()).toHaveLength(0);
+      await bank.syncDatabase().run(reviewLegacySeries('recurring', parentId, choices, randomUUID));
+      expect(tables.map(table => bank.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(before);
+      for (const identity of identities) expect(bank.db.prepare("SELECT object_id FROM sync_identity WHERE entity_type='transaction' AND local_id=?").get(identity.local_id)?.object_id).toBe(identity.object_id);
+      const slots = bank.db.prepare('SELECT * FROM sync_slots').all();
+      expect(slots).toHaveLength(127);
+      expect(new Set(slots.map(slot => slot.object_id)).size).toBe(127);
+      expect(new Set(slots.map(slot => slot.slot_key)).size).toBe(127);
+      const deleted = rows.find(row => row.deleted_at)!;
+      const deletedIdentity = bank.db.prepare("SELECT object_id FROM sync_identity WHERE entity_type='transaction' AND local_id=?").get(deleted.id)!;
+      expect(bank.db.prepare('SELECT * FROM sync_tombstones WHERE object_id=?').all(deletedIdentity.object_id)).toHaveLength(1);
+      expect(bank.db.prepare("SELECT * FROM sync_outbox WHERE state='blocked'").all()).toHaveLength(0);
+      const outbox = bank.db.prepare("SELECT payload_json FROM sync_outbox WHERE state='pending'").all();
+      expect(outbox.every(item => JSON.parse(String(item.payload_json)).operations.length <= 100)).toBe(true);
+      expect(bank.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally { bank.db.close(); }
+  });
+
   it('captures populated baselines without changing local IDs and records linked zero settlement atomically', async () => {
     const bank = new LionPocketDatabase(':memory:');
     bank.saveTransaction({

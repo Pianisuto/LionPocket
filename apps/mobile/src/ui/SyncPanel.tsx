@@ -1,3 +1,4 @@
+import { SeriesReviewForm } from './SeriesReview';
 import { syncActivityLabel, revisionSummary } from '@lionpocket/sync-local';
 import React, { useEffect, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
@@ -5,7 +6,6 @@ import type {
   SyncStatus,
   SeriesReview,
   CatalogReview,
-  ReviewedSlot,
 } from '@lionpocket/sync-local';
 import type { PairingRequest } from '@lionpocket/sync-protocol';
 import { syncController, betaEndpoint } from '../sync/sync';
@@ -470,23 +470,21 @@ export function SyncPanel({
               {!!series.filter((item) => !item.autoResolvable).length && (
                 <Text style={styles.muted}>
                   {series.filter((item) => !item.autoResolvable).length} série(s)
-                  têm ambiguidade real e aparecem abaixo já pré-preenchidas.
+                  precisam de decisões nos grupos indicados. Abra uma revisão para conferir os registros envolvidos.
                 </Text>
               )}
             </View>
           )}
-          {series
-            .filter((s) => !s.autoResolvable)
-            .map((s) => (
-              <SeriesReviewForm
-                key={s.localId}
-                series={s}
-                busy={busy}
-                submit={(slots) =>
-                  act((c) => c.reviewSeries(s.entityType, s.localId, slots))
-                }
-              />
-            ))}
+          {series.map((s) => (
+            <SeriesReviewForm
+              key={s.localId}
+              series={s}
+              busy={busy}
+              submit={(slots) =>
+                act((c) => c.reviewSeries(s.entityType, s.localId, slots))
+              }
+            />
+          ))}
           {!!catalogs.length && (
             <CatalogBatchReview
               catalogs={catalogs}
@@ -607,103 +605,6 @@ function CatalogReviewForm({
         label="Conservar ambos separadamente"
         disabled={busy || !name.trim() || name.trim() === review.remoteName}
         onPress={() => submit(name)}
-      />
-    </View>
-  );
-}
-function SeriesReviewForm({
-  series,
-  busy,
-  submit,
-}: {
-  series: SeriesReview;
-  busy: boolean;
-  submit: (slots: ReviewedSlot[]) => void;
-}) {
-  const styles = useStyles();
-  const [choices, setChoices] = useState<ReviewedSlot[]>(() =>
-      series.suggestedSlots.map((slot) => ({ ...slot })),
-    ),
-    [confirmed, setConfirmed] = useState(false);
-  const change = (i: number, patch: Partial<ReviewedSlot>) =>
-    setChoices((old) => old.map((c, n) => (n === i ? { ...c, ...patch } : c)));
-  return (
-    <View>
-      <Text style={styles.text}>
-        Revisar série antiga: {series.description}
-      </Text>
-      <Text style={styles.text}>
-        {series.autoReason ??
-          'Os valores foram pré-preenchidos com a melhor informação disponível.'}{' '}
-        Ajuste apenas o que estiver diferente do histórico e confirme a série.
-      </Text>
-      {series.slots.map((t, i) => (
-        <View key={t.localId}>
-          <Text style={styles.text}>
-            {t.description} · {t.status} · atual {t.currentDate} · parcela atual{' '}
-            {t.installmentNumber ?? '—'}
-          </Text>
-          <TextInput
-            style={styles.input}
-            accessibilityLabel="Data original AAAA-MM-DD"
-            placeholder="Data original AAAA-MM-DD"
-            value={choices[i].originalDate}
-            onChangeText={(v) => change(i, { originalDate: v })}
-          />
-          <TextInput
-            style={styles.input}
-            accessibilityLabel="Chave original do slot"
-            placeholder="Chave original do slot"
-            value={choices[i].slotKey}
-            onChangeText={(v) => change(i, { slotKey: v })}
-          />
-          {series.entityType === 'installmentPurchase' && (
-            <TextInput
-              style={styles.input}
-              accessibilityLabel="Posição original"
-              placeholder="Posição original"
-              keyboardType="number-pad"
-              value={
-                choices[i].originalIndex === null
-                  ? ''
-                  : String(choices[i].originalIndex)
-              }
-              onChangeText={(v) => change(i, { originalIndex: Number(v) })}
-            />
-          )}
-          <Button
-            label={
-              choices[i].publish
-                ? 'Enviar esta ocorrência: sim'
-                : 'Enviar esta ocorrência editada ou realizada: não'
-            }
-            disabled={busy}
-            onPress={() => change(i, { publish: !choices[i].publish })}
-          />
-        </View>
-      ))}
-      <Button
-        label={
-          confirmed
-            ? 'Identidades conferidas'
-            : 'Conferi todas as identidades no histórico'
-        }
-        disabled={busy}
-        onPress={() => setConfirmed(!confirmed)}
-      />
-      <Button
-        label="Confirmar identidades e liberar série"
-        disabled={
-          busy ||
-          !confirmed ||
-          choices.some(
-            (c) =>
-              !c.originalDate ||
-              !c.slotKey ||
-              (series.entityType === 'installmentPurchase' && !c.originalIndex),
-          )
-        }
-        onPress={() => submit(choices)}
       />
     </View>
   );

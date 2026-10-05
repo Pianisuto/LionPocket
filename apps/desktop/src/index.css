@@ -4775,3 +4775,25 @@ button.goal-mini {
   .sync-choice { padding: 14px; }
   .sync-steps li { flex-direction: column; gap: 7px; text-align: center; }
 }
+
+.series-review { gap: 0; padding: 14px 18px; }
+.series-review__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.series-review__header h4 { margin: 0 0 4px; font-size: 14px; }
+.series-review__header p { margin: 0; color: var(--text-soft); font-size: 12px; line-height: 1.5; }
+.series-review__header > button { flex-shrink: 0; }
+.series-review__body { display: grid; gap: 16px; margin-top: 18px; }
+.series-review__group, .series-review__confirmation { display: grid; gap: 10px; border-top: 1px solid var(--line-1); padding-top: 14px; }
+.series-review__body h5, .series-review__body p { margin: 0; }
+.series-review__body p { font-size: 12px; line-height: 1.6; color: var(--text-soft); }
+.series-review__table-wrap { overflow-x: auto; }
+.series-review__table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.series-review__table th, .series-review__table td { padding: 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line-1); }
+.series-review__table th { color: var(--text-soft); font-weight: 500; }
+.series-review__table small { display: block; color: var(--text-soft); margin-top: 3px; }
+.series-review__table .button { height: auto; min-height: 30px; padding: 5px 8px; font-size: 12px; }
+.series-review__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.series-review__editor { display: grid; gap: 10px; min-width: 175px; width: 220px; margin-top: 8px; }
+.series-review__confirmation { padding: 16px; background: var(--surface-2); border-radius: var(--radius-md); }
+@media (max-width: 600px) { .series-review__header { align-items: flex-start; } .series-review { padding: 12px; } }
+
+.series-review__editor input { width: 100%; padding: 8px; border: 1px solid var(--line-1); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); }
