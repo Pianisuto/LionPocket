@@ -59,7 +59,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
   });
   async function request(action: string, value: unknown, token = session.accessToken, vaultId = oldVault()) {
     const res = await fetch(`${endpoint}/v1/vaults/${vaultId}/${action}`, { method: 'POST',
-      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: canonicalStringify(value) });
+      headers: { 'x-lionpocket-control-version': '2', authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: canonicalStringify(value) });
     return { status: res.status, body: await res.json() };
   }
   async function challenge() {

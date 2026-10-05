@@ -474,6 +474,7 @@ export function* resolveFinancial(
     choice.restoredFrom = objectId;
     choice.provenance.origin = 'restore';
   }
+  const [control] = yield sql('SELECT applying FROM sync_control WHERE id=1');
   yield sql('UPDATE sync_control SET applying=1 WHERE id=1');
   yield* projectFinancial(localId, choice, dialect);
   yield* recordFinancialRevision(
@@ -483,7 +484,9 @@ export function* resolveFinancial(
     uuid,
     recover ? undefined : expectedHeads,
   );
-  yield sql('UPDATE sync_control SET applying=0 WHERE id=1');
+  // Automatic resolution may be nested inside applyCommit. Keep its projection
+  // guard active so remaining objects cannot become echoed local user edits.
+  yield sql('UPDATE sync_control SET applying=? WHERE id=1', [control.applying]);
 }
 
 function* priorityReference(

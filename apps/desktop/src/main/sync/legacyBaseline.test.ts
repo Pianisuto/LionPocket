@@ -101,7 +101,15 @@ async function deliver(
         [op.objectId],
       );
       // An interruption between archival snapshots and tombstones must never make a deletion visible again.
-      expect(archived.deleted_at).toBe(op.revision.provenance.legacyDeletedAt);
+      const conflict = await to.read(
+        'SELECT * FROM sync_conflicts WHERE object_id=? AND resolution_id IS NULL',
+        [op.objectId],
+      );
+      if (conflict.length) expect(archived.deleted_at).not.toBeNull();
+      else
+        expect(archived.deleted_at).toBe(
+          op.revision.provenance.legacyDeletedAt,
+        );
     }
   }
 }
@@ -257,13 +265,13 @@ function fixture(bank: LionPocketDatabase) {
       description: `Série ${s}`,
       planned_cents: 1234,
       start_month: '2000-01',
-      start_date: '2000-01-10',
+      start_date: s < 8 ? '2000-01-10' : '2000-01-13',
       due_day: 10,
       frequency,
-      interval_count: s === 9 ? 17 : 1,
+      interval_count: s === 9 ? 11 : 1,
       interval_unit: s === 9 ? 'days' : 'months',
       anchor_to_actual: s === 9 ? 1 : 0,
-      manual_months: frequency === 'manual' ? '01,03,08' : '',
+      manual_months: frequency === 'manual' ? '02,05,09' : '',
       notes: '',
       ...refs,
       ...timestamps,
@@ -446,12 +454,22 @@ describe('zero-touch legacy financial adoption', () => {
         const count = (
           await target.read('SELECT count(*) AS n FROM transactions')
         )[0].n;
-        // Monthly generations recognize historical months even though the series' day changed.
-        if (dialect === 'desktop')
-          await new MobileRepository(mobile.db, randomUUID).list({
-            month: '2000-05',
-          });
-        else desktop.listTransactions({ month: '2000-05' });
+        // All historic agendas differ from today's: weekly anchor, custom
+        // interval/actual anchor, manual months, monthly day/card cycle.
+        for (const month of [
+          '2000-02',
+          '2000-05',
+          '2001-09',
+          '2005-10',
+          '2025-09',
+        ]) {
+          if (dialect === 'desktop')
+            await new MobileRepository(mobile.db, randomUUID).list({ month });
+          else desktop.listTransactions({ month });
+          expect(
+            (await target.read('SELECT count(*) AS n FROM transactions'))[0].n,
+          ).toBe(count);
+        }
         const monthlyRows = await target.read(
           "SELECT t.* FROM transactions t JOIN recurring_expenses r ON r.id=t.source_id WHERE r.frequency='monthly'",
         );
@@ -460,7 +478,7 @@ describe('zero-touch legacy financial adoption', () => {
           Number(
             (await target.read('SELECT count(*) AS n FROM transactions'))[0].n,
           ),
-        ).toBeGreaterThanOrEqual(Number(count));
+        ).toBe(Number(count));
         const stable = await source.read(
           'SELECT local_id,object_id,slot_key FROM sync_slots ORDER BY local_id',
         );
@@ -519,6 +537,22 @@ describe('zero-touch legacy financial adoption', () => {
         expect(
           (await source.read('SELECT count(*) AS n FROM transactions'))[0].n,
         ).toBe(original.transactions.length);
+        // Coverage ends at the adopted horizon; it is not a permanent generation freeze.
+        const counts = () =>
+          target.read(
+            'SELECT r.frequency,count(*) AS n FROM transactions t JOIN recurring_expenses r ON r.id=t.source_id GROUP BY r.frequency',
+          );
+        const beforeFuture = await counts();
+        if (dialect === 'desktop')
+          await new MobileRepository(mobile.db, randomUUID).list({
+            month: '2042-06',
+          });
+        else desktop.listTransactions({ month: '2042-06' });
+        const afterFuture = await counts();
+        for (const row of beforeFuture)
+          expect(
+            Number(afterFuture.find((r) => r.frequency === row.frequency)!.n),
+          ).toBeGreaterThan(Number(row.n));
       } finally {
         desktop.db.close();
         mobile.sqlite.close();
@@ -629,6 +663,108 @@ describe('zero-touch legacy financial adoption', () => {
     }
   });
 
+  it('resumes >100 unpublished dependency-only reviews without batch_too_large', async () => {
+    const a = new LionPocketDatabase(':memory:'),
+      b = new LionPocketDatabase(':memory:');
+    try {
+      const p = profile();
+      await activate(a.syncDatabase(), p);
+      a.db.exec('UPDATE sync_control SET applying=1');
+      for (let i = 0; i < 250; i++) {
+        const tx = a.saveTransaction({
+          kind: 'expense',
+          description: `Dependência antiga ${i}`,
+          plannedAmount: i + 1,
+          dueDate: '2026-10-10',
+          status: 'planned',
+        });
+        const objectId = randomUUID();
+        a.db
+          .prepare("INSERT INTO sync_identity VALUES('transaction',?,?)")
+          .run(tx.id, objectId);
+        a.db
+          .prepare('INSERT INTO sync_review VALUES(?,?,?,?)')
+          .run(
+            randomUUID(),
+            objectId,
+            'dependency_review_required',
+            canonicalStringify({ table: 'transactions', localId: tx.id }),
+          );
+      }
+      a.db.exec('DELETE FROM sync_dirty; UPDATE sync_control SET applying=0');
+      const before = await dump(a.syncDatabase());
+      await a.syncDatabase().run(captureFinancial(randomUUID));
+      expect(await dump(a.syncDatabase())).toEqual(before);
+      expect(a.db.prepare('SELECT * FROM sync_review').all()).toEqual([]);
+      expect(
+        a.db.prepare("SELECT * FROM sync_outbox WHERE state='blocked'").all(),
+      ).toEqual([]);
+      b.db.exec(
+        'DELETE FROM categories; DELETE FROM payment_methods; DELETE FROM cards',
+      );
+      await activate(b.syncDatabase(), profile(p.pin));
+      await deliver(a.syncDatabase(), b.syncDatabase(), p, 'desktop');
+      expect(await semantic(b.syncDatabase())).toEqual(
+        await semantic(a.syncDatabase()),
+      );
+    } finally {
+      a.db.close();
+      b.db.close();
+    }
+  });
+
+  it('retains the atomic limit when dependency reviews refer to already-published versions', async () => {
+    const bank = new LionPocketDatabase(':memory:');
+    try {
+      for (let i = 0; i < 101; i++)
+        bank.saveTransaction({
+          kind: 'expense',
+          description: `Versão ${i}`,
+          plannedAmount: 1,
+          dueDate: '2026-10-10',
+          status: 'planned',
+        });
+      await activate(bank.syncDatabase(), profile());
+      bank.db.exec(
+        'UPDATE sync_control SET applying=1; UPDATE transactions SET planned_cents=200',
+      );
+      for (const identity of bank.db
+        .prepare("SELECT * FROM sync_identity WHERE entity_type='transaction'")
+        .all())
+        bank.db
+          .prepare('INSERT INTO sync_review VALUES(?,?,?,?)')
+          .run(
+            randomUUID(),
+            identity.object_id,
+            'dependency_review_required',
+            canonicalStringify({
+              table: 'transactions',
+              localId: identity.local_id,
+            }),
+          );
+      bank.db.exec(
+        'DELETE FROM sync_dirty; UPDATE sync_control SET applying=0',
+      );
+      await bank.syncDatabase().run(captureFinancial(randomUUID));
+      expect(
+        bank.db
+          .prepare(
+            "SELECT * FROM sync_outbox WHERE state='blocked' AND last_error='batch_too_large'",
+          )
+          .all(),
+      ).toHaveLength(101);
+      expect(
+        bank.db
+          .prepare(
+            'SELECT count(*) AS n FROM transactions WHERE planned_cents=200',
+          )
+          .get()!.n,
+      ).toBe(101);
+    } finally {
+      bank.db.close();
+    }
+  });
+
   it('gives copies of the same unsynchronized rows identical slots, epochs and synthetic import keys', async () => {
     const a = new LionPocketDatabase(':memory:'),
       b = new LionPocketDatabase(':memory:');
@@ -654,6 +790,29 @@ describe('zero-touch legacy financial adoption', () => {
           "UPDATE transactions SET source_type='imported',source_id='lost.xlsx:42' WHERE id=?",
         )
         .run(tx.id);
+      const deleted = a.saveTransaction({
+        kind: 'expense',
+        description: 'Exclusão copiada',
+        plannedAmount: 12.34,
+        dueDate: '2026-09-10',
+        status: 'paid',
+        actualAmount: 11,
+        settledDate: '2026-09-12',
+      });
+      a.db
+        .prepare('UPDATE transactions SET deleted_at=? WHERE id=?')
+        .run('2026-09-20 11:22:33', deleted.id);
+      a.saveInstallmentPurchase({
+        description: 'Parcelas copiadas',
+        installmentAmount: 10,
+        totalInstallments: 3,
+        currentInstallment: 2,
+        currentDueDate: '2026-10-10',
+      });
+      a.db.exec(
+        "UPDATE transactions SET deleted_at='2026-09-20 11:22:33' WHERE source_type='recurring' OR (source_type='installment' AND installment_number=2)",
+      );
+      const original = await dump(a.syncDatabase());
       b.db.exec(
         'DELETE FROM categories; DELETE FROM payment_methods; DELETE FROM cards;',
       );
@@ -686,7 +845,31 @@ describe('zero-touch legacy financial adoption', () => {
       await deliver(a.syncDatabase(), b.syncDatabase(), p, 'desktop');
       expect(
         b.db.prepare('SELECT count(*) AS n FROM transactions').get()!.n,
-      ).toBe(2);
+      ).toBe(original.transactions.length);
+      await deliver(b.syncDatabase(), a.syncDatabase(), q, 'desktop');
+      await deliver(a.syncDatabase(), b.syncDatabase(), p, 'desktop');
+      for (const bank of [a, b]) {
+        expect(
+          bank.db
+            .prepare('SELECT * FROM sync_conflicts WHERE resolution_id IS NULL')
+            .all(),
+        ).toEqual([]);
+        expect(
+          bank.db.prepare('SELECT count(*) AS n FROM transactions').get()!.n,
+        ).toBe(original.transactions.length);
+        expect(
+          bank.db
+            .prepare(
+              'SELECT deleted_at,actual_cents,due_date,settled_date FROM transactions WHERE id=?',
+            )
+            .get(deleted.id),
+        ).toEqual({
+          deleted_at: '2026-09-20 11:22:33',
+          actual_cents: 1100,
+          due_date: '2026-09-10',
+          settled_date: '2026-09-12',
+        });
+      }
       expect(
         b.db
           .prepare('SELECT * FROM sync_conflicts WHERE resolution_id IS NULL')
@@ -697,6 +880,79 @@ describe('zero-touch legacy financial adoption', () => {
       b.db.close();
     }
   });
+
+  it.each(['different financial history', 'a live version'])(
+    'keeps a real conflict when a legacy deletion meets %s',
+    async (variant) => {
+      const a = new LionPocketDatabase(':memory:'),
+        b = new LionPocketDatabase(':memory:');
+      try {
+        const tx = a.saveTransaction({
+          kind: 'expense',
+          description: 'Versões reais',
+          plannedAmount: 10,
+          dueDate: '2026-09-10',
+          status: 'paid',
+          actualAmount: 9,
+          settledDate: '2026-09-11',
+        });
+        a.db
+          .prepare('UPDATE transactions SET deleted_at=? WHERE id=?')
+          .run('2026-09-20 11:22:33', tx.id);
+        b.db.exec(
+          'DELETE FROM categories; DELETE FROM payment_methods; DELETE FROM cards',
+        );
+        for (const [table, rows] of Object.entries(
+          await dump(a.syncDatabase()),
+        ))
+          for (const row of rows)
+            b.db
+              .prepare(
+                `INSERT INTO ${table}(${Object.keys(row).join(',')}) VALUES(${Object.keys(
+                  row,
+                )
+                  .map(() => '?')
+                  .join(',')})`,
+              )
+              .run(...Object.values(row));
+        b.db
+          .prepare(
+            variant === 'a live version'
+              ? 'UPDATE transactions SET deleted_at=NULL WHERE id=?'
+              : 'UPDATE transactions SET actual_cents=777 WHERE id=?',
+          )
+          .run(tx.id);
+        const p = profile(),
+          q = profile(p.pin);
+        await activate(a.syncDatabase(), p);
+        await activate(b.syncDatabase(), q);
+        await deliver(a.syncDatabase(), b.syncDatabase(), p, 'desktop');
+        await deliver(b.syncDatabase(), a.syncDatabase(), q, 'desktop');
+        for (const bank of [a, b]) {
+          const objectId = bank.db
+            .prepare(
+              "SELECT object_id FROM sync_identity WHERE entity_type='transaction' AND local_id=?",
+            )
+            .get(tx.id)!.object_id;
+          expect(
+            bank.db
+              .prepare(
+                'SELECT * FROM sync_conflicts WHERE object_id=? AND resolution_id IS NULL',
+              )
+              .all(objectId),
+          ).toHaveLength(1);
+          expect(
+            bank.db
+              .prepare('SELECT deleted_at FROM transactions WHERE id=?')
+              .get(tx.id)!.deleted_at,
+          ).not.toBeNull();
+        }
+      } finally {
+        a.db.close();
+        b.db.close();
+      }
+    },
+  );
 
   it('rolls back an interrupted activation and keeps deleted series history without cascading legacy deletes', async () => {
     const a = new LionPocketDatabase(':memory:'),

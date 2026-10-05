@@ -295,7 +295,17 @@ function* adoptUnresolvedSeries(
         : type === 'recurringPriorityList'
           ? [{ id: 'recurring-priorities' } as SqlRow]
           : yield sql(`SELECT * FROM ${data.table} WHERE id=?`, [data.localId]);
-    if (row && review.reason !== 'dependency_review_required') adopted = true;
+    if (row) {
+      // Unpublished rows left by the old bootstrap are adoption work even when
+      // the only missing piece was dependency creation order. Existing user
+      // revisions keep their normal atomic capture boundary.
+      const heads = yield sql(
+        'SELECT h.revision_id FROM sync_heads h JOIN sync_identity i USING(object_id) WHERE i.entity_type=? AND i.local_id=?',
+        [type, data.localId],
+      );
+      if (review.reason !== 'dependency_review_required' || !heads.length)
+        adopted = true;
+    }
     if (row)
       yield sql(
         "INSERT INTO sync_dirty VALUES(?,?,'update',?) ON CONFLICT(table_name,local_id) DO UPDATE SET row_json=excluded.row_json",
@@ -346,7 +356,9 @@ function* ensureSlot(
     const predecessor = predecessors[0]
       ? yield* identityFor('transaction', String(predecessors[0].id), uuid)
       : seriesId;
-    key = `${meta.schedule_epoch}:after:${predecessor}`;
+    // Several forecasts may follow the same settled legacy predecessor. Their
+    // intended dates distinguish them; an existing slot remains stable on edit.
+    key = `${meta.schedule_epoch}:after:${predecessor}:${original}`;
   } else key = `${meta.schedule_epoch}:${original}`;
   const [same] = yield sql(
     'SELECT * FROM sync_slots WHERE series_id=? AND slot_key=?',
@@ -631,25 +643,77 @@ export function* snapshotFor(
     }
   }
 }
-/** Several identical adoption roots do not represent competing user changes. */
+/** Adoption copies are equivalent only when their complete financial value agrees.
+ * User deletions and edits never participate in historical-delete equivalence.
+ */
 export function* equivalentMigrationHeads(
   objectId: string,
 ): Generator<ReturnType<typeof sql>, boolean, SqlRow[]> {
   const rows = yield sql(
-    'SELECT r.payload_json FROM sync_heads h JOIN sync_revisions r USING(revision_id) WHERE h.object_id=?',
+    'SELECT r.* FROM sync_heads h JOIN sync_revisions r USING(revision_id) WHERE h.object_id=?',
     [objectId],
   );
   if (rows.length < 2) return false;
   const revisions = rows.map(
     (r) => JSON.parse(String(r.payload_json)) as RevisionPlaintext,
   );
-  return revisions.every(
-    (r) =>
-      r.action === 'put' &&
-      r.provenance.origin === 'migration' &&
-      canonicalStringify(r.snapshot) ===
-        canonicalStringify(revisions[0].snapshot),
+  const first = revisions[0];
+  const sameMigration = (r: RevisionPlaintext) =>
+    r.provenance.origin === 'migration' &&
+    r.restoredFrom === null &&
+    r.provenance.legacyDeletedAt === first.provenance.legacyDeletedAt;
+  if (first.action === 'put')
+    return revisions.every(
+      (r) =>
+        sameMigration(r) &&
+        r.action === 'put' &&
+        canonicalStringify(r.snapshot) === canonicalStringify(first.snapshot),
+    );
+  if (first.provenance.legacyDeletedAt === null) return false;
+  if (
+    !revisions.every(
+      (r) =>
+        sameMigration(r) &&
+        r.action === 'delete' &&
+        r.reason === 'legacy_unknown' &&
+        r.slotKey === first.slotKey &&
+        r.importKey === first.importKey,
+    )
+  )
+    return false;
+  const history = yield sql(
+    'SELECT * FROM sync_revisions WHERE object_id=? AND revision_id NOT IN (SELECT revision_id FROM sync_rejected)',
+    [objectId],
   );
+  const byId = new Map(history.map((r) => [String(r.revision_id), r]));
+  const visited = new Set<string>();
+  let snapshot: string | undefined;
+  let hasValue = false;
+  const pending = rows.map((r) => String(r.revision_id));
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const row = byId.get(id);
+    if (!row) return false;
+    const r = JSON.parse(String(row.payload_json)) as RevisionPlaintext;
+    if (!sameMigration(r)) return false;
+    if (r.action === 'put') {
+      const value = canonicalStringify(r.snapshot);
+      if (hasValue && value !== snapshot) return false;
+      snapshot = value;
+      hasValue = true;
+    } else if (
+      r.reason !== 'legacy_unknown' ||
+      r.slotKey !== first.slotKey ||
+      r.importKey !== first.importKey
+    )
+      return false;
+    pending.push(...(JSON.parse(String(row.parents_json)) as string[]));
+  }
+  // A tombstone with no archived value cannot prove that both copies deleted
+  // the same data. authoredAt/deletedAt describe adoption time, not that value.
+  return hasValue;
 }
 export function* recordFinancialRevision(
   type: EntityType,
@@ -753,7 +817,7 @@ export function* captureFinancial(
 ): SqlWorkflow {
   const [state] = yield sql('SELECT * FROM sync_local_state WHERE id=1');
   if (state.mode !== 'financial') return;
-  if (yield* adoptUnresolvedSeries(uuid)) {
+  if (!baseline && (yield* adoptUnresolvedSeries(uuid))) {
     yield* captureAdoptedBaseline(uuid, authoredAt);
     return;
   }
@@ -932,10 +996,9 @@ export function* captureFinancial(
     } catch (e) {
       if (
         !(e instanceof Error) ||
-        ![
-          'identity_unresolved',
-          'dependency_review_required',
-        ].includes(e.message)
+        !['identity_unresolved', 'dependency_review_required'].includes(
+          e.message,
+        )
       )
         throw e;
       const objectId = yield* identityFor(type, id, uuid);

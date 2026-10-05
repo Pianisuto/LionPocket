@@ -550,6 +550,30 @@ describe('anchor archive and graph planning; activation remains unavailable', ()
     await blocked(f, 'ambiguous_tombstone_projection');
   });
 
+  it('replays equivalent legacy deletion timestamps despite different migration authorship', async () => {
+    const f = await fixture(), base = root(f);
+    const d1 = append(f, base, [String(base.revision_id)], { deleted: true });
+    const d2 = append(f, d1, [String(d1.revision_id)]);
+    for (const [index, row] of [d1, d2].entries()) {
+      const payload = JSON.parse(String(row.payload_json));
+      payload.reason = 'legacy_unknown';
+      payload.provenance.legacyDeletedAt = '2020-12-01 11:12:13';
+      payload.provenance.legacyUpdatedAt = '2020-12-01 11:12:13';
+      payload.authoredAt = `2026-10-0${index + 1}T15:00:00.000Z`;
+      payload.deletedAt = payload.authoredAt;
+      f.sqlite.prepare('UPDATE sync_revisions SET authored_at=?,payload_json=? WHERE revision_id=?').run(payload.authoredAt, canonicalStringify(payload), row.revision_id);
+      f.sqlite.prepare('UPDATE sync_tombstones SET deleted_at=? WHERE revision_id=?').run(payload.deletedAt, row.revision_id);
+    }
+    await f.db.run((function* () {
+      yield sql('UPDATE sync_control SET applying=1');
+      yield* projectObject(String(base.object_id), 'desktop', randomUUID);
+      yield sql('UPDATE sync_control SET applying=0');
+    })());
+    const operations = await plan(f);
+    expect(operations.filter(o => o.revision.action === 'delete')).toHaveLength(2);
+    expect(f.sqlite.prepare('SELECT deleted_at FROM transactions WHERE id=(SELECT local_id FROM sync_identity WHERE object_id=?)').get(base.object_id)!.deleted_at).toBe('2020-12-01 11:12:13');
+  });
+
   it('does not plan a stale archive when the anchor captures another local operation after preparation', async () => {
     const f = await fixture(); await f.prepare(); const digest = f.sqlite.prepare('SELECT archive_sha256 FROM recovery_generations').get()!.archive_sha256;
     await f.save('NEW_LOCAL_AFTER_ARCHIVE');

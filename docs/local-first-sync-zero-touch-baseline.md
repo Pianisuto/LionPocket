@@ -22,9 +22,15 @@ reverte a ativação, sem modificar as linhas financeiras existentes.
   não é alterada. A relação entre UUIDs identifica slots históricos sem novos campos.
 - O epoch inicial deriva da identidade da série e da estrutura atual, com o formato
   de UUID já aceito pelo protocolo. Alterações posteriores de estrutura continuam
-  criando um novo epoch. Ocorrências novas conservam a semântica normal do protocolo.
-- A geração mensal consulta também os aliases históricos, inclusive os de registros
-  excluídos, para não duplicar ocorrências de séries que mudaram de dia ou cartão.
+  criando um novo epoch. Ocorrências novas usam slots da agenda atual. Previsões
+  custom ancoradas
+  incluem a data pretendida além do predecessor, distinguindo várias previsões
+  após o mesmo pagamento; slots existentes continuam estáveis ao editar.
+- Todas as frequências consultam os aliases históricos, inclusive os de registros
+  excluídos. O intervalo até o maior mês entre as ocorrências legadas e a captura
+  de adoção fica consolidado, inclusive lacunas: a agenda atual não retropreenche
+  o histórico mensal, semanal, custom ou manual. A captura de restore conserva
+  essa proteção. Períodos posteriores continuam gerando normalmente.
   Agregados parcelados adotados não sintetizam lacunas históricas a partir da
   numeração atual, nem recriam parcelas antigas ao receber uma edição de notas.
 
@@ -47,7 +53,10 @@ atual. Exclusões novas continuam seguindo a regra normal do produto.
 Identidades e slots são preparados antes dos snapshots; revisões seguem a ordem de
 catálogos, séries, lançamentos e prioridades. Dependências identificam revisões já
 capturadas. A adoção é enviada em commits de até 100 operações, sem mudar o limite
-remoto. Mutações reais do usuário mantêm sua fronteira de atomicidade.
+remoto. Retomadas com apenas `dependency_review_required` em linhas ainda não
+publicadas também são adoção e recebem esse particionamento. Reviews de linhas
+com revisions reais preservam a captura normal. Mutações reais do usuário mantêm
+sua fronteira de atomicidade.
 
 ## Catálogos e versões reais
 
@@ -91,12 +100,31 @@ Auditorias de projeção e recibos históricos não se tornam decisões de recup
 
 ## Compatibilidade e regressões
 
-Não há mudança de wire protocol, domain schema ou schema das tabelas existentes.
+Não há mudança do envelope financeiro, domain schema ou tabelas SQL existentes.
 São utilizados slots, aliases, proveniência e `legacy_unknown` já permitidos.
-Clientes antigos seguem validando as revisions, mas não implementam as novas regras
-locais de projeção/geração de histórico. Ambos os aparelhos devem estar atualizados
-para garantir a experiência de adoção e os limites de não regeneração descritos aqui.
-Nenhuma atualização ou migração do servidor é necessária.
+A camada de controle passa a **controlVersion 2**. O cliente novo exige um servidor
+v2 antes de login, vinculação, captura ou envio: um servidor v1 não consegue excluir
+pares antigos incompatíveis. O v0.3.11 já rejeita discovery com controlVersion 2.
+O servidor também exige `X-LionPocket-Control-Version: 2` em todas as rotas protegidas
+(controle, transporte e recuperação), retornando HTTP 426 `client_upgrade_required`
+antes de autenticação, consumo do proof ou mutação. Isso cobre sessões em cache,
+envelopes preparados e requisições atravessando a atualização do servidor. O header
+é compatibilidade, não autorização: OIDC, proofs e grants seguem obrigatórios.
+
+A implantação atualiza o servidor primeiro, em todas as réplicas. Aparelhos antigos
+pausam sync conservando dados e pendências; cada aparelho retoma quando seu app é
+atualizado. Não é preciso atualizar desktop e celular simultaneamente. Cliente novo
+com servidor antigo também para com “Atualização necessária”. Nenhuma conversão de
+ciphertexts, schema SQL, chaves ou backup é necessária. O servidor exige nova versão
+da aplicação; isso substitui a recomendação informal anterior de atualizar ambos.
+
+`tools/release/version-skew.cjs`, executado pelo CI de release, compila o código
+original do v0.3.11 (commit fixo) com seu próprio protocolo. A integração comprova
+recusa no discovery, preservação byte a byte das sidecars/outbox com envelope
+preparado, recusa do transporte antigo, proof não consumido e retomada pelo cliente
+atual. `clientVersion.test.ts` verifica a barreira em todas as famílias de endpoints
+sem permitir acesso ao banco ou autenticação; foreground verifica recusa de servidor
+v1 sem login/POST e sem alterar dados locais.
 
 `legacyBaseline.test.ts` usa SQLite real nos adaptadores Desktop e Android:
 4.118 lançamentos, 11 séries, oito mensais com 240 ocorrências cada, semanais,
@@ -107,7 +135,11 @@ prioridades. Cada direção adota uma base sem reviews, compara todas as linhas
 financeiras da origem e sincroniza para um segundo banco vazio com comparação
 semântica e replay. Exercita também geração posterior, edição de notas da compra,
 edição de uma ocorrência no receptor, retomada de um baseline anterior, cópias de
-uma base ainda não sincronizada, rollback e catálogos iguais/diferentes.
+uma base ainda não sincronizada com exclusão histórica (troca nos dois sentidos),
+exclusões com snapshots diferentes/versão viva, 250 reviews exclusivamente de
+dependência, rollback e catálogos iguais/diferentes. Consultas de vários períodos
+históricos com agendas semanal/custom/manual alteradas exigem contagem total
+exatamente estável em ambos os apps; geração futura é verificada por frequência.
 
 As regressões de foreground comprovam envio sem aprovação de combinação e a
 preservação de decisões específicas de restore. A convergência existente mantém

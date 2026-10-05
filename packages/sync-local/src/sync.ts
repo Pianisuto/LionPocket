@@ -19,7 +19,7 @@ import type {
   EpochRecoveryAuthorization,
   EpochTransition,
 } from "@lionpocket/sync-protocol";
-import { assertCompatibleEnvironment } from './compatibility';
+import { assertCompatibleEnvironment, SYNC_CONTROL_VERSION } from './compatibility';
 import { bankSyncCoordinator, type SyncCoordinator } from './coordinator';
 import { syncFetchText } from './network';
 import {
@@ -227,6 +227,7 @@ export class SyncController {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-lionpocket-control-version": String(SYNC_CONTROL_VERSION),
           authorization: "Bearer " + session.accessToken,
         },
         body: canonicalStringify(value),
@@ -1363,7 +1364,7 @@ export class SyncController {
         error ?? '',
       );
     const needsReview = !!(
-      ['epoch_changed', 'unsupported_version', 'unsupported_capability', 'server_configuration_changed'].includes(error ?? '') ||
+      ['epoch_changed', 'unsupported_version', 'unsupported_capability', 'client_upgrade_required', 'server_configuration_changed'].includes(error ?? '') ||
       reviews.length ||
       quarantine.length ||
       sync?.conflicts.length ||
@@ -1394,7 +1395,7 @@ export class SyncController {
       anchorRecoveryAvailable: !!this.options.epochBackup && !!saved?.owner,
       activity: (activation ? 'action-required' : activity) as SyncActivity,
       discovered: saved?.discovered ?? null,
-      compatibilityMessage: ['unsupported_version', 'unsupported_capability'].includes(error ?? '')
+      compatibilityMessage: ['unsupported_version', 'unsupported_capability', 'client_upgrade_required'].includes(error ?? '')
         ? 'Atualização necessária: cliente e servidor incompatíveis. Banco local e pendências preservados; nenhum envio realizado.'
         : error === 'epoch_changed'
           ? 'O histórico do servidor mudou. Este aparelho ainda precisa ser reconectado após a recuperação do servidor. Seus dados e alterações locais estão preservados.'

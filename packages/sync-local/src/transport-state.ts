@@ -395,9 +395,8 @@ export function* projectObject(
     const equivalentRoots =
       heads.length > 1 &&
       !revision &&
-      !tombstones.length &&
       (yield* equivalentMigrationHeads(objectId));
-    if (heads.length > 1 && !tombstones.length) {
+    if (heads.length > 1 && (!tombstones.length || equivalentRoots)) {
       const branches = heads.map(
         (h) =>
           JSON.parse(

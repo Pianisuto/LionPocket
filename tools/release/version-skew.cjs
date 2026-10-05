@@ -11,8 +11,7 @@ const { tmpdir } = require("node:os");
 const { execFileSync } = require("node:child_process");
 const root = resolve(__dirname, "../..");
 for (const base of [
-  "8de0087cdbcdcc670ec2073ba3f4ea51932072b4",
-  "cbd7067644c63e6c09802b208731b43d239c0031",
+  "8fafec7f0ea46d1255f905aded20f24156640c10", // Released v0.3.11, before zero-touch adoption.
 ]) {
   const directory = mkdtempSync(
     join(tmpdir(), "lion-release-previous-client-"),
@@ -78,13 +77,13 @@ for (const base of [
           LIONPOCKET_SYNC_INTEGRATION: "1",
           LIONPOCKET_PREVIOUS_CLIENT: join(
             directory,
-            "packages/sync-local/dist/beta.js",
+            "packages/sync-local/dist/index.js",
           ),
         },
       },
     );
     console.log(
-      `PASS: previous engine/controller from ${base} interoperates with current PostgreSQL/Keycloak server.`,
+      `PASS: previous engine/controller from ${base} stops safely at the control-v2 compatibility gate with its SQLite/outbox intact.`,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });

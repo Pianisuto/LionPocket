@@ -1,3 +1,4 @@
+import { SYNC_CONTROL_VERSION } from './compatibility';
 import { syncFetchText } from './network';
 import { acceptKeyCheckpoints } from './security';
 import { reissueForKeyVersion } from './reemission';
@@ -81,6 +82,7 @@ export function fetchSyncHttp(endpoint: string, signal?: AbortSignal): SyncHttp 
           'content-type': 'application/json',
           authorization: `Bearer ${token}`,
           'x-lionpocket-proof': proof,
+          'x-lionpocket-control-version': String(SYNC_CONTROL_VERSION),
         },
         body,
       }, signal);

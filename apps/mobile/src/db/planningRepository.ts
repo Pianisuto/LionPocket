@@ -165,12 +165,22 @@ export class PlanningRepository {
         let history = await this.history(tx, 'recurring', item.id);
         const legacy = hasSyncSlots ? (await tx.executeAsync<{ original_date: string }>(`SELECT s.original_date FROM sync_slots s JOIN sync_identity i ON i.object_id=s.series_id WHERE i.entity_type='recurring' AND i.local_id=? AND s.slot_key LIKE 'legacy:%'`, [item.id])).rows._array : [];
         const legacyMonths = new Set(legacy.map(s => s.original_date?.slice(0, 7)));
+        const [adoption] = legacy.length ? (await tx.executeAsync<{ month: string }>(`
+          SELECT substr(min(r.authored_at),1,7) AS month FROM sync_revisions r
+          JOIN sync_identity i ON i.object_id=r.object_id
+          WHERE i.entity_type='recurring' AND i.local_id=?
+            AND json_extract(r.payload_json,'$.provenance.origin') IN ('migration','restore')`, [item.id])).rows._array : [];
+        const throughMonth = [...legacyMonths, adoption?.month].filter(Boolean).sort().at(-1);
+
         const candidateStart = item.cardId ? addDays(start, -70) : start;
         const dates =
           item.frequency === 'custom' && item.anchorToActual
             ? rollingRecurringDates(item, history, candidateStart, end)
             : fixedRecurringDates(item, candidateStart, end);
         for (const scheduled of dates) {
+          // Preserve the adopted interval (including gaps), regardless of the
+          // current weekly/custom/manual agenda. Future periods still generate.
+          if (throughMonth && scheduled.slice(0, 7) <= throughMonth) continue;
           if (
             history.some(
               (t) => t.occurrenceDate === scheduled || (t.purchaseDate ?? t.dueDate) === scheduled,

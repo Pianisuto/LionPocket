@@ -94,6 +94,7 @@ app
         response = await fetch(endpoint + target, {
           method: 'POST',
           headers: {
+            'x-lionpocket-control-version': '2',
             'content-type': 'application/json',
             authorization: 'Bearer ' + sessionA.accessToken,
             'x-lionpocket-proof': crypto.encode(

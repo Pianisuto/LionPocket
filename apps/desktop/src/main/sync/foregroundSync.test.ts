@@ -101,6 +101,7 @@ async function setup(path = ':memory:') {
   const posts: string[] = [];
   const environment: Record<string, unknown> = {
     ...client.profile.pin,
+    controlVersion: 2,
     financialSyncEnabled: true,
     entityScopes: ['transaction'],
     oidc: { issuer: 'https://identity.invalid', desktopClientId: 'lionpocket-desktop', androidClientId: 'lionpocket-android', desktopRedirect: 'http://127.0.0.1:18761/callback', androidRedirect: 'com.lionpocketmobile:/callback' },
@@ -188,7 +189,9 @@ async function manual(beta: BetaSync) {
 describe('financial foreground sync boundaries', () => {
   it.each([
     { protocolVersion: 2 },
-    { controlVersion: 2 },
+    { controlVersion: 1 },
+    { controlVersion: null },
+    { controlVersion: 3 },
     { domainSchema: 2 },
     { entityScopes: ['transaction', 'futureObject'] },
     { serverEpoch: 'ffffffff-ffff-4fff-bfff-ffffffffffff' },
@@ -207,9 +210,9 @@ describe('financial foreground sync boundaries', () => {
     expect(status.activity).toBe('review');
     expect(status.compatibilityMessage).toMatch(/preservad/);
   });
-  it('accepts explicit v1 discovery without changing wire or domain versions', async () => {
+  it('accepts control v2 discovery without changing wire or domain versions', async () => {
     const s = await setup();
-    Object.assign(s.environment, { controlVersion: 1, protocolVersion: 1, domainSchema: 1 });
+    Object.assign(s.environment, { controlVersion: 2, protocolVersion: 1, domainSchema: 1 });
     await foreground(s.beta);
     await manual(s.beta);
     s.bank.saveTransaction(input);

@@ -825,6 +825,15 @@ export class LionPocketDatabase {
         )
       LIMIT 1
     `);
+    const legacyCoverage = this.db.prepare(`
+      SELECT CASE WHEN count(*)>0 THEN max(
+        coalesce(max(substr(s.original_date,1,7)),''),
+        coalesce((SELECT substr(min(r.authored_at),1,7) FROM sync_revisions r
+          WHERE r.object_id=i.object_id AND json_extract(r.payload_json,'$.provenance.origin') IN ('migration','restore')), '')
+      ) END AS through_month
+      FROM sync_slots s JOIN sync_identity i ON i.object_id=s.series_id
+      WHERE i.entity_type='recurring' AND i.local_id=? AND s.slot_key LIKE 'legacy:%'
+    `);
     const statement = this.db.prepare(`
       INSERT OR IGNORE INTO transactions(
         id, kind, description, category_id, planned_cents, purchase_date, due_date, status,
@@ -834,6 +843,7 @@ export class LionPocketDatabase {
     const timestamp = now();
     for (const item of recurring) {
       const frequency = this.recurringFrequency(item);
+      const throughMonth = legacyCoverage.get(item.id)?.through_month as string | null;
       const candidateStart = item.card_id ? addDays(start, -70) : start;
       let scheduledDates: string[];
       if (frequency === 'custom' && Boolean(item.anchor_to_actual)) {
@@ -852,6 +862,9 @@ export class LionPocketDatabase {
         scheduledDates = this.fixedRecurringDates(item, candidateStart, end);
       }
       for (const scheduledDate of scheduledDates) {
+        // Adoption records the actual history, including gaps and old agendas.
+        // Do not backfill that covered interval using today's schedule.
+        if (throughMonth && scheduledDate.slice(0, 7) <= throughMonth) continue;
         // Uma ocorrência excluída continua no banco como um marcador. Isso
         // impede que consultar novamente o mês desfaça a exclusão da pessoa.
         if (existing.get(item.id, scheduledDate)) continue;

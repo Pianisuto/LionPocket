@@ -104,7 +104,7 @@ try {
     const originalFetch = globalThis.fetch;
     const originalDiscovery = await (await originalFetch(endpoint + '/v1/environment')).json();
     assert.deepEqual(await (await originalFetch(endpoint + '/.well-known/lionpocket')).json(), originalDiscovery);
-    for (const delta of [{ protocolVersion: 2 }, { domainSchema: 2 }, { cryptoSuites: ['future'] }, { entityScopes: ['future'] }]) {
+    for (const delta of [{ controlVersion: 1 }, { controlVersion: 3 }, { protocolVersion: 2 }, { domainSchema: 2 }, { cryptoSuites: ['future'] }, { entityScopes: ['future'] }]) {
       globalThis.fetch = (url, init) => String(url).endsWith('/v1/environment') ? Promise.resolve(new Response(canonicalStringify({ ...originalDiscovery, ...delta }))) : originalFetch(url, init);
       await assert.rejects(a.configure(endpoint), /unsupported_/);
       assert.equal(saved.desktop, undefined);
@@ -113,7 +113,7 @@ try {
     globalThis.fetch = originalFetch;
     await a.configure(endpoint); await b.configure(endpoint);
     const discovery = await a.environment();
-    assert.equal(discovery.protocolVersion, 1); assert.equal(discovery.domainSchema, 1);
+    assert.equal(discovery.controlVersion, 2); assert.equal(discovery.protocolVersion, 1); assert.equal(discovery.domainSchema, 1);
     assert.equal(discovery.entityScopes.length, 9);
     const first = await a.create();
     assert.equal(first.phase, 'recovery');
@@ -153,7 +153,7 @@ try {
     await fetchSyncHttp(endpoint).request(target, body, validEncoded, own.accessToken);
     await assert.rejects(fetchSyncHttp(endpoint).request(target, body, validEncoded, own.accessToken), /replay/);
     await assert.rejects(fetchSyncHttp(endpoint).request('/v1/redirect-canary', body, validEncoded, own.accessToken));
-    const tokenOnly = await fetch(endpoint + target, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + own.accessToken }, body });
+    const tokenOnly = await fetch(endpoint + target, { method: 'POST', headers: { 'x-lionpocket-control-version': '2', 'content-type': 'application/json', authorization: 'Bearer ' + own.accessToken }, body });
     assert.equal(tokenOnly.status, 403);
   } else if (phase === 'restart') {
     await a.sync(); await b.sync(); await a.sync(); await b.sync();

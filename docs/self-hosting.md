@@ -148,6 +148,17 @@ Endpoint é preferência por aparelho e não sincroniza. Uma base vinculada não
 
 `protocolVersion=1`, `domainSchema=1`, `lp-sodium-v1`, E2EE, assinatura de commit/HTTP proof, DAG, causalidade, tombstones, idempotência e checkpoints são preservados. `/v1/environment` continua disponível; `/.well-known/lionpocket` é um alias aditivo. Escopo completo genérico cobre categorias, formas de pagamento, cartões, lançamentos, recorrências, parcelas, objetivos e prioridades recorrentes/mensais. Servidor só valida protocolo/autorização e conserva ciphertext.
 
+A adoção automática de bases antigas exige **controlVersion 2**. Atualize o servidor
+em todas as réplicas antes de habilitar o cliente novo; versões antigas dos apps
+param de sincronizar, preservando banco e pendências, e retomam conforme cada
+aparelho é atualizado. O cliente novo recusa servidores v1. Rotas protegidas exigem
+`X-LionPocket-Control-Version: 2`; sessões antigas ou envelopes já preparados sem
+essa declaração recebem HTTP 426 `client_upgrade_required`, sem consumir proofs.
+Esse header não substitui autenticação, proofs ou autorização. O formato financeiro,
+schema SQL, chaves e ciphertexts permanecem iguais. Veja a
+[regra de compatibilidade e suas regressões](local-first-sync-zero-touch-baseline.md).
+
+
 `tools/sync-beta` permanece um deployment/channel legado da mesma API. Apenas hostname/realm/client/redirect, perfil e pacote/instalador variam. Normal não tem endpoint LionsLab padrão. Classes/imports `BetaSync`/`beta-security` continuam aliases temporários; `ManualSync` e `DevelopmentSyncActions` são nomes históricos do mesmo transporte/facade financeiro, sem gate de canal; os contextos criptográficos históricos que contêm a palavra `beta` ficam byte a byte iguais para compatibilidade, sem habilitar comportamento especial.
 
 Ensaio automatizado, somente fixtures:
