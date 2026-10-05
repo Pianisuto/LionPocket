@@ -6,7 +6,7 @@ on:
       version:
         description: Version without v prefix
         required: true
-        default: '0.3.11'
+        default: '0.3.12'
         type: string
       confirm:
         description: Type PUBLICAR vX.Y.Z
@@ -191,11 +191,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd release-assets
-          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort | while read -r file; do
-            sha256sum "$file"
-          done > SHA256SUMS.txt
-          node -e 'const fs=require("fs"); const version=process.env.RELEASE_VERSION; fs.writeFileSync("build-manifest.json", JSON.stringify({version,androidVersionCode:4,source:process.env.GITHUB_SHA,tag:"v"+version,publicRelease:true,server:"Git tag/source archive is the self-hosted server release"},null,2)+"\n")'
+          node tools/release/publication-metadata.cjs release-assets
       - name: Publish immutable GitHub Release
         shell: bash
         run: |
