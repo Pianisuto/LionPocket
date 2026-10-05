@@ -114,6 +114,8 @@ export async function registerSyncController(bank: LionPocketDatabase) {
           return c.reconnectRestored(args[0] === true);
         case 'series-reviews':
           return c.seriesReviews();
+        case 'series-review-suggested':
+          return c.reviewSuggestedSeries(args[0] === true);
         case 'series-review':
           return c.reviewSeries(
             args[0] as 'recurring' | 'installmentPurchase',
