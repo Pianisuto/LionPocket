@@ -9,6 +9,7 @@ apply_theme() {
     printf 'Tema Keycloak do LionPocket ausente em %s/keycloak-theme/lionpocket.\n' "$runtime" >&2
     return 1
   }
+  docker compose up -d keycloak >/dev/null
   local ready=0
   for _ in {1..60}; do
     if docker compose exec -T keycloak bash -lc '/opt/keycloak/bin/kcadm.sh config credentials --server http://127.0.0.1:8080 --realm master --user beta-admin --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null' >/dev/null 2>&1; then
