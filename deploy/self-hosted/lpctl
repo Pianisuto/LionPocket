@@ -235,6 +235,7 @@ def main():
         print('Segredos externos preparados. Nenhum arquivo existente foi substituído.')
     elif command == 'up':
         compose(cfg, 'up', '-d', '--build', '--wait', '--wait-timeout', '300')
+        operator(cfg, 'apply-theme', '')
     elif command == 'status':
         compose(cfg, 'ps')
         operator(cfg, 'status', '')
@@ -328,6 +329,7 @@ def main():
             compose(cfg, 'up', '-d', '--force-recreate', '--wait', '--wait-timeout', '300', 'api', 'keycloak', capture=True)
             # Health endpoints alone cannot detect a mismatched admin password.
             operator(cfg, 'check-admin', '')
+            operator(cfg, 'apply-theme', '')
             journal_path.unlink()
         except (ValueError, OSError, KeyboardInterrupt):
             try:
@@ -342,6 +344,7 @@ def main():
     elif command == 'restart':
         compose(cfg, 'restart', 'api', 'keycloak')
         compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', 'api', 'keycloak')
+        operator(cfg, 'apply-theme', '')
     elif command == 'logs':
         compose(cfg, 'logs', '--tail', '100', 'api', 'keycloak')
     else:

@@ -29,7 +29,9 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_BOOTSTRAP_ADMIN_USERNAME: beta-admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?required}
-    volumes: ['./realm.json:/opt/keycloak/data/import/lionpocket-beta.json:ro']
+    volumes:
+      - ./realm.json:/opt/keycloak/data/import/lionpocket-beta.json:ro
+      - ./keycloak-theme/lionpocket:/opt/keycloak/themes/lionpocket:ro
     depends_on:
       postgres: {condition: service_healthy}
   api:

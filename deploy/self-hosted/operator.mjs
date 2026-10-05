@@ -15,7 +15,7 @@ try {
     console.log(JSON.stringify({ healthy: true }));
     process.exit(0);
   }
-  if (!['create', 'lookup', 'disable', 'check-admin'].includes(action) || (action !== 'check-admin' && !/^[a-zA-Z0-9._@-]{1,128}$/.test(username)))
+  if (!['create', 'lookup', 'disable', 'check-admin', 'apply-theme'].includes(action) || (!['check-admin', 'apply-theme'].includes(action) && !/^[a-zA-Z0-9._@-]{1,128}$/.test(username)))
     throw new Error('invalid_input');
   const root = 'http://keycloak:8080';
   const admin = (await readFile('/run/secrets/admin_password', 'utf8')).trim();
@@ -27,6 +27,30 @@ try {
   const { access_token: token } = await auth.json();
   if (action === 'check-admin') {
     console.log(JSON.stringify({ authenticated: true }));
+    process.exit(0);
+  }
+  if (action === 'apply-theme') {
+    const realmUrl = root + '/admin/realms/lionpocket';
+    const headers = { authorization: 'Bearer ' + token, 'content-type': 'application/json' };
+    const currentResponse = await fetch(realmUrl, {
+      redirect: 'error', signal: AbortSignal.timeout(15000), headers,
+    });
+    if (!currentResponse.ok) throw new Error('theme_update_failed');
+    const current = await currentResponse.json();
+    Object.assign(current, {
+      displayName: 'LionPocket',
+      displayNameHtml: 'LionPocket',
+      loginTheme: 'lionpocket',
+      internationalizationEnabled: true,
+      supportedLocales: ['pt-BR', 'en'],
+      defaultLocale: 'pt-BR',
+    });
+    const updated = await fetch(realmUrl, {
+      method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(15000),
+      headers, body: JSON.stringify(current),
+    });
+    if (!updated.ok) throw new Error('theme_update_failed');
+    console.log(JSON.stringify({ themed: true }));
     process.exit(0);
   }
   const request = async (path, method = 'GET', body) => {
@@ -53,7 +77,7 @@ try {
     console.log(JSON.stringify({ subject }));
   }
 } catch (error) {
-  const known = ['invalid_input', 'admin_login_failed', 'user_exists', 'user_operation_failed', 'password_too_short', 'user_missing'];
+  const known = ['invalid_input', 'admin_login_failed', 'user_exists', 'user_operation_failed', 'password_too_short', 'user_missing', 'theme_update_failed'];
   console.error(known.includes(error.message) ? error.message : 'operator_unavailable');
   process.exitCode = 1;
 }

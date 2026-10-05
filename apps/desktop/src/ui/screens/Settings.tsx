@@ -1,7 +1,7 @@
 import { SyncPanel } from '../SyncPanel';
 import { DevelopmentSync } from '../DevelopmentSync';
 import { useState } from 'react';
-import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
+import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, LockKeyhole, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
 import type { CatalogInput, Catalogs, MoneyKind } from '@lionpocket/core/types';
 import { ConfirmDialog, NumberField, SelectField } from '../components';
 
@@ -101,7 +101,11 @@ export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChan
 
       <div className="panel settings-panel">
         <header className="panel__header"><div className="settings-icon settings-icon--safe"><ShieldCheck size={20} /></div><div><h3>Privacidade local</h3><p>Você escolhe quando conectar a sincronização.</p></div></header>
-        <div className="privacy-card"><ShieldCheck size={26} /><div><strong>Banco local protegido pelo sistema</strong><p>O uso local funciona sem conta. Na beta, a sincronização opcional envia conteúdo financeiro cifrado. Banco e backups locais permanecem em claro. Para proteção contra acesso físico ao computador, mantenha a criptografia de disco do Linux ou Windows ativada.</p></div></div>
+        <ul className="privacy-facts">
+          <li><HardDrive size={18} aria-hidden="true" /><div><strong>Seus dados ficam neste aparelho</strong><p>O uso local funciona sem conta. Você escolhe se e quando configurar a sincronização.</p></div></li>
+          <li><LockKeyhole size={18} aria-hidden="true" /><div><strong>Criptografia no envio</strong><p>A sincronização opcional envia conteúdo financeiro cifrado. O servidor não recebe os dados em claro.</p></div></li>
+          <li><ShieldCheck size={18} aria-hidden="true" /><div><strong>Proteja também seu computador</strong><p>O banco e os backups locais ficam em claro. Ative a criptografia de disco do Linux ou Windows para protegê-los contra acesso físico.</p></div></li>
+        </ul>
       </div>
 
       <div className="panel settings-panel settings-panel--wide">

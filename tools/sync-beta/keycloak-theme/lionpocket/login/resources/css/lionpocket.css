@@ -1,0 +1,292 @@
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../fonts/inter.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('../fonts/bricolage-grotesque.woff2') format('woff2');
+}
+
+/* Also override the dark class: PatternFly defines its own primary/focus tokens there. */
+:root,
+:root.pf-v5-theme-dark {
+  --lp-bg: #140d13;
+  --lp-surface: #1d1420;
+  --lp-surface-2: #271a29;
+  --lp-text: #f9eff6;
+  --lp-soft: #d8bccd;
+  --lp-muted: #a0849a;
+  --lp-line: #34202f;
+  --lp-line-strong: #482b41;
+  --lp-primary: #ff4d9d;
+  --lp-primary-hover: #ff6cae;
+  --lp-primary-ink: #ff8fc2;
+  --lp-on-primary: #2f0518;
+  --lp-primary-wash: rgba(255, 77, 157, .13);
+  --lp-alert: #ff5d7e;
+  --lp-alert-wash: rgba(255, 93, 126, .14);
+  --lp-positive: #56d7ab;
+  --lp-shadow: 0 24px 70px rgba(0, 0, 0, .3);
+  --keycloak-card-top-color: transparent;
+  --pf-v5-global--FontFamily--text: 'Inter', system-ui, sans-serif;
+  --pf-v5-global--FontFamily--heading: 'Bricolage Grotesque', 'Inter', system-ui, sans-serif;
+  --pf-v5-global--primary-color--100: var(--lp-primary);
+  --pf-v5-global--primary-color--200: var(--lp-primary-hover);
+  --pf-v5-global--primary-color--dark-100: var(--lp-primary);
+  --pf-v5-global--primary-color--light-100: var(--lp-primary);
+  --pf-v5-global--link--Color: var(--lp-primary-ink);
+  --pf-v5-global--link--Color--hover: var(--lp-primary-hover);
+  --pf-v5-global--active-color--100: var(--lp-primary);
+  --pf-v5-global--danger-color--100: var(--lp-alert);
+  --pf-v5-global--danger-color--200: var(--lp-alert);
+  --pf-v5-global--BackgroundColor--100: var(--lp-surface);
+  --pf-v5-global--BackgroundColor--200: var(--lp-surface-2);
+  --pf-v5-global--Color--100: var(--lp-text);
+  --pf-v5-global--Color--200: var(--lp-soft);
+  --pf-v5-global--BorderColor--100: var(--lp-line);
+  --pf-v5-global--BorderColor--200: var(--lp-line-strong);
+  --pf-v5-global--BorderColor--300: var(--lp-line-strong);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { min-height: 100%; }
+html,
+.login-pf body,
+body#keycloak-bg {
+  margin: 0;
+  color: var(--lp-text);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  background: radial-gradient(ellipse at 50% 0%, var(--lp-primary-wash), transparent 58%), var(--lp-bg);
+}
+.pf-v5-c-login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: 40px 24px;
+  background: transparent;
+}
+.pf-v5-c-login__container {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: min(100%, 460px);
+  max-width: 460px;
+  padding: 0;
+  margin: 0;
+}
+.pf-v5-c-login__header,
+#kc-header { padding: 0; margin: 0; }
+#kc-header-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  color: var(--lp-text) !important;
+  font-family: 'Bricolage Grotesque', 'Inter', system-ui, sans-serif;
+  font-size: 28px;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: -.055em;
+  text-transform: none;
+  text-shadow: none;
+}
+#kc-header-wrapper::before {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: url('../img/lionpocket.svg') center / cover no-repeat;
+  box-shadow: 0 8px 24px rgba(194, 24, 91, .18);
+  content: '';
+}
+.pf-v5-c-login__main {
+  align-self: stretch;
+  margin: 0;
+  color: var(--lp-text);
+  overflow: hidden;
+  border: 1px solid var(--lp-line);
+  border-radius: 24px;
+  background: var(--lp-surface);
+  box-shadow: var(--lp-shadow), inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+/* The inherited styles.css draws a separate blue stripe on this header. */
+div.pf-v5-c-login__main-header,
+div.pf-v5-c-login__main-header:has(.pf-v5-c-login__main-header-utilities) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 22px;
+  padding: 22px 32px 0;
+  color: var(--lp-text);
+  border: 0;
+  background: transparent;
+}
+.pf-v5-c-login__main-header-utilities { order: -1; align-self: flex-end; }
+#kc-page-title,
+.pf-v5-c-title { margin: 0; color: var(--lp-text); font-family: 'Bricolage Grotesque', 'Inter', system-ui, sans-serif; font-size: 27px; font-weight: 700; line-height: 1.2; letter-spacing: -.04em; }
+.pf-v5-c-login__main-body { padding: 12px 32px 28px; color: var(--lp-text); background: transparent; }
+.lp-login-intro { margin: 0 0 26px; color: var(--lp-muted); font-size: 13px; line-height: 1.65; }
+.pf-v5-c-form { gap: 20px; }
+.pf-v5-c-form__group-label { padding-bottom: 8px; }
+.pf-v5-c-form__label,
+.pf-v5-c-form__label-text,
+.pf-v5-c-check__label { color: var(--lp-soft); font-size: 12px; font-weight: 550; }
+
+/* Replace the underlined PatternFly control with the app's full rounded border.
+   Both pseudo-elements must be removed, including their focused variants. */
+body .pf-v5-c-form-control {
+  min-height: 46px;
+  color: var(--lp-text);
+  border: 1px solid var(--lp-line-strong);
+  border-radius: 12px;
+  background: var(--lp-surface-2);
+  box-shadow: none;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+body .pf-v5-c-form-control::before,
+body .pf-v5-c-form-control::after,
+body .pf-v5-c-button::after { display: none; }
+body .pf-v5-c-form-control > input,
+body .pf-v5-c-form-control > select {
+  min-height: 44px;
+  padding: 10px 13px;
+  color: var(--lp-text);
+  font: 13px 'Inter', system-ui, sans-serif;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+}
+body .pf-v5-c-form-control:hover { border-color: color-mix(in srgb, var(--lp-primary) 45%, var(--lp-line-strong)); }
+body .pf-v5-c-form-control:focus-within { border-color: var(--lp-primary); box-shadow: 0 0 0 3px var(--lp-primary-wash); }
+body .pf-v5-c-form-control:has([aria-invalid='true']) { border-color: var(--lp-alert); }
+body .pf-v5-c-form-control > select { padding-right: 34px; }
+body .pf-v5-c-form-control > select > option { color: var(--lp-text); background: var(--lp-surface-2); }
+body .pf-v5-c-form-control > input:autofill {
+  -webkit-text-fill-color: var(--lp-text);
+  box-shadow: 0 0 0 100px var(--lp-surface-2) inset;
+  caret-color: var(--lp-text);
+}
+.pf-v5-c-form-control__utilities { color: var(--lp-muted); }
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control { min-height: 32px; border-color: transparent; background: transparent; }
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control > select { min-height: 30px; padding-top: 5px; padding-bottom: 5px; font-size: 11px; color: var(--lp-muted); }
+.pf-v5-c-input-group {
+  gap: 0;
+  border: 1px solid var(--lp-line-strong);
+  border-radius: 12px;
+  background: var(--lp-surface-2);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.pf-v5-c-input-group:focus-within { border-color: var(--lp-primary); box-shadow: 0 0 0 3px var(--lp-primary-wash); }
+.pf-v5-c-input-group:has([aria-invalid='true']) { border-color: var(--lp-alert); }
+body .pf-v5-c-input-group .pf-v5-c-form-control,
+body .pf-v5-c-input-group .pf-v5-c-form-control:focus-within { min-height: 44px; border: 0; background: transparent; box-shadow: none; }
+body .pf-v5-c-input-group .pf-v5-c-form-control > input { border-radius: 12px 0 0 12px; }
+body .pf-v5-c-button.pf-m-control {
+  min-height: 44px;
+  padding: 10px 14px;
+  color: var(--lp-muted);
+  border: 0;
+  border-radius: 0 12px 12px 0;
+  background: transparent;
+}
+body .pf-v5-c-button.pf-m-control:hover { color: var(--lp-primary-ink); background: var(--lp-primary-wash); }
+body .pf-v5-c-button.pf-m-primary,
+#kc-login {
+  min-height: 46px;
+  padding: 12px 18px;
+  color: var(--lp-on-primary);
+  font: 650 13px 'Inter', system-ui, sans-serif;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ff5ca4, #c2185b);
+  box-shadow: 0 8px 22px rgba(194, 24, 91, .22);
+  transition: filter 140ms ease, transform 140ms ease;
+}
+body .pf-v5-c-button.pf-m-primary:hover,
+#kc-login:hover { color: var(--lp-on-primary); filter: brightness(1.07); transform: translateY(-1px); }
+body .pf-v5-c-button:focus-visible,
+body a:focus-visible { outline: 2px solid var(--lp-primary); outline-offset: 4px; }
+body .pf-v5-c-button:disabled { color: var(--lp-on-primary); opacity: .6; filter: none; transform: none; cursor: not-allowed; }
+input::placeholder { color: var(--lp-muted); }
+input[type='checkbox'] { accent-color: var(--lp-primary); }
+a,
+a:visited,
+body .pf-v5-c-button.pf-m-link { color: var(--lp-primary-ink); }
+a:hover { color: var(--lp-primary-hover); }
+
+body .pf-v5-c-helper-text__item.pf-m-error,
+body .pf-v5-c-helper-text__item-text,
+body .pf-v5-c-form__helper-text.pf-m-error,
+#input-error { color: var(--lp-alert); font-size: 12px; line-height: 1.6; }
+body .pf-v5-c-alert { color: var(--lp-text); border: 1px solid color-mix(in srgb, var(--lp-alert) 30%, transparent); border-radius: 12px; background: var(--lp-alert-wash); }
+body .pf-v5-c-alert__title,
+.kc-feedback-text { color: var(--lp-soft); font-size: 12px; }
+body .pf-v5-c-alert__icon { color: var(--lp-alert); }
+.lp-login-privacy { display: flex; align-items: flex-start; gap: 11px; margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--lp-line); }
+.lp-login-privacy > svg { flex: 0 0 auto; margin-top: 2px; color: var(--lp-primary-ink); }
+.lp-login-privacy strong { font-size: 11.5px; font-weight: 600; }
+.lp-login-privacy p { margin: 5px 0 0; color: var(--lp-muted); font-size: 11px; line-height: 1.65; }
+.pf-v5-c-login__main-footer { color: var(--lp-muted); background: transparent; }
+.pf-v5-c-login__main-footer:empty { display: none; }
+.pf-v5-c-login__main-footer-band { padding: 16px 0 0; color: var(--lp-muted); border-color: var(--lp-line); background: transparent; }
+#kc-info,
+#kc-info-wrapper,
+#kc-registration,
+.instruction,
+.subtitle { color: var(--lp-muted); font-size: 12px; }
+#kc-social-providers svg:not(.google) { filter: none; color: var(--lp-primary-ink); }
+.pf-v5-c-menu,
+.pf-v5-c-dropdown__menu { color: var(--lp-text); border: 1px solid var(--lp-line-strong); border-radius: 12px; background: var(--lp-surface-2); box-shadow: var(--lp-shadow); }
+.pf-v5-c-menu__item { color: var(--lp-text); }
+
+@media (prefers-color-scheme: light) {
+  :root,
+  :root.pf-v5-theme-dark {
+    --lp-bg: #fdf5fa;
+    --lp-surface: #ffffff;
+    --lp-surface-2: #fdf1f7;
+    --lp-text: #2b1523;
+    --lp-soft: #6d4a5d;
+    --lp-muted: #92697f;
+    --lp-line: #f3dbe8;
+    --lp-line-strong: #e8c3d9;
+    --lp-primary: #e11d74;
+    --lp-primary-hover: #c81664;
+    --lp-primary-ink: #c2185b;
+    --lp-on-primary: #ffffff;
+    --lp-primary-wash: rgba(225, 29, 116, .09);
+    --lp-alert: #d81b52;
+    --lp-alert-wash: rgba(216, 27, 82, .11);
+    --lp-positive: #12a077;
+    --lp-shadow: 0 18px 50px rgba(90, 20, 60, .1);
+    color-scheme: light;
+  }
+}
+@media (max-width: 540px) {
+  .pf-v5-c-login { padding: 24px 16px; }
+  .pf-v5-c-login__container { gap: 24px; }
+  #kc-header-wrapper { font-size: 26px; }
+  #kc-header-wrapper::before { flex-basis: 42px; width: 42px; height: 42px; border-radius: 14px; }
+  div.pf-v5-c-login__main-header,
+  div.pf-v5-c-login__main-header:has(.pf-v5-c-login__main-header-utilities) { padding: 18px 24px 0; }
+  .pf-v5-c-login__main-body { padding: 12px 24px 24px; }
+  #kc-page-title { font-size: 25px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body .pf-v5-c-button { transition: none; }
+  #kc-login:hover { transform: none; }
+}

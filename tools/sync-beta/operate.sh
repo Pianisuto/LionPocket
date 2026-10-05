@@ -3,6 +3,25 @@
 set -euo pipefail
 runtime="${LION_BETA_RUNTIME:-$HOME/apps/lionpocket-beta/runtime}"
 cd "$runtime"
+
+apply_theme() {
+  [[ -f keycloak-theme/lionpocket/login/theme.properties ]] || {
+    printf 'Tema Keycloak do LionPocket ausente em %s/keycloak-theme/lionpocket.\n' "$runtime" >&2
+    return 1
+  }
+  docker compose up -d keycloak >/dev/null
+  local ready=0
+  for _ in {1..60}; do
+    if docker compose exec -T keycloak bash -lc '/opt/keycloak/bin/kcadm.sh config credentials --server http://127.0.0.1:8080 --realm master --user beta-admin --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null' >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 2
+  done
+  [[ "$ready" == 1 ]] || { printf 'Keycloak beta não ficou pronto para aplicar o tema.\n' >&2; return 1; }
+  docker compose exec -T keycloak bash -lc '/opt/keycloak/bin/kcadm.sh update realms/lionpocket-beta -s loginTheme=lionpocket -s displayName="LionPocket Beta" -s displayNameHtml="LionPocket Beta" -s internationalizationEnabled=true -s '"'"'supportedLocales=["pt-BR","en"]'"'"' -s defaultLocale=pt-BR >/dev/null'
+}
+
 case "${1:-}" in
   backup)
     destination="../backups/$(date -u +%Y%m%dT%H%M%SZ)"
@@ -41,7 +60,9 @@ p='.env';text=open(p).read();lines=text.splitlines();lines=[('API_IMAGE='+sys.ar
 f=open(p+'.next','w');os.chmod(p+'.next',0o600);f.write('\n'.join(lines)+'\n');f.flush();os.fsync(f.fileno());f.close();os.replace(p+'.next',p)
 PY
     docker compose up -d --wait api
+    apply_theme
     ;;
-  restart) docker compose restart api keycloak; docker compose up -d --wait api ;;
-  *) printf 'Usage: operate.sh backup | verify-backup DIR | deploy TAG | rollback TAG | restart\n' >&2; exit 2 ;;
+  restart) docker compose restart api keycloak; docker compose up -d --wait api; apply_theme ;;
+  theme) apply_theme ;;
+  *) printf 'Usage: operate.sh backup | verify-backup DIR | deploy TAG | rollback TAG | restart | theme\n' >&2; exit 2 ;;
 esac
