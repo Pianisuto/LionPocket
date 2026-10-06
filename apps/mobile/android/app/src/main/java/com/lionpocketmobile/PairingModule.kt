@@ -1,6 +1,9 @@
 package com.lionpocketmobile
 
 import android.os.Build
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -19,6 +22,18 @@ class PairingModule(context: ReactApplicationContext) : ReactContextBaseJavaModu
   private var scanning = false
   override fun getName() = "LionPocketPairing"
   override fun getConstants(): Map<String, Any> = mapOf("deviceName" to Build.MODEL.take(80))
+  @ReactMethod fun copyLink(link: String, promise: Promise) {
+    if (link.length > 4096 || !link.startsWith("lionpocket://pair/LPV2.")) {
+      promise.reject("PAIRING_COPY", "Convite inválido"); return
+    }
+    val clipboard = reactApplicationContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = ClipData.newPlainText("Convite LionPocket", link)
+    if (Build.VERSION.SDK_INT >= 33) clip.description.extras = android.os.PersistableBundle().apply {
+      putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+    }
+    clipboard.setPrimaryClip(clip)
+    promise.resolve(null)
+  }
   /** Render the local matrix in memory. Thousands of React Native views would make the QR screen sluggish. */
   @ReactMethod fun renderQr(rows: ReadableArray, promise: Promise) {
     try {

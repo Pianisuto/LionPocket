@@ -48,7 +48,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: Pianisuto
 Installed-Size: $(du -sk "$stage_dir/opt/$package_name" | cut -f1)
-Depends: libgtk-3-0, libnss3, libxss1, libasound2t64 | libasound2, libgbm1
+Depends: libgtk-3-0, libnss3, libxss1, libasound2t64 | libasound2, libgbm1, desktop-file-utils
 Description: Finanças pessoais simples, locais e bonitas
  LionPocket organiza entradas, despesas, parcelas e objetivos sem precisar de internet.
 EOF
@@ -58,7 +58,8 @@ cat > "$stage_dir/usr/share/applications/$executable.desktop" <<EOF
 Name=$app_name
 GenericName=Finanças pessoais
 Comment=Organize suas finanças pessoais
-Exec=$executable
+Exec=$executable %u
+MimeType=x-scheme-handler/lionpocket;
 Icon=$executable
 Terminal=false
 Type=Application

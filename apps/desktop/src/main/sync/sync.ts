@@ -160,5 +160,6 @@ export async function registerSyncController(bank: LionPocketDatabase) {
       }
     },
   );
+  return { inspectInvitation: async (link: string) => (await get()).inspectPairingInvitation(link) };
 }
 export type DesktopSyncStatus = SyncStatus;

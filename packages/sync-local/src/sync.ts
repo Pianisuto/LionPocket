@@ -155,6 +155,7 @@ export class SyncController {
   private cachedSession?: SyncSession;
   private pairingTimer?: ReturnType<typeof setTimeout>;
   private pairingRunning = false;
+  private invitationFlight?: Promise<SyncStatus>;
   private pairingAbort?: AbortController;
   private pairingListeners = new Set<() => void>();
   private pendingRequests: NamedPairing[] = [];
@@ -549,13 +550,14 @@ export class SyncController {
   }
   /** Foreground polling is single-flight, resumable from public metadata and protected device seeds. */
   private async pollPairing() {
-    if (this.pairingRunning || !this.coordinator.foreground) return;
+    if (this.pairingRunning || this.invitationFlight || !this.coordinator.foreground) return;
     clearTimeout(this.pairingTimer);
     this.pairingAbort = new AbortController();
     this.pairingRunning = true;
     let observe = false;
     try {
       const s = await this.options.storage.load();
+      if (this.invitationFlight) return;
       if (s?.phase === 'pairing' && s.pairingInvite) {
         observe = true;
         if (!s.pairingSubmitted) await this.submitPairing(s,this.pairingAbort.signal);
@@ -637,11 +639,18 @@ export class SyncController {
     return { id: invite.id, endpoint, vault: 'Cofre pessoal', expiresAt: invite.expiresAt };
   }
   async connectInvitation(input: string) {
-    try { return await this.beginInvitation(input); }
+    // Repeated OS delivery / double clicks share one identity and immutable request.
+    while (this.invitationFlight) await this.invitationFlight;
+    const operation = Promise.resolve().then(() => this.beginInvitation(input));
+    this.invitationFlight = operation;
+    try { return await operation; }
     catch (error) {
       if ((await this.options.storage.load())?.phase !== 'pairing') this.pairingStep = undefined;
       this.pairingError = pairingErrorMessage(error); this.pairingChanged();
       throw error;
+    } finally {
+      if (this.invitationFlight === operation) this.invitationFlight = undefined;
+      void this.pollPairing();
     }
   }
   private async beginInvitation(input: string) {
@@ -649,6 +658,7 @@ export class SyncController {
     const parsed = parsePairingInvitation(input,this.crypto());
     await this.inspectPairingInvitation(input);
     const selected = await this.options.storage.load();
+    if (selected?.phase === 'bound' && selected.pairingInvite && canonicalStringify(selected.pairingInvite) === canonicalStringify(parsed.invite)) return this.status();
     if (selected?.profile && selected.phase !== 'pairing') throw new Error('binding_mismatch');
     this.pairingStep = 'preparing'; this.pairingError = undefined; this.pairingChanged();
     const e = await this.environment(parsed.invite.endpoint);
@@ -672,8 +682,8 @@ export class SyncController {
       try { await this.options.secrets.store(d.scope('pairingCapability'),capability); } finally { this.crypto().erase(capability); }
       await this.options.storage.save(s);
     }
-    try { if (!s.pairingSubmitted) await this.submitPairing(s); this.pairingStep = 'waiting'; }
-    finally { void this.pollPairing(); }
+    if (!s.pairingSubmitted) await this.submitPairing(s);
+    this.pairingStep = 'waiting';
     return this.status();
   }
   private async submitPairing(s: SyncSaved, signal?: AbortSignal) {

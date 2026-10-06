@@ -31,7 +31,10 @@ export interface UpdateInfo {
   version: string | null;
 }
 
+export type PairingLinkEvent = { invitation: string; endpoint: string; id: string; error?: never } | { error: string; invitation?: never; endpoint?: never; id?: never };
+
 export interface LionPocketApi {
+  onPairingLink?(listener: (event: PairingLinkEvent) => void): () => void;
   onSyncChanged?(listener: () => void): () => void;
   syncStatus?(): Promise<import('@lionpocket/sync-local').SyncStatus|null>;
   syncCommand?(action:string,args:unknown[]):Promise<unknown>;

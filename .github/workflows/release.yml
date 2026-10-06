@@ -32,6 +32,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Linux desktop entry validation tools
+        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
       - run: npm run release:validate
       - name: Validate requested tag without shell interpolation
         env:
@@ -81,6 +83,9 @@ jobs:
       - name: Install Squirrel and test the installed application without downloading updates
         if: runner.os == 'Windows'
         run: node tools/release/windows-installer-smoke.cjs
+      - name: Windows installed protocol, cold/warm launch, single instance and direct LPV2 confirmation
+        if: runner.os == 'Windows'
+        run: node tools/pairing/desktop-deeplink-smoke.cjs
       - name: Prepare the packaged SUID helper in the disposable Linux runner
         if: runner.os == 'Linux'
         shell: bash
@@ -95,6 +100,11 @@ jobs:
       - name: Test packaged Electron with deliberately unavailable Linux vault
         if: runner.os == 'Linux'
         run: xvfb-run -a node tools/release/desktop-smoke.cjs
+      - name: Linux installed DEB MIME handler, cold/warm launch and direct LPV2 confirmation
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y desktop-file-utils
+          xvfb-run -a node tools/pairing/desktop-deeplink-smoke.cjs
       # Deliberately no upload-artifact, GH Release or publish step.
 
   android:

@@ -18,7 +18,8 @@ import type {
   RecurringExpense,
   Transaction,
 } from '@lionpocket/core/types';
-import type { UpdateInfo } from './api';
+import type { PairingLinkEvent, UpdateInfo } from './api';
+import { PairingOnboarding } from './ui/PairingOnboarding';
 import { Modal, MonthPicker } from './ui/components';
 import { Leo } from './ui/Leo';
 import { TitleBar } from './ui/TitleBar';
@@ -84,6 +85,10 @@ const pageCopy: Record<View, { title: string; subtitle: string }> = {
 export default function App() {
   const { theme, toggleTheme } = useTheme();
   const [view, setView] = useState<View>('dashboard');
+  const [pairingIntent, setPairingIntent] = useState<PairingLinkEvent | null>(null);
+  useEffect(() => window.lionPocket.onPairingLink?.(intent => {
+    setPairingIntent(previous => previous?.invitation && previous.invitation === intent.invitation ? previous : intent);
+  }), []);
   const [month, setMonth] = useState(currentMonthIso);
   const [catalogs, setCatalogs] = useState<Catalogs>(emptyCatalogs);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -183,6 +188,9 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {pairingIntent && <Modal title={pairingIntent.error ? 'Não foi possível abrir o convite' : 'Conectar a este cofre'} onClose={() => setPairingIntent(null)}>
+        <PairingOnboarding intent={pairingIntent} onCancel={() => setPairingIntent(null)} />
+      </Modal>}
       <TitleBar
         theme={theme}
         onToggleTheme={toggleTheme}

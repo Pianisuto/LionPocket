@@ -456,8 +456,8 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
           )}
           <SyncSection
             icon={Link2}
-            title="Conectar com convite"
-            description="Cole o link do aparelho conectado."
+            title="Colar convite"
+            description="Se o link não abrir o aplicativo, cole o convite do aparelho conectado."
           >
             <label className="field">
               <span>Convite do cofre</span>
@@ -671,7 +671,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                 {adding && status.pairingRequests.length === 0 && (
                   <>
                     <p>
-                      Escaneie no outro aparelho. Convite válido por 15 minutos
+                      Escaneie com outro celular ou abra o link no computador. Convite válido por 15 minutos
                       e para um aparelho.
                     </p>
                     {pairingLink && <PairingQR link={pairingLink} />}
@@ -694,6 +694,10 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                       >
                         Compartilhar convite
                       </button>
+                      <button
+                        className="button"
+                        onClick={() => void navigator.clipboard.writeText(pairingLink)}
+                      >Copiar convite</button>
                       <button
                         className="button"
                         disabled={busy}

@@ -1,6 +1,6 @@
 # Pareamento de aparelhos por convite LPV2
 
-O fluxo normal tem quatro ações humanas, contando a leitura do QR:
+Desktop → Mobile mantém quatro ações humanas, contando a leitura do QR:
 
 1. No aparelho que criou o cofre, abrir **Adicionar aparelho**.
 2. No novo aparelho, escanear o QR ou abrir o link.
@@ -9,9 +9,29 @@ O fluxo normal tem quatro ações humanas, contando a leitura do QR:
 
 O restante é automático: discovery, validação do servidor, preparação de identidade, pedido, consulta de aprovação, registry, grant, delivery selada, checkpoints, backup local, vinculação e primeiro sync. Não há login no aparelho novo, campos de fingerprint ou botões para conferir convite, buscar pedidos, entregar/receber chave. As decisões que permanecem são escolher o cofre e autorizar acesso. Comparar o código não exige digitá-lo nem abrir outra tela.
 
+## Dois caminhos naturais com o mesmo LPV2
+
+**Desktop → Mobile:** Adicionar aparelho no Desktop → mostrar QR Code → celular escaneia → Conectar → aprovar no Desktop.
+
+**Mobile → Desktop:** Adicionar aparelho no celular → Compartilhar convite ou Copiar link → abrir o link no computador → Conectar → aprovar no celular. O Desktop recebe a chave e faz o primeiro sync automaticamente. A transferência inclui compartilhar/copiar e abrir o link; não é preciso escolher antecipadamente o tipo de aparelho destino.
+
+Nos dois aparelhos, a apresentação diz **“Escaneie com outro celular ou abra o link no computador”**, mantém QR local, Compartilhar convite, Copiar link e Copiar convite, e informa a validade de 15 minutos. No Android, a cópia usa o clipboard nativo com indicação de conteúdo sensível quando disponível. A UI não mostra o LPV2 bruto. **Colar convite** continua sendo fallback universal caso o sistema/aplicativo de mensagens não abra o link.
+
+### Entrada direta no Desktop instalado
+
+`lionpocket://pair/LPV2....` é o mesmo formato usado no Android, QR, clipboard e compartilhamento. O Desktop valida assinatura, capability, finalidade, versão, endpoint e expiração antes de mostrar **Conectar a este cofre**, domínio do servidor e somente **Cancelar / Conectar**. Não exige Configurações, Sincronização, Tenho convite, Conferir convite, câmera ou fingerprint. Somente **Conectar** cria o pedido; abrir ou cancelar o link não prepara identidade, entrega chave ou autoriza acesso. A revogação/consumo são verificados pelo servidor no pedido autenticado, sem criar uma API anônima de consulta ou relaxar as regras LPV2.
+
+O processo principal recebe o URI de `argv` na abertura fria, encaminha `second-instance` para a instância que possui `requestSingleInstanceLock`, restaura/foca a janela e também registra `open-url` para macOS. Um processo secundário termina antes de abrir banco, registrar IPC ou criar janela. A caixa de entrada conserva o convite em memória até o renderer confirmar o recebimento, inclusive durante o ciclo de subscribe/unsubscribe do React StrictMode. Validações antigas não substituem um link mais recente. Não há URI como navegação web, persistência extra da capability, impressão de argumentos ou segunda instância duradoura.
+
+- **Linux / Zorin / Ubuntu-like:** o `.deb` produzido por `build-linux-deb.sh` instala `MimeType=x-scheme-handler/lionpocket;`, `Exec=lionpocket %u` (ou `lionpocket-beta %u`), executável/atalho e atualização do banco de desktop no postinst/postrm. `desktop-file-utils` é dependência do pacote. Funciona através do handler MIME do ambiente instalado, sem `npm run dev`.
+- **Windows:** o executável instalado registra o protocolo com `setAsDefaultProtocolClient` durante Squirrel install/update/primeira execução e inicialização normal; uninstall remove o registro. O instalador mantém atalhos e o comando aponta para o executável instalado, com URI como argumento. O tratamento local de Squirrel evita o log de `argv[1]` que a dependência anterior fazia sob `DEBUG`.
+- Normal e beta usam o mesmo scheme; a associação selecionada no sistema determina qual instalação abre o link. O modo de desenvolvimento não substitui essa associação.
+
+Após Conectar, a UI mostra **Aguardando aprovação no outro aparelho…** e o SAS para comparação visual, sem digitação. Cliques concorrentes são serializados e preservam identidade/pedido imutável; reabrir o mesmo convite em espera ou depois da aprovação não cria outro pedido. Grant, delivery, TrustPin, checkpoints, replay, revogação e approval continuam protegidos pelo fluxo existente.
+
 ## Antes e depois
 
-A sequência relatada no pedido tem 13 interações no aplicativo: nove no aparelho novo e quatro no autorizado, incluindo preencher servidor/convite/códigos e os botões intermediários. Logins OIDC, troca de aparelho e navegação adicional ficam fora dessa contagem; portanto ela é conservadora. O fluxo LPV2 tem quatro ações no total, incluindo escanear: duas no aparelho novo e duas no autorizado. O E2E aciona as telas reais e exige exatamente essa sequência.
+A sequência relatada no pedido tem 13 interações no aplicativo: nove no aparelho novo e quatro no autorizado, incluindo preencher servidor/convite/códigos e os botões intermediários. Logins OIDC, troca de aparelho e navegação adicional ficam fora dessa contagem; portanto ela é conservadora. Desktop → Mobile tem quatro ações no total, incluindo escanear: duas no aparelho novo e duas no autorizado. O E2E preserva essa sequência; um segundo E2E monta Android fundador → Desktop novo com compartilhar/copiar e abertura pelo handler do sistema.
 
 A primeira configuração também foi reduzida: **Configurar sincronização → URL HTTPS → Conectar → login OIDC → sincronização pronta**. Conectar inclui criar o cofre e fazer backup/vincular; discovery e preparação de chaves não são decisões humanas separadas.
 
@@ -64,7 +84,7 @@ LPV1 permanece metadata pública para recuperação e contratos antigos. Não re
 
 Servidor e aplicativos precisam da versão com `pairingVersion=2` para o fluxo novo. `controlVersion`, protocolo financeiro e schema de domínio não mudam. A migração PostgreSQL é aditiva/idempotente: tabela `sync_pairing_invites` e campos de convite/nome/autenticação/recusa em `sync_pairings`. Não há nova configuração OIDC, conta compartilhada, porta, serviço ou segredo no `.env`. Atualize a imagem com `./lpctl up`, preservando identidade/epoch, volumes e backups. Clientes antigos seguem nas rotas antigas; servidor antigo recebe mensagem de atualização no pareamento LPV2. Android precisa ser recompilado para registrar o deep link e o módulo de QR.
 
-O leitor integrado usa [Google Code Scanner](https://developers.google.com/ml-kit/vision/barcode-scanning/code-scanner), processa no aparelho e depende do módulo Play Services. Sem esse módulo, pode-se usar a câmera externa que abre o link ou colar o convite. Desktop exibe QR, copia link e usa compartilhamento quando o ambiente oferece essa API; câmera desktop fica fora deste PR.
+O leitor integrado usa [Google Code Scanner](https://developers.google.com/ml-kit/vision/barcode-scanning/code-scanner), processa no aparelho e depende do módulo Play Services. Sem esse módulo, pode-se usar a câmera externa que abre o link ou colar o convite. Desktop exibe QR, copia link e usa compartilhamento quando o ambiente oferece essa API. Ao receber o link, abre diretamente a confirmação; câmera ou leitor de QR no computador não são necessários.
 
 ## Evidências e limites dos testes
 
@@ -82,18 +102,26 @@ O leitor integrado usa [Google Code Scanner](https://developers.google.com/ml-ki
 | Servidor malicioso/downgrade | Autenticação de capability alterada/removida não produz delivery |
 | Upgrade do owner | Perfil sem novo transporte passa a grant/prova sem outro login |
 
+A matriz adicional cobre os 17 requisitos Desktop/Mobile: abertura fria/quente e instância única; confirmação direta; convite inválido/expirado/revogado; cancelar sem pedido; duplo clique/link repetido; registro Windows/Linux; Android → Desktop sem QR; Desktop → Android por QR preservado; colagem manual; logs sem capability e ausência de chave/acesso antes de aprovação. Os testes de erros UI usam assinatura e revogação reais, além dos contratos negativos existentes.
+
+`apps/desktop/src/main/pairingLinks.test.ts` cobre os eventos do Electron, registro Squirrel, caixa de entrada, erros e retomada do renderer. `squirrelStartup.test.ts` cobre atalhos e ausência de logs. `tools/release/protocol-registration.test.cjs` constrói e inspeciona DEBs normal/beta e valida o desktop entry/cache, não apenas o texto-fonte.
+
+`tools/pairing/desktop-deeplink-smoke.cjs` usa o aplicativo empacotado e o handler do SO, verificando abertura fria/quente, mesmo PID/uma janela, confirmação direta sem inputs/câmera, cancelamento, expiração, convite inválido, ausência de pedido/acesso antes da confirmação e logs sem capability. O workflow instala o `.deb` com dpkg no Linux e usa o Squirrel instalado no Windows. Localmente, `--deb-extracted` registra o desktop entry do `.deb` extraído em diretórios XDG temporários, preservando a instalação/dados do usuário; `--packaged` testa argv sem associação do SO. O teste nativo não substitui o E2E completo de approval/chave/primeiro sync.
+
 `tools/pairing/android-deeplink-smoke.cjs` abre um LPV2 sintético no APK normal instalado, usando usuário Android temporário em emulador descartável, e verifica um único **Conectar**, domínio obtido do convite e ausência de segredo nos logs da aplicação. O workflow Android executa o teste depois de preservar/verificar fixtures de atualização. Não simula câmera física nem afirma um teste de pareamento completo entre aparelhos físicos.
 
-Verificação visual: painel Desktop no preview e modal no Android instalado. Capturas usam somente dados sintéticos; a imagem de aprovação não contém capability.
+Verificação visual: painel Desktop, confirmação de deep link no Desktop empacotado e modal no Android instalado. Capturas usam somente dados sintéticos; a imagem de aprovação não contém capability.
 
 ![Aprovação Desktop com nome e código curto](images/pairing-desktop-approval.png)
 
+![Deep link abre diretamente a confirmação Desktop](images/pairing-desktop-confirmation.png)
+
 ![Deep link abre diretamente a confirmação Android](images/pairing-android-confirmation.png)
 
-Validação executada nesta mudança:
+Validação do LPV2 e da melhoria Desktop (ver descrição do PR para a execução mais recente):
 
-- `npm test`: 543 testes passaram; suítes de integração ficam opt-in nesse comando.
-- `npm run sync:dev:test`: 80 testes passaram, incluindo dez novos casos LPV2; um teste de skew precisa do artefato antigo que o workflow prepara e ficou skipped localmente.
+- `npm test`: validação completa local; suítes de integração ficam opt-in nesse comando. Contagens finais estão na descrição do PR.
+- `npm run sync:dev:test`: inclui os E2Es Desktop → Android por QR e Android fundador → Desktop por link, fallback e erros amigáveis reais. Um teste de skew precisa do artefato antigo que o workflow prepara e fica skipped localmente.
 - `npm run typecheck`, lint sem erros e `git diff --check`.
 - `npm run sync:self-hosted:validate`, 25 testes de operação e smoke completo com TLS, contas, LPV2, privacidade, offline e restauração E1 → E2 → E3.
 - Android debug e release com assinatura explícita de desenvolvimento; deep link no APK normal instalado em emulador Android 36. Câmera física e pareamento entre aparelhos físicos não foram executados localmente.

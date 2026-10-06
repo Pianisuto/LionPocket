@@ -5,6 +5,9 @@ import {
   type ReactTestRenderer,
   type ReactTestInstance,
 } from 'react-test-renderer';
+import { PairingOnboarding } from '../../desktop/src/ui/PairingOnboarding';
+import { handlePairingInstances, PairingLinkInbox } from '../../desktop/src/main/pairingLinks';
+import type { PairingLinkEvent } from '../../desktop/src/api';
 import { SyncPanel as DesktopSyncPanel } from '../../desktop/src/ui/SyncPanel';
 import { SyncPanel as MobileSyncPanel } from '../../mobile/src/ui/SyncPanel';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -18,6 +21,7 @@ import {
   pairingCapabilityInput,
   parsePairingInvitation,
   pairingLink,
+  inviteSigningInput,
   type HttpProof,
 } from '@lionpocket/sync-protocol';
 import {
@@ -51,7 +55,8 @@ vi.mock('react-native', () => ({
   TextInput: 'mobile-input',
   View: 'mobile-view',
   Share: { share: vi.fn() },
-  NativeModules: {},
+  Image: 'mobile-image',
+  NativeModules: { LionPocketPairing: { renderQr: vi.fn(async () => 'data:image/png;base64,synthetic'), copyLink: vi.fn(async () => undefined), scan: vi.fn(async () => { throw new Error('Camera must not be needed'); }) } },
 }));
 vi.mock('../../mobile/src/ui/components', async () => {
   const React = await import('react');
@@ -489,6 +494,156 @@ describe.skipIf(!enabled)(
         vi.unstubAllGlobals();
         a.sync.setForeground(false);
         b.sync.setForeground(false);
+      }
+    }, 30000);
+
+    it('E2E ANDROID FUNDADOR → DESKTOP NOVO: share/copy → OS deep link → Conectar → Aprovar → key and first sync, without camera/manual paste/OIDC', async () => {
+      const a = await owner('android'), b = await client('desktop');
+      const commands: string[] = [], actions: string[] = [];
+      let mobile: ReactTestRenderer | undefined, desktop: ReactTestRenderer | undefined;
+      const { NativeModules, Share } = await import('react-native');
+      const events = new Map<string, (...args: any[]) => void>();
+      let intent: PairingLinkEvent | null = null;
+      const command = async (action: string, args: unknown[]) => {
+        commands.push(action);
+        if (action === 'pairing-connect') return b.sync.connectInvitation(String(args[0]));
+        throw new Error('Desktop must not need intermediate commands: ' + action);
+      };
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      vi.stubGlobal('window', { lionPocket: { syncStatus: () => b.sync.status(), syncCommand: command, onSyncChanged: (f: () => void) => b.sync.subscribe(f) } });
+      mobileRuntime.controller = a.sync;
+      const mobileButton = (label: string) => mobile!.root.findAll(node => node.type === ('mobile-button' as unknown) && node.props.label === label)[0];
+      const desktopButton = (label: string) => desktop!.root.findAllByType('button').find(node => renderedText(node) === label)!;
+      const flush = async <T>(read: () => T) => { await act(async () => { /* Flush pending UI effects. */ }); return read(); };
+      const inbox = new PairingLinkInbox(link => b.sync.inspectPairingInvitation(link), () => { intent = inbox.take(); });
+      const open = async (link: string) => {
+        events.get('second-instance')!({}, ['installed-lionpocket', link]);
+        await expect.poll(() => intent).toBeTruthy();
+        await act(async () => { desktop = create(React.createElement(PairingOnboarding, { intent: intent!, onCancel: () => { intent = null; } })); });
+        await expect.poll(() => flush(() => !!desktopButton('Conectar'))).toBe(true);
+      };
+      try {
+        handlePairingInstances({ requestSingleInstanceLock: () => true, quit: () => { throw new Error('Primary must remain open'); }, on: (event, f) => events.set(event, f) }, [], link => { void inbox.receive(link); }, () => { /* The test renderer has no native window to focus. */ });
+        await act(async () => { mobile = create(React.createElement(MobileSyncPanel, { onChanged: async () => undefined })); });
+        await expect.poll(() => flush(() => !!mobileButton('Adicionar aparelho'))).toBe(true);
+        actions.push('Android: Adicionar aparelho');
+        await act(async () => mobileButton('Adicionar aparelho').props.onPress());
+        await expect.poll(() => flush(() => !!mobileButton('Compartilhar convite'))).toBe(true);
+        actions.push('Android: Compartilhar convite / Copiar link');
+        await act(async () => mobileButton('Compartilhar convite').props.onPress());
+        const link = vi.mocked(Share.share).mock.calls.at(-1)![0].message!;
+        await act(async () => mobileButton('Copiar link').props.onPress());
+        expect(NativeModules.LionPocketPairing.copyLink).toHaveBeenLastCalledWith(link);
+        expect(renderedText(mobile!.root)).not.toContain('LPV2.');
+        actions.push('Desktop: abrir deep link pelo handler do SO');
+        await open(link);
+        expect(renderedText(desktop!.root)).toContain(new URL(endpoint).host);
+        expect(desktop!.root.findAllByType('textarea')).toHaveLength(0);
+        expect(desktop!.root.findAllByType('input')).toHaveLength(0);
+        expect(renderedText(desktop!.root)).not.toMatch(/LPV2\.|QR|câmera|fingerprint|Conferir convite/);
+        expect(b.profile()).toBeNull();
+        expect((await a.sync.status()).pairingRequests).toHaveLength(0);
+        // Cancelling is purely UI: no identity, request, key or access is created.
+        await act(async () => desktopButton('Cancelar').props.onClick());
+        expect(intent).toBeNull(); expect(b.profile()).toBeNull(); expect(commands).toEqual([]);
+        await act(async () => desktop!.unmount());
+        await open(link);
+        actions.push('Desktop: Conectar');
+        await act(async () => {
+          const click = desktopButton('Conectar').props.onClick;
+          click(); click(); // Rapid double click, same render.
+        });
+        await expect.poll(() => flush(() => !!mobileButton('Aprovar aparelho')), { timeout: 15000 }).toBe(true);
+        expect(commands).toEqual(['pairing-connect']);
+        const device = new DeviceProvisioning(b.profile().profile!, b.secrets, crypto);
+        expect(await b.secrets.load(device.scope('dataKey'))).toBeNull();
+        expect((await send(device, `/v2/pair/${b.profile().pairingInvite!.id}/status`, {})).body).toEqual({ state: 'waiting' });
+        const deviceId = b.profile().profile!.deviceId;
+        await Promise.all([b.sync.connectInvitation(link), b.sync.connectInvitation(link), b.sync.connectInvitation(link)]);
+        expect(b.profile().profile!.deviceId).toBe(deviceId);
+        expect((await a.sync.status()).pairingRequests).toHaveLength(1);
+        events.get('second-instance')!({}, ['installed-lionpocket', link]);
+        expect((await a.sync.status()).pairingRequests).toHaveLength(1);
+        expect(renderedText(desktop!.root)).toContain((await a.sync.status()).pairingRequests[0].securityCode!);
+        actions.push('Android: Aprovar aparelho');
+        await act(async () => mobileButton('Aprovar aparelho').props.onPress());
+        await expect.poll(() => flush(() => renderedText(desktop!.root).includes('Sincronização pronta')), { timeout: 15000 }).toBe(true);
+        expect(await b.secrets.load(device.scope('dataKey'))).not.toBeNull();
+        expect(await b.rows()).toMatchObject([{ description: 'E2EE pairing canary 🦁' }]);
+        expect(b.login).not.toHaveBeenCalled();
+        expect(NativeModules.LionPocketPairing.scan).not.toHaveBeenCalled();
+        expect(actions).toHaveLength(5);
+        await b.sync.connectInvitation(link); // Reopening after approval cannot create another request.
+        expect(b.profile().phase).toBe('bound');
+      } finally {
+        await act(async () => { mobile?.unmount(); desktop?.unmount(); });
+        mobileRuntime.controller = undefined; vi.unstubAllGlobals();
+        a.sync.setForeground(false); b.sync.setForeground(false);
+      }
+    }, 30000);
+
+    it('Desktop manual paste remains universal fallback and automatically validates without another review button', async () => {
+      const a = await owner('android'), b = await client('desktop'), { link } = await a.sync.createInvitation();
+      let desktop: ReactTestRenderer | undefined;
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      vi.stubGlobal('window', { lionPocket: { syncStatus: () => b.sync.status(), onSyncChanged: (f: () => void) => b.sync.subscribe(f), syncCommand: async (action: string, args: unknown[]) => {
+        if (action === 'pairing-inspect') return b.sync.inspectPairingInvitation(String(args[0]));
+        if (action === 'pairing-connect') return b.sync.connectInvitation(String(args[0]));
+        throw new Error('Unexpected fallback command');
+      } } });
+      try {
+        await act(async () => { desktop = create(React.createElement(DesktopSyncPanel, { onChanged: async () => undefined })); });
+        await expect.poll(async () => { await act(async () => { /* Flush pending UI effects. */ }); return desktop!.root.findAllByType('textarea').length; }).toBe(1);
+        await act(async () => desktop!.root.findByType('textarea').props.onChange({ target: { value: link } }));
+        await expect.poll(async () => { await act(async () => { /* Flush pending UI effects. */ }); return renderedText(desktop!.root).includes(new URL(endpoint).host); }).toBe(true);
+        const connect = desktop!.root.findAllByType('button').find(n => renderedText(n) === 'Conectar')!;
+        await act(async () => connect.props.onClick());
+        await expect.poll(async () => (await a.sync.status()).pairingRequests.length, { timeout: 15000 }).toBe(1);
+        expect(b.login).not.toHaveBeenCalled();
+      } finally {
+        await act(async () => desktop?.unmount()); vi.unstubAllGlobals(); a.sync.setForeground(false); b.sync.setForeground(false);
+      }
+    }, 30000);
+
+    it.each(['invalid', 'expired', 'revoked'] as const)('Desktop OS invite %s shows a friendly error and grants no access', async kind => {
+      const a = await owner('android'), b = await client('desktop');
+      let { link } = await a.sync.createInvitation();
+      if (kind === 'invalid') link = 'lionpocket://pair/LPV2.invalid';
+      if (kind === 'expired') {
+        const parsed = parsePairingInvitation(link, crypto);
+        const { signature: _signature, ...unsigned } = parsed.invite;
+        unsigned.expiresAt = Date.now() - 1;
+        const device = new DeviceProvisioning(a.profile().profile!, a.secrets, crypto);
+        const authority = await a.secrets.load(device.scope('authoritySeed'));
+        try { parsed.invite = { ...unsigned, signature: crypto.sign(inviteSigningInput(unsigned), authority!) }; }
+        finally { crypto.erase(authority!); }
+        link = pairingLink(parsed, crypto);
+      }
+      if (kind === 'revoked') await a.sync.cancelInvitation();
+      const inbox = new PairingLinkInbox(value => b.sync.inspectPairingInvitation(value), () => { /* UI reads the validated inbox below. */ });
+      await inbox.receive(link);
+      let desktop: ReactTestRenderer | undefined;
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      vi.stubGlobal('window', { lionPocket: { syncStatus: () => b.sync.status(), onSyncChanged: (f: () => void) => b.sync.subscribe(f), syncCommand: (_action: string, args: unknown[]) => b.sync.connectInvitation(String(args[0])) } });
+      try {
+        await act(async () => { desktop = create(React.createElement(PairingOnboarding, { intent: inbox.take()!, onCancel: () => { /* No network mutation on close. */ } })); });
+        const button = () => desktop!.root.findAllByType('button').find(n => renderedText(n) === 'Conectar');
+        if (kind === 'revoked') {
+          // Revocation is authoritative on the server, and is checked when Conectar submits the proof.
+          await expect.poll(async () => { await act(async () => { /* Flush status load. */ }); return !button()?.props.disabled; }).toBe(true);
+          await act(async () => button()!.props.onClick());
+        } else expect(button()).toBeUndefined();
+        const expected = { invalid: 'Convite inválido', expired: 'Convite expirado', revoked: 'Convite cancelado' }[kind];
+        await expect.poll(async () => { await act(async () => { /* Flush rejection UI. */ }); return renderedText(desktop!.root); }).toContain(expected);
+        expect(renderedText(desktop!.root)).not.toContain('LPV2.');
+        expect((await a.sync.status()).pairingRequests).toHaveLength(0);
+        expect(b.login).not.toHaveBeenCalled();
+        if (b.profile()?.profile) {
+          const device = new DeviceProvisioning(b.profile().profile!, b.secrets, crypto);
+          expect(await b.secrets.load(device.scope('dataKey'))).toBeNull();
+        } else expect(b.profile()).toBeNull();
+      } finally {
+        await act(async () => desktop?.unmount()); vi.unstubAllGlobals(); a.sync.setForeground(false); b.sync.setForeground(false);
       }
     }, 30000);
 

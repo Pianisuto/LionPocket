@@ -415,8 +415,9 @@ export function SyncPanel({
             )}
             {status.owner && adding && status.pairingRequests.length === 0 && (
               <>
-                <Text style={styles.heading}>Escaneie no outro aparelho</Text>
+                <Text style={styles.heading}>Adicionar aparelho</Text>
                 {!!pairingLink && <PairingQR link={pairingLink} />}
+                <Text style={styles.text}>Escaneie com outro celular ou abra o link no computador.</Text>
                 <Text style={styles.muted}>
                   Convite válido por 15 minutos e para um aparelho.
                 </Text>
@@ -424,9 +425,8 @@ export function SyncPanel({
                   label="Compartilhar convite"
                   onPress={() => void Share.share({ message: pairingLink })}
                 />
-                <Text style={styles.text} selectable>
-                  {pairingLink}
-                </Text>
+                <Button label="Copiar link" onPress={() => act(() => NativeModules.LionPocketPairing.copyLink(pairingLink))} />
+                <Button label="Copiar convite" onPress={() => act(() => NativeModules.LionPocketPairing.copyLink(pairingLink))} />
                 <Button
                   label="Cancelar convite"
                   disabled={busy}

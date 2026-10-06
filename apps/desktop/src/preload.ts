@@ -2,6 +2,18 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { LionPocketApi, UpdateInfo, WindowState } from './api';
 
 const api: LionPocketApi = {
+  onPairingLink: (listener) => {
+    let disposed = false;
+    const drain = () => { void ipcRenderer.invoke('pairing:pending').then(delivery => {
+      if (!disposed && delivery) {
+        listener(delivery.event);
+        void ipcRenderer.invoke('pairing:ack', delivery.generation);
+      }
+    }); };
+    ipcRenderer.on('pairing:available', drain);
+    drain();
+    return () => { disposed = true; ipcRenderer.removeListener('pairing:available', drain); };
+  },
   onSyncChanged: (listener) => {
     ipcRenderer.on('sync:changed', listener);
     return () => ipcRenderer.removeListener('sync:changed', listener);
