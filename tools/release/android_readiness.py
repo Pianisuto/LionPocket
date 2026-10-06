@@ -7,8 +7,42 @@ import re
 import shlex
 import subprocess
 import time
+import sys
 
 PACKAGES = ('com.lionpocketmobile', 'com.lionpocketmobile.beta')
+
+
+def emulator_read(serial, *args, binary=False, timeout=30, clock=time.monotonic,
+                  sleep=time.sleep, execute=subprocess.check_output):
+    """Await transport recovery for a read only; never repeat product mutations."""
+    if not serial.startswith('emulator-'):
+        raise ValueError('Disposable emulator only')
+    safe = (len(args) == 3 and args[:2] == ('exec-out', 'cat') and
+            re.fullmatch(r'/data/user/0/[\w.]+/files/lionpocket\.sqlite(?:-wal|-shm)?', args[2])) or (
+        len(args) == 2 and args[0] == 'shell' and (
+            re.fullmatch(r'pidof [\w.]+ \|\| true', args[1]) or
+            re.fullmatch(r'stat -c %u(?::%i)? /data/user/0/[\w.]+', args[1]) or
+            re.fullmatch(r'if \[ -f /data/user/0/[\w.]+/files/lionpocket\.sqlite-(?:wal|shm) \]; then echo yes; fi', args[1])))
+    if not safe:
+        raise ValueError('Only known read operations can await ADB transport')
+    started = clock()
+    warned = False
+    while True:
+        try:
+            result = execute(['adb', '-s', serial, *args], text=not binary,
+                             stderr=subprocess.PIPE, timeout=min(5, max(.01, timeout - (clock() - started))))
+            return result if binary else result.strip()
+        except subprocess.CalledProcessError as error:
+            message = error.stderr or ''
+            if isinstance(message, bytes):
+                message = message.decode(errors='replace')
+            transient = re.search(r'device offline|device .* not found|error: closed', message)
+            if not transient or clock() - started >= timeout:
+                raise
+            if not warned:
+                print('Disposable emulator ADB offline; awaiting read transport only.', file=sys.stderr, flush=True)
+                warned = True
+            sleep(min(.25, max(0, timeout - (clock() - started))))
 
 
 def prepare_emulator_root(serial, *, timeout=20, clock=time.monotonic,
@@ -39,7 +73,7 @@ def prepare_emulator_root(serial, *, timeout=20, clock=time.monotonic,
     raise AssertionError('Disposable emulator ADB/root setup timed out: ' + last_error)
 
 
-def wait_for_readiness(observe, diagnostics, *, expected=8, legacy=False,
+def wait_for_readiness(observe, diagnostics, *, expected, legacy=False,
                        expected_failure=None, timeout=60, clock=time.monotonic, sleep=time.sleep):
     started = clock()
     last = {}
@@ -73,10 +107,13 @@ def wait_for_readiness(observe, diagnostics, *, expected=8, legacy=False,
 
 
 class EmulatorDatabase:
-    def __init__(self, serial, package):
+    def __init__(self, serial, package, expected):
         if not serial.startswith('emulator-') or package not in PACKAGES:
             raise ValueError('Disposable LionPocket emulator only')
         self.serial, self.package = serial, package
+        if not isinstance(expected, int) or expected < 1:
+            raise ValueError('Expected Mobile schema required')
+        self.expected = expected
         self.directory = '/data/user/0/' + package
         self.target = self.directory + '/files/lionpocket.sqlite'
         if self.shell('getprop ro.kernel.qemu') != '1':
@@ -118,7 +155,8 @@ class EmulatorDatabase:
             own = '\n'.join(line for line in logs.splitlines()
                             if re.search(r'\s' + pid + r'\s+\d+\s+[VDIWEF]\s', line))
             result['running'] = 'Running "LionPocketMobile"' in own
-            result['ready'] = result['running'] if legacy else '[LionPocket] database ready: lionpocket.sqlite schema=8' in own
+            marker = '[LionPocket] database ready: lionpocket.sqlite schema=' + str(self.expected)
+            result['ready'] = result['running'] if legacy else bool(re.search(re.escape(marker) + r'(?!\d)', own))
             result['failed'] = '[LionPocket] database initialization failed: lionpocket.sqlite' in own
             if result['failed']:
                 result['failureText'] = own
@@ -142,7 +180,9 @@ class EmulatorDatabase:
                 output[name] = str(error)
         return output
 
-    def start_and_wait(self, legacy=False, timeout=60, expected=8, expected_failure=None):
+    def start_and_wait(self, legacy=False, timeout=60, expected=None, expected_failure=None):
+        if expected is None:
+            expected = self.expected
         self.adb('logcat', '-c')
         try:
             # Await Android's single launch; never restart the product to make a check pass.

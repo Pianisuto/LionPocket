@@ -49,6 +49,27 @@ afterEach(() => {
 });
 
 describe('planejamento SQLite local', () => {
+  it.each([false, true])('uses the Desktop date fallback without rewriting nullable storage (card: %s)', async card => {
+    const { repository: r, sqlite } = await open();
+    let cardId: string | undefined;
+    if (card) {
+      await r.createCatalog({ type: 'card', name: 'Card', dueDay: 10 });
+      cardId = (await r.catalogs()).cards[0].id;
+    }
+    await r.saveRecurring(recurring({ startMonth: '2026-02', dueDay: 31, chargeDay: 15, cardId }));
+    sqlite.exec('UPDATE recurring_expenses SET start_date=NULL');
+    expect(await r.listRecurring()).toMatchObject([{ startDate: card ? '2026-02-15' : '2026-02-28' }]);
+    await r.list({ month: '2026-03' });
+    expect(sqlite.prepare('SELECT start_date FROM recurring_expenses').get()).toMatchObject({ start_date: null });
+  });
+  it('allows a replacement of a deleted occurrence while preventing two live occurrences', async () => {
+    const { sqlite } = await open();
+    const insert = sqlite.prepare(`INSERT INTO transactions(id,kind,description,planned_amount_cents,due_date,status,source_type,source_id,occurrence_date,deleted_at)
+      VALUES(?,'expense','Occurrence',0,?,'planned','recurring','series','2026-10-10',?)`);
+    insert.run('deleted', '2026-10-10', '2026-10-01');
+    insert.run('replacement', '2026-10-11', null);
+    expect(() => insert.run('duplicate', '2026-10-12', null)).toThrow('UNIQUE');
+  });
   it('migra v2 com vínculos, valores realizados e exclusões intactos; reabre tudo em disco', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lion-mobile-'));
     directories.push(dir);

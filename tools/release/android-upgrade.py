@@ -4,7 +4,7 @@ Requires old APKs supplied by the operator (or generated from the base revision)
 No clear-storage, uninstall, downgrade, personal data or signature workaround.
 """
 import argparse, json, pathlib, sqlite3, subprocess, tempfile
-from android_readiness import EmulatorDatabase, prepare_emulator_root
+from android_readiness import EmulatorDatabase, prepare_emulator_root, emulator_read
 
 p = argparse.ArgumentParser()
 p.add_argument('--serial', required=True)
@@ -20,29 +20,37 @@ if not a.serial.startswith('emulator-'):
 fixtures = pathlib.Path(a.fixtures).resolve()
 if not fixtures.name.startswith('lion-release-fixtures-') or fixtures.parent != pathlib.Path(tempfile.gettempdir()):
     raise SystemExit('Disposable fixture directory required.')
+metadata = json.loads((fixtures / 'metadata.json').read_text())
+expected_schema = metadata['currentSchemaVersion']
+versions = metadata['versions']
+if not isinstance(expected_schema, int) or expected_schema < 8 or expected_schema not in versions:
+    raise SystemExit('Current Mobile schema metadata required.')
 def adb(*args, binary=False):
+    if binary:
+        return emulator_read(a.serial, *args, binary=True)
     return subprocess.check_output(['adb', '-s', a.serial, *args], text=not binary).strip() if not binary else subprocess.check_output(['adb', '-s', a.serial, *args])
 def shell(command): return adb('shell', command)
+def read_shell(command): return emulator_read(a.serial, 'shell', command)
 prepare_emulator_root(a.serial)
 results = []
 for pkg, old, new, versions in [
-    ('com.lionpocketmobile', a.old_normal, a.new_normal, [1, 4, 5, 8]),
-    ('com.lionpocketmobile.beta', a.old_beta, a.new_beta, [8]),
+    ('com.lionpocketmobile', a.old_normal, a.new_normal, versions),
+    ('com.lionpocketmobile.beta', a.old_beta, a.new_beta, list(dict.fromkeys([8, expected_schema]))),
 ]:
     # Refuse any already-present package in this emulator at the start.
     if shell('pm path ' + pkg + ' || true'): raise SystemExit('Use a fresh disposable AVD without LionPocket packages.')
     install_old = adb('install', old)
-    observer = EmulatorDatabase(a.serial, pkg)
+    observer = EmulatorDatabase(a.serial, pkg, expected_schema)
     try:
-        observer.start_and_wait(legacy=True)
+        observer.start_and_wait(legacy=True, expected=8)
     finally:
         adb('shell', 'am', 'force-stop', pkg)
-    uid = shell('stat -c %u /data/user/0/' + pkg)
-    storage = shell('stat -c %u:%i /data/user/0/' + pkg)
+    uid = read_shell('stat -c %u /data/user/0/' + pkg)
+    storage = read_shell('stat -c %u:%i /data/user/0/' + pkg)
     for index, version in enumerate(versions):
         # Fixture injection is offline preparation, before replacement. No user storage is cleared.
         target = '/data/user/0/' + pkg + '/files/lionpocket.sqlite'
-        if shell('pidof ' + pkg + ' || true'):
+        if read_shell('pidof ' + pkg + ' || true'):
             raise AssertionError('Fixture injection requires a stopped process')
         src = fixtures / ('v' + str(version) + '.sqlite')
         shell('mkdir -p /data/user/0/' + pkg + '/files')
@@ -61,20 +69,20 @@ for pkg, old, new, versions in [
             print(json.dumps(dict(package=pkg, sourceSchema=version, readiness=readiness, evidence=evidence)), flush=True)
         finally:
             adb('shell', 'am', 'force-stop', pkg)
-        if shell('pidof ' + pkg + ' || true'):
+        if read_shell('pidof ' + pkg + ' || true'):
             raise AssertionError('Cannot extract a live database')
-        if shell('stat -c %u:%i /data/user/0/' + pkg) != storage:
+        if read_shell('stat -c %u:%i /data/user/0/' + pkg) != storage:
             raise AssertionError('Replacement removed or changed package storage')
         with tempfile.TemporaryDirectory(prefix='lion-release-extracted-') as temp:
             local = pathlib.Path(temp) / 'after.sqlite'
             local.write_bytes(adb('exec-out', 'cat', target, binary=True))
             # Keep committed WAL for a consistent read after force-stop.
             for suffix in ['-wal', '-shm']:
-                if shell('if [ -f ' + target + suffix + ' ]; then echo yes; fi') == 'yes':
+                if read_shell('if [ -f ' + target + suffix + ' ]; then echo yes; fi') == 'yes':
                     (pathlib.Path(str(local) + suffix)).write_bytes(adb('exec-out', 'cat', target + suffix, binary=True))
             db = sqlite3.connect(local)
             current = db.execute('PRAGMA user_version').fetchone()[0]
-            if current != 8: raise AssertionError('Product did not migrate fixture v' + str(version) + ': ' + str(current))
+            if current != expected_schema: raise AssertionError('Product did not migrate fixture v' + str(version) + ': ' + str(current))
             checks = 0
             for table in before['tables']:
                 names = table['columns']

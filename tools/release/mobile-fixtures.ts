@@ -17,7 +17,8 @@ async function main() {
   if (!process.argv[2] || relative(tmpdir(), directory).includes(sep) || !/^lion-release-fixtures-/.test(relative(tmpdir(), directory))) throw new Error('Disposable fixture directory required.');
   if (existsSync(directory) && (realpathSync(directory) !== directory || readdirSync(directory).length)) throw new Error('Fresh empty disposable fixture directory required.');
   mkdirSync(directory, { recursive: true });
-  for (const version of [1, 4, 5, 8]) {
+  const versions = [...new Set([1, 4, 5, 8, migrations.length])];
+  for (const version of versions) {
     const { db, sqlite } = sqliteTestConnection(join(directory, `v${version}.sqlite`));
     try {
       if (version < 8) {
@@ -30,13 +31,20 @@ async function main() {
         // Avoid time-dependent creation of new projection-cache rows when product UI opens.
         if (version >= 4) sqlite.exec('UPDATE recurring_expenses SET active=0');
       } else {
-        await migrate(db);
+        // Build the historical v8 fixture as v8 even when the product advances.
+        const later = (migrations as string[][]).splice(version);
+        try { await migrate(db); }
+        finally { (migrations as string[][]).push(...later); }
         await sodium.ready;
         const repo = new MobileRepository(db, randomUUID), adapter = mobileSyncDatabase(db);
         await repo.enableSyntheticManualSyncPilot();
         const { client } = await founder(new ProvisioningCrypto(sodium));
         await adapter.run(bindSynthetic(client.profile, 'https://fixture.invalid', randomUUID()));
         await repo.save({ kind: 'expense', description: 'Fixture zero/null 🍋', plannedAmount: 0, actualAmount: null, dueDate: '2026-08-12', status: 'planned' });
+        if (version >= 9) {
+          await repo.saveRecurring({ kind: 'expense', active: false, description: 'Fixture nullable schedule', plannedAmount: 0, startMonth: '2026-02', dueDay: 31 });
+          sqlite.exec('UPDATE recurring_expenses SET start_date=NULL');
+        }
         await repo.save({ kind: 'expense', description: 'Fixture tombstone', plannedAmount: 12.34, actualAmount: 0, dueDate: '2026-08-12', status: 'paid', settledDate: '2026-08-12' });
         const [deleted] = await adapter.read("SELECT id FROM transactions WHERE description='Fixture tombstone'");
         await repo.remove(String(deleted.id));
@@ -52,6 +60,8 @@ async function main() {
       if (sqlite.prepare('PRAGMA integrity_check').get()?.integrity_check !== 'ok' || sqlite.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Bad fixture.');
     } finally { sqlite.close(); }
   }
-  console.log(JSON.stringify({ directory, versions: [1, 4, 5, 8], syntheticOnly: true }));
+  const metadata = { directory, versions, currentSchemaVersion: migrations.length, syntheticOnly: true };
+  writeFileSync(join(directory, 'metadata.json'), JSON.stringify(metadata, null, 2));
+  console.log(JSON.stringify(metadata));
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

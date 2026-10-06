@@ -3,6 +3,7 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
+import { financialTriggers, financialTableTypes } from '@lionpocket/sync-local';
 import { migrations, migrate } from './migrations';
 import { sqliteTestConnection } from './sqliteTestConnection';
 import { captureBackup, loadBackupData, restoreBackup, verifyDatabase } from './backupRepository';
@@ -21,7 +22,51 @@ function fixture(version: number) {
   return native;
 }
 function empty() { const native = sqliteTestConnection(); connections.push(native.sqlite); return native; }
+async function version8() {
+  const native = fixture(4);
+  for (const statements of migrations.slice(4, 8))
+    for (const sql of statements) await native.db.executeAsync(sql);
+  const columns: Record<string, string[]> = {};
+  for (const table of Object.keys(financialTableTypes))
+    columns[table] = native.sqlite.prepare(`PRAGMA table_info(${table})`).all().map(row => String(row.name));
+  for (const sql of financialTriggers('android', columns)) native.sqlite.exec(sql);
+  native.sqlite.exec('PRAGMA user_version=8');
+  return native;
+}
 describe('fixtures históricas e preparação aditiva mobile', () => {
+  it('v8 → v9 preserves financial rows, priorities, sync state and queues without recording migration writes', async () => {
+    const { db, sqlite } = await version8();
+    sqlite.exec("UPDATE sync_local_state SET mode='financial',local_scope_id='00000000-0000-4000-8000-000000000001'");
+    const before = captureDatabaseManifest(sqlite);
+    const protect = vi.fn(async () => { expect(captureDatabaseManifest(sqlite)).toEqual(before); });
+    await migrate(db, protect);
+    expect(protect).toHaveBeenCalledTimes(1);
+    expect(projectLegacyColumns(sqlite, before)).toEqual(before.tables.map(({ name, columns, rows }) => ({ name, columns, rows })));
+    await verifyDatabase(db, migrations.length);
+    sqlite.exec("UPDATE recurring_expenses SET start_date=NULL WHERE id='legacy-recurring'");
+    expect(sqlite.prepare("SELECT start_date FROM recurring_expenses WHERE id='legacy-recurring'").get()).toMatchObject({ start_date: null });
+    expect(sqlite.prepare("SELECT operation FROM sync_dirty WHERE table_name='recurring_expenses' AND local_id='legacy-recurring'").get()).toMatchObject({ operation: 'update' });
+    sqlite.exec("UPDATE recurring_transaction_priorities SET position=position WHERE recurring_id='legacy-recurring'");
+    expect(sqlite.prepare("SELECT operation FROM sync_dirty WHERE table_name='recurring_transaction_priorities'").get()).toMatchObject({ operation: 'update' });
+  });
+  it('a late v9 failure restores v8 rows, constraints, capture triggers and version', async () => {
+    const { db, sqlite } = await version8();
+    const before = captureDatabaseManifest(sqlite);
+    const originalTransaction = db.transaction.bind(db);
+    db.transaction = action => originalTransaction(async tx => {
+      const execute = tx.executeAsync.bind(tx);
+      tx.executeAsync = (async (...args: Parameters<typeof tx.executeAsync>) => {
+        const result = await execute(...args);
+        if (args[0] === 'PRAGMA user_version = 9') throw new Error('Late v9 failure');
+        return result;
+      }) as typeof tx.executeAsync;
+      return action(tx);
+    });
+    await expect(migrate(db, async () => {})).rejects.toThrow('Late v9 failure');
+    expect(captureDatabaseManifest(sqlite)).toEqual(before);
+    await verifyDatabase(db, 8);
+    expect(() => sqlite.exec("UPDATE recurring_expenses SET start_date=NULL")).toThrow('NOT NULL');
+  });
   it.each([1, 2, 3, 4])('migra e restaura v%i conservando cada valor de cada coluna antiga', async (version) => {
     const { db, sqlite } = fixture(version), before = captureDatabaseManifest(sqlite);
     const protect = vi.fn(async () => {

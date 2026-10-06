@@ -2,10 +2,48 @@ import unittest
 import subprocess
 from unittest.mock import Mock, patch
 
-from android_readiness import EmulatorDatabase, prepare_emulator_root, wait_for_readiness
+from android_readiness import EmulatorDatabase, prepare_emulator_root, wait_for_readiness, emulator_read
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_offline_read_recovers_without_restarting_or_writing(self):
+        now = [0]
+        command = ('exec-out', 'cat', '/data/user/0/com.lionpocketmobile/files/lionpocket.sqlite')
+        execute = Mock(side_effect=[subprocess.CalledProcessError(1, 'adb', stderr=b'adb: device offline'), b'SQLite bytes\n'])
+        result = emulator_read('emulator-5554', *command, binary=True,
+                               clock=lambda: now[0], sleep=lambda seconds: now.__setitem__(0, now[0] + seconds), execute=execute)
+        self.assertEqual(result, b'SQLite bytes\n')
+        self.assertEqual(now[0], .25)
+        self.assertEqual(execute.call_count, 2)
+        for call in execute.call_args_list:
+            self.assertEqual(call.args[0], ['adb', '-s', 'emulator-5554', *command])
+            self.assertEqual(call.kwargs['stderr'], subprocess.PIPE)
+            self.assertFalse(call.kwargs['text'])
+
+    def test_offline_read_timeout_fails_and_permission_error_is_not_retried(self):
+        now = [0]
+        command = ('shell', 'stat -c %u /data/user/0/com.lionpocketmobile')
+        execute = Mock(side_effect=subprocess.CalledProcessError(1, 'adb', stderr='adb: device offline'))
+        with self.assertRaises(subprocess.CalledProcessError):
+            emulator_read('emulator-5554', *command, timeout=1,
+                          clock=lambda: now[0], sleep=lambda seconds: now.__setitem__(0, now[0] + seconds), execute=execute)
+        self.assertEqual(now[0], 1)
+        execute = Mock(side_effect=subprocess.CalledProcessError(1, 'adb', stderr='Permission denied'))
+        with self.assertRaises(subprocess.CalledProcessError):
+            emulator_read('emulator-5554', *command, execute=execute)
+        execute.assert_called_once()
+
+    def test_transport_wait_refuses_physical_devices_and_mutations(self):
+        execute = Mock()
+        for serial, args in [('phone', ('shell', 'stat -c %u /data/user/0/com.lionpocketmobile')),
+                             ('emulator-5554', ('install', '-r', '/fixture.apk')),
+                             ('emulator-5554', ('shell', 'am force-stop com.lionpocketmobile')),
+                             ('emulator-5554', ('shell', 'stat -c %u /data/user/0/pkg; reboot')),
+                             ('emulator-5554', ('exec-out', 'cat', '--help'))]:
+            with self.assertRaises(ValueError):
+                emulator_read(serial, *args, execute=execute)
+        execute.assert_not_called()
+
     def test_closed_adb_root_connection_requires_reconnected_root_and_boot(self):
         now, rooted, commands = [0], [False], []
         def execute(args, **kwargs):
@@ -45,6 +83,7 @@ class ReadinessTests(unittest.TestCase):
     def test_activity_launch_is_awaited_once_and_still_requires_database_readiness(self):
         observer = object.__new__(EmulatorDatabase)
         observer.package = 'com.lionpocketmobile'
+        observer.expected = 9
         observer.adb = Mock(return_value='Status: ok')
         observer.observe = Mock()
         observer.diagnostics = Mock(return_value={})
@@ -54,11 +93,12 @@ class ReadinessTests(unittest.TestCase):
                                      'com.lionpocketmobile/com.lionpocketmobile.MainActivity', timeout=40)
         self.assertEqual(observer.adb.call_count, 2)  # clear logs and exactly one launch
         self.assertEqual(wait.call_args.kwargs['timeout'], 40)
-        self.assertEqual(wait.call_args.kwargs['expected'], 8)
+        self.assertEqual(wait.call_args.kwargs['expected'], 9)
 
     def test_launch_timeout_fails_without_relaunch_and_preserves_diagnostics(self):
         observer = object.__new__(EmulatorDatabase)
         observer.package = 'com.lionpocketmobile'
+        observer.expected = 9
         observer.adb = Mock(side_effect=['', subprocess.TimeoutExpired('am start', 1)])
         observer.diagnostics = Mock(return_value={'logcat': 'FATAL EXCEPTION from app UID'})
         with self.assertRaisesRegex(AssertionError, 'FATAL EXCEPTION from app UID'):
@@ -78,7 +118,7 @@ class ReadinessTests(unittest.TestCase):
         self.now = 0
         def sleep(seconds):
             self.now += seconds
-        return wait_for_readiness(observe, diagnostics, timeout=timeout,
+        return wait_for_readiness(observe, diagnostics, expected=8, timeout=timeout,
                                   clock=lambda: self.now, sleep=sleep)
 
     def test_delayed_startup_beyond_old_six_second_cutoff(self):
@@ -134,6 +174,7 @@ class ReadinessTests(unittest.TestCase):
     def test_stale_ready_marker_from_previous_pid_is_rejected(self):
         observer = object.__new__(EmulatorDatabase)
         observer.package = 'com.lionpocketmobile'
+        observer.expected = 8
         observer.target = '/data/user/0/com.lionpocketmobile/files/lionpocket.sqlite'
         observer.schema = lambda: 8
         def shell(command):
@@ -148,6 +189,21 @@ class ReadinessTests(unittest.TestCase):
         self.assertTrue(observer.observe()['ready'])
         observer.shell = lambda command: '65079:573568\n65079:999999' if command.startswith('stat') else shell(command)
         self.assertFalse(observer.observe()['opened'])
+
+    def test_current_schema_marker_is_configurable_and_requires_exact_version(self):
+        observer = object.__new__(EmulatorDatabase)
+        observer.package, observer.target, observer.expected = 'com.lionpocketmobile', '/fixture', 9
+        observer.schema = lambda: 9
+        logs = ['schema=9']
+        def shell(command):
+            if command.startswith('pidof'): return '124'
+            if command.startswith('stat'): return '65079:573568\n65079:573568'
+            return '10-02 12:00:00.001  124  300 I ReactNativeJS: [LionPocket] database ready: lionpocket.sqlite ' + logs[0]
+        observer.shell = shell
+        self.assertTrue(observer.observe()['ready'])
+        for wrong in ['schema=8', 'schema=90']:
+            logs[0] = wrong
+            self.assertFalse(observer.observe()['ready'])
 
     def test_observer_reads_as_app_uid_with_sqlite_readonly_not_live_file_copy(self):
         observer = object.__new__(EmulatorDatabase)

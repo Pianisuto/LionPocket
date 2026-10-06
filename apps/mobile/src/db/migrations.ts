@@ -142,12 +142,31 @@ const parityMigration = [
   ...rebuiltTables.map((table) => `DROP TABLE parity_${table}`),
   `CREATE TABLE local_preferences (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)`,
 ];
+// The financial protocol permits an unknown historical start date. Keep that
+// value instead of changing the schedule while receiving a Desktop baseline.
+const nullableScheduleMigration = [
+  'CREATE TEMP TABLE schedule_recurring AS SELECT * FROM recurring_expenses',
+  'CREATE TEMP TABLE schedule_priorities AS SELECT * FROM recurring_transaction_priorities',
+  'DROP TABLE recurring_transaction_priorities',
+  'DROP TABLE recurring_expenses',
+  ...parityMigration.filter(sql => sql.startsWith('CREATE TABLE recurring_expenses ('))
+    .map(sql => sql.replace('start_date TEXT NOT NULL', 'start_date TEXT')),
+  ...previousMigrations.flat().filter(sql => sql.startsWith('CREATE TABLE recurring_transaction_priorities (')),
+  'INSERT INTO recurring_expenses SELECT * FROM schedule_recurring',
+  'INSERT INTO recurring_transaction_priorities SELECT * FROM schedule_priorities',
+  'DROP TABLE schedule_priorities',
+  'DROP TABLE schedule_recurring',
+  'DROP INDEX transactions_recurring_occurrence_unique',
+  `CREATE UNIQUE INDEX transactions_recurring_occurrence_unique ON transactions(source_id, occurrence_date)
+    WHERE source_type = 'recurring' AND occurrence_date IS NOT NULL AND deleted_at IS NULL`,
+];
 export const migrations: ReadonlyArray<ReadonlyArray<string>> = [
   ...previousMigrations,
   parityMigration,
   syncMigration,
   transportMigration,
   financialMigration,
+  nullableScheduleMigration,
 ];
 
 export async function migrate(
@@ -184,9 +203,12 @@ export async function migrate(
         throw new Error(
           'A atualização não pôde preservar as referências do banco.',
         );
-      if (index === 7) {
+      if (index >= 7) {
         const columns: Record<string, string[]> = {};
         for (const table of Object.keys(financialTableTypes)) columns[table] = (await tx.executeAsync<{ name: string }>(`PRAGMA table_info(${table})`)).rows._array.map(r => r.name);
+        for (const table of Object.keys(financialTableTypes))
+          for (const action of ['insert', 'update', 'delete'])
+            await tx.executeAsync(`DROP TRIGGER IF EXISTS sync_capture_${table}_${action}`);
         for (const statement of financialTriggers('android', columns)) await tx.executeAsync(statement);
       }
       await tx.executeAsync(`PRAGMA user_version = ${index + 1}`);

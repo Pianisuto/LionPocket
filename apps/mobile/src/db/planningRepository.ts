@@ -3,6 +3,7 @@ import {
   addDays,
   addMonths,
   calculateGoal,
+  dateForMonthDay,
   fixedRecurringDates,
   fromCents,
   monthRange,
@@ -60,7 +61,8 @@ export class PlanningRepository {
 
   private async recurring(db: Query): Promise<RecurringExpense[]> {
     const result = await db.executeAsync<
-      Omit<RecurringExpense, 'active' | 'anchorToActual' | 'manualMonths'> & {
+      Omit<RecurringExpense, 'active' | 'anchorToActual' | 'manualMonths' | 'startDate'> & {
+        startDate: string | null;
         active: number;
         anchorToActual: number;
         manualMonths: string;
@@ -79,6 +81,10 @@ export class PlanningRepository {
     return result.rows._array.map(
       ({ plannedCents, active, anchorToActual, manualMonths, ...row }) => ({
         ...row,
+        startDate: row.startDate ?? dateForMonthDay(
+          row.startMonth,
+          row.cardId && row.chargeDay !== null ? row.chargeDay : row.dueDay,
+        ),
         active: Boolean(active),
         anchorToActual: Boolean(anchorToActual),
         manualMonths: manualMonths.split(',').filter(Boolean),

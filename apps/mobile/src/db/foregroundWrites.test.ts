@@ -110,7 +110,7 @@ describe('native financial post-commit notification', () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(await bank.repo.list({ month: '2026-10' })).toHaveLength(1);
   });
-  it('applying a signed encrypted inbox on the native transaction adapter emits no local-write notification', async () => {
+  it.each([false, true])('applying a signed encrypted inbox emits no local-write notification (nullable recurring date: %s)', async (nullableRecurring) => {
     const bank = await setup(false);
     // Reuse actual sodium/signatures and a real desktop sender, while keeping native types isolated.
     const sodium = (await import('libsodium-wrappers-sumo')).default;
@@ -131,6 +131,13 @@ describe('native financial post-commit notification', () => {
     const source = new LionPocketDatabase(':memory:');
     cleanups.push(() => source.db.close());
     source.db.exec('DELETE FROM categories; DELETE FROM payment_methods;');
+    if (nullableRecurring) {
+      source.saveRecurringExpense({
+        kind: 'expense', active: false, description: 'Historical recurrence',
+        startMonth: '2026-02', dueDay: 31, plannedAmount: 0,
+      });
+      source.db.exec('UPDATE recurring_expenses SET start_date=NULL');
+    }
     await source
       .syncDatabase()
       .run(
@@ -149,10 +156,13 @@ describe('native financial post-commit notification', () => {
       'desktop',
       'https://fixture.invalid',
     );
-    const id = String(
-      source.db.prepare('SELECT commit_id FROM sync_outbox').get()!.commit_id,
-    );
-    const envelope = JSON.parse(await sender.prepare(id));
+    const envelopes = [];
+    for (const row of source.db.prepare('SELECT commit_id FROM sync_outbox ORDER BY rowid').all()) {
+      envelopes.push({
+        envelope: JSON.parse(await sender.prepare(String(row.commit_id))),
+        logPosition: String(envelopes.length + 1), acceptedRegistryVersion: '1',
+      });
+    }
     // The receiving financial bank uses the sender's pinned vault/device for this isolated fixture.
     await mobileSyncDatabase(bank.db).run(
       startFinancialBaseline(
@@ -173,9 +183,9 @@ describe('native financial post-commit notification', () => {
       receivePage(
         binding,
         '0',
-        '1',
-        '1',
-        [{ envelope, logPosition: '1', acceptedRegistryVersion: '1' }],
+        String(envelopes.length),
+        String(envelopes.length),
+        envelopes,
         false,
       ),
     );
@@ -187,6 +197,22 @@ describe('native financial post-commit notification', () => {
       'https://fixture.invalid',
     ).applyInbox();
     expect(await bank.repo.list({ month: '2026-10' })).toHaveLength(1);
+    if (nullableRecurring) {
+      expect(bank.sqlite.prepare('SELECT start_date FROM recurring_expenses').get())
+        .toMatchObject({ start_date: null });
+      expect(await bank.repo.listRecurring()).toMatchObject([
+        { startDate: '2026-02-28', plannedAmount: 0, active: false },
+      ]);
+      const snapshot = await import('./backupRepository');
+      const backup = await snapshot.captureBackup(bank.db);
+      const restored = await setup(false);
+      const stage = sqliteTestConnection();
+      cleanups.push(() => stage.sqlite.close());
+      const hydrated = await snapshot.loadBackupData(stage.db, backup.data, backup.schemaVersion);
+      await snapshot.restoreBackup(restored.db, hydrated, async () => {});
+      expect(restored.sqlite.prepare('SELECT start_date FROM recurring_expenses').get())
+        .toMatchObject({ start_date: null });
+    }
     expect(listener).not.toHaveBeenCalled();
     expect(bank.sqlite.prepare('SELECT * FROM sync_outbox').all()).toEqual(
       before,

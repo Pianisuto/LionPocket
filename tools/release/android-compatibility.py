@@ -4,6 +4,7 @@ import argparse, json, pathlib, sqlite3, subprocess, tempfile
 from android_readiness import EmulatorDatabase
 p = argparse.ArgumentParser()
 p.add_argument('--serial', required=True)
+p.add_argument('--expected-schema', required=True, type=int)
 p.add_argument('--mismatch-apk', required=True)
 p.add_argument('--new-normal')
 p.add_argument('--new-beta')
@@ -35,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix='lion-release-compatibility-') as direct
         before, _ = snapshot(pkg, directory)
         if new:
             result = adb('install', '-r', new).decode()
-            EmulatorDatabase(a.serial, pkg).start_and_wait()
+            EmulatorDatabase(a.serial, pkg, a.expected_schema).start_and_wait()
             after, _ = snapshot(pkg, directory)
             if before != after: raise AssertionError('Final APK changed synthetic database')
             reports.append(dict(package=pkg, finalApkReplacement='Success', allTablesPreserved=True))
@@ -58,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='lion-release-compatibility-') as direct
     future, _ = snapshot(pkg, directory)
     # A schema-99 file remaining unchanged is not proof that the app opened it.
     # Require the real initialization's explicit future-schema rejection.
-    readiness = EmulatorDatabase(a.serial, pkg).start_and_wait(expected=99, expected_failure='O banco foi criado por uma versão mais nova do LionPocket.')
+    readiness = EmulatorDatabase(a.serial, pkg, a.expected_schema).start_and_wait(expected=99, expected_failure='O banco foi criado por uma versão mais nova do LionPocket.')
     opened, _ = snapshot(pkg, directory)
     if future != opened or opened['version'] != 99: raise AssertionError('Future schema was modified')
     reports.append(dict(futureSchema=99, allTablesPreserved=True, versionPreserved=True, integrity='ok', foreignKeyViolations=0, readiness=readiness))

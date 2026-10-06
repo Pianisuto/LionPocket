@@ -35,6 +35,17 @@ export function* reissueForKeyVersion(
         expectedHeads?: string[];
       }[];
     };
+    const envelope = old.envelope_json == null
+      ? null
+      : JSON.parse(String(old.envelope_json)) as { keyVersion: number };
+    const affected = pending.operations.some(op =>
+      [...op.parents, ...(op.expectedHeads ?? []), ...op.revision.dependencies.map(d => d.revisionId)]
+        .some(id => mapped.has(id)),
+    );
+    // Plaintext drafts have never used the old key. Preserve their causal IDs;
+    // prepare() encrypts them with the current key. A descendant of a reissued
+    // encrypted revision still needs remapping, as before.
+    if ((!envelope || envelope.keyVersion === keyVersion) && !affected) continue;
     const accepted = yield sql(
       'SELECT revision_id FROM sync_revision_origin WHERE revision_id=? AND log_position IS NOT NULL',
       [pending.operations[0].opId],
