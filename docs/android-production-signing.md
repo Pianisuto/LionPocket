@@ -21,23 +21,18 @@ Faça pelo menos um backup independente e cifrado dos **dois arquivos**. Perder 
 
 O SHA-256 do certificado é público e pode ser registrado em documentação/checks de release. A chave e as senhas são privadas.
 
-## 2. Configurar GitHub Actions
+## 2. Build local com assinatura de produção
 
-Com GitHub CLI autenticado:
+GitHub Actions está desativado e o workflow de publicação foi removido. Preserve a chave permanente e suas senhas fora do checkout. Configure um arquivo privado com `storeFile`, `storePassword`, `keyAlias`, `keyPassword` e `certificateSha256`, conforme as propriedades aceitas pelo Gradle; nunca adicione esse arquivo ao Git.
 
 ```sh
-bash tools/release/configure-github-signing-secrets.sh
+export LIONPOCKET_ANDROID_SIGNING_FILE=/caminho/privado/production-signing.properties
+export LIONPOCKET_ANDROID_CERTIFICATE_SHA256=<fingerprint-permanente>
+npm run mobile:build:android:release
+node tools/release/android-production-candidate.cjs
 ```
 
-O helper lê o arquivo privado e envia por stdin os seguintes repository secrets, sem imprimir seus valores:
-
-- `LIONPOCKET_ANDROID_KEYSTORE_BASE64`
-- `LIONPOCKET_ANDROID_STORE_PASSWORD`
-- `LIONPOCKET_ANDROID_KEY_ALIAS`
-- `LIONPOCKET_ANDROID_KEY_PASSWORD`
-- `LIONPOCKET_ANDROID_CERTIFICATE_SHA256`
-
-A CI materializa o keystore somente no diretório temporário do runner. Builds normais de produção recusam assinatura ausente, certificado debug e fingerprint divergente.
+O build recusa assinatura ausente, certificado debug e fingerprint divergente. O pipeline `validate:local` usa exclusivamente identidades de desenvolvimento/efêmeras de teste e não publica esse candidato.
 
 ## 3. Primeira migração de instalações antigas
 
@@ -46,7 +41,7 @@ As instalações anteriores à v0.3.11 podem estar assinadas pela chave pública
 Antes de desinstalar uma instalação antiga que contenha dados:
 
 1. em **Dados locais**, salve um backup SQLite em arquivo externo;
-2. se já usa sync, guarde também código de recuperação, convite e URL do servidor, ou mantenha outro aparelho autorizado;
+2. se já usa sync, guarde também pacote LPR1 e código de recuperação, ou mantenha outro aparelho autorizado;
 3. confira que o arquivo externo está acessível;
 4. desinstale o app antigo;
 5. instale o APK de produção v0.3.11;
@@ -57,32 +52,13 @@ O restore local desabilita transporte restaurado para não reutilizar secrets re
 
 Depois dessa migração única, releases futuras assinadas pela mesma identidade podem atualizar normalmente.
 
-## 4. Publicar uma release
+## 4. Publicação explícita
 
-O workflow público é propositalmente manual e só aceita `main`.
+A publicação é uma operação separada dos hooks de validação, feita somente após aprovação do proprietário. Não há workflow GitHub para disparar.
 
-Exemplo para v0.3.11:
+1. Execute o [pipeline local](local-validation.md) e registre também os ensaios Windows em host descartável.
+2. Construa Linux/Windows normais e o Android com a identidade permanente; confira certificados, versões e checksums.
+3. Prepare manifest/checksums com `tools/release/publication-metadata.cjs`, usando o SHA exato de `main` e a versão aprovada.
+4. Somente depois da autorização explícita, crie a tag/release e envie os artefatos revisados pela operação manual. Não reutilize tag ou substitua release existente.
 
-```sh
-gh workflow run publish-release.yml \
-  --repo Pianisuto/LionPocket \
-  --ref main \
-  -f version=0.3.11 \
-  -f 'confirm=PUBLICAR v0.3.11'
-```
-
-Acompanhe:
-
-```sh
-gh run watch --repo Pianisuto/LionPocket
-```
-
-O workflow:
-
-- revalida suíte/versão;
-- constrói Linux e Windows normais;
-- constrói e verifica o APK com a identidade permanente;
-- publica checksums e manifest;
-- cria a tag e GitHub Release no SHA exato de `main`.
-
-A tag da release é também a versão oficial do servidor self-hosted. O servidor é instalado a partir do source archive/tag e compila a imagem da API localmente.
+A tag publicada também identifica o source do servidor self-hosted, cuja imagem é compilada localmente.

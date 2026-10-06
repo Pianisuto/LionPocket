@@ -33,6 +33,12 @@
     "sync:self-hosted:validate": "python3 tools/self-hosted/validate.py",
     "sync:self-hosted:unit": "python3 -m unittest discover -s tools/self-hosted -p 'test_*.py'",
     "sync:self-hosted:test": "npm run sync:self-hosted:unit && python3 tools/self-hosted/smoke.py",
-    "sync:self-hosted:typecheck": "tsc -p tools/self-hosted/tsconfig.json"
+    "sync:self-hosted:typecheck": "tsc -p tools/self-hosted/tsconfig.json",
+    "prepare": "node tools/local-validation/install-hooks.cjs",
+    "hooks:install": "node tools/local-validation/install-hooks.cjs",
+    "validate:local": "node tools/local-validation/run.cjs",
+    "validate:checks": "node tools/local-validation/run.cjs --checks-only",
+    "validate:android": "node tools/local-validation/run.cjs --android-only",
+    "validate:plan": "node tools/local-validation/run.cjs --plan"
   }
 }

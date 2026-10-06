@@ -94,13 +94,13 @@ node tools/release/validate.cjs v0.3.10
 node tools/release/checksums.cjs /caminho/candidatos .apk
 ```
 
-`.github/workflows/release.yml` verifica PR/main/tag ou dispatch: suíte, typecheck, lint, PostgreSQL/Keycloak, Linux/Windows em ambos os canais, Android debug e releases de teste, assinatura ausente/externa, APK replacement em emulador descartável. Tag ou tag solicitada divergente falha. Gera SHA256SUMS e manifest de fonte/versão/canal. Não tem permissão contents:write, etapa publish, upload-artifact nem criação de GitHub Release. Binários ficam no runner e são descartados. Publicação futura será uma decisão externa; este pipeline não transforma merge/tag em autorização.
+GitHub Actions está desativado e os workflows foram removidos. O [pipeline local](local-validation.md) executa suíte, typecheck, lint, integração, self-hosted, Linux normal/beta e Android com preservação de SQLite. Windows instalado/DPAPI exige host Windows descartável. Checksums e versão continuam validados pelos scripts existentes. Não há publicação automática, upload, criação de tag ou release; hooks verificam o conteúdo exato antes de commit/push.
 
 O smoke do binário desktop seleciona **exclusivamente** diretório aleatório `lion-release-smoke-*` sob tmp; compara cada registro legado, verifica integridade/FKs, abre renderer e usa o cofre real (DPAPI Windows ou recusa basic_text Linux). Testes unitários do cofre são identificados como mocks, sem substituir o smoke real. O teste Windows da beta também exercita persistência do perfil, agora sem fsync de diretório incompatível.
 
 ## Compatibilidade e preservação
 
-Protocolo wire **1** e domainSchema **1** permanecem. Servidor anuncia campos adicionais `protocolVersion=1`, `domainSchema=1` no discovery; servidor anterior sem esses campos mantém o baseline controlVersion 1. Não muda envelope, E2EE, pais, conflicts, outbox/inbox, pareamento, recovery ou debounce.
+Protocolo wire **1** e domainSchema **1** permanecem. Servidor anuncia `protocolVersion=1`, `domainSchema=1` e exige `controlVersion=2`. Clientes/servidores incompatíveis são bloqueados. Não muda envelope, E2EE, pais, conflicts, outbox/inbox, pareamento, recovery ou debounce.
 
 
 ## Pendências antes de beta pública

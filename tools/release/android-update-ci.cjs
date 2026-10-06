@@ -5,10 +5,10 @@ const { validate } = require('./validate.cjs');
 const root = resolve(__dirname, '../..'), version = validate().version;
 const candidate = beta => join(root, 'release-candidates', beta ? 'private-beta' : 'normal', `LionPocket${beta ? '-Beta' : ''}-Android-${version}-DEVELOPMENT-ONLY.apk`);
 const serial = process.env.ANDROID_SERIAL || 'emulator-5554';
-const preparationReport = '/tmp/lionpocket-android-preparation-secrets.json';
+const preparationReport = process.env.LIONPOCKET_ANDROID_PREPARATION_REPORT || '/tmp/lionpocket-android-preparation-secrets.json';
 rmSync(preparationReport, { force: true });
-execFileSync('python3', [join(__dirname, 'android-upgrade.py'), '--serial', serial, '--fixtures', '/tmp/lion-release-fixtures-ci', '--old-normal', join(root, 'release-candidates/base-normal.apk'), '--new-normal', candidate(false), '--old-beta', join(root, 'release-candidates/base-beta.apk'), '--new-beta', candidate(true), '--report', '/tmp/android-upgrades.json'], { stdio: 'inherit' });
-execFileSync('python3', [join(__dirname, 'android-compatibility.py'), '--serial', serial, '--mismatch-apk', '/tmp/LionPocket-EPHEMERAL-ONLY.apk', '--report', '/tmp/android-compatibility.json'], { stdio: 'inherit' });
+execFileSync('python3', [join(__dirname, 'android-upgrade.py'), '--serial', serial, '--fixtures', process.env.LIONPOCKET_ANDROID_FIXTURES || '/tmp/lion-release-fixtures-ci', '--old-normal', join(root, 'release-candidates/base-normal.apk'), '--new-normal', candidate(false), '--old-beta', join(root, 'release-candidates/base-beta.apk'), '--new-beta', candidate(true), '--report', process.env.LIONPOCKET_ANDROID_UPGRADE_REPORT || '/tmp/android-upgrades.json'], { stdio: 'inherit' });
+execFileSync('python3', [join(__dirname, 'android-compatibility.py'), '--serial', serial, '--mismatch-apk', process.env.LIONPOCKET_TEST_SIGNED_APK || '/tmp/LionPocket-EPHEMERAL-ONLY.apk', '--report', process.env.LIONPOCKET_ANDROID_COMPATIBILITY_REPORT || '/tmp/android-compatibility.json'], { stdio: 'inherit' });
 
 // Instrumentation uses a disposable private subtree and random installation IDs, outside all financial fixtures.
 execFileSync('adb', ['-s', serial, 'install', '-r', join(root, 'apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk')], { stdio: 'inherit' });

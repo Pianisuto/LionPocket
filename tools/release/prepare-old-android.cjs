@@ -4,7 +4,7 @@ const { join, resolve } = require('node:path');
 const { tmpdir } = require('node:os');
 const { execFileSync } = require('node:child_process');
 const root = resolve(__dirname, '../..');
-const directory = mkdtempSync(join(tmpdir(), 'lion-release-base-'));
+const directory = mkdtempSync(join(process.env.LIONPOCKET_LOCAL_VALIDATION_TMP || tmpdir(), 'lion-release-base-'));
 const base = '8de0087cdbcdcc670ec2073ba3f4ea51932072b4';
 const archive = execFileSync('git', ['archive', base], { cwd: root, maxBuffer: 40 * 1024 * 1024 });
 execFileSync('tar', ['-x', '-C', directory], { input: archive });

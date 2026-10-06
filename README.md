@@ -119,11 +119,11 @@ npm run make:linux
 npm run make
 ```
 
-Os artefatos gerados localmente ficam em `apps/desktop/out/` e não fazem parte do repositório. O workflow [`release.yml`](.github/workflows/release.yml) compila as versões para Windows e Linux.
+Os artefatos gerados localmente ficam em `apps/desktop/out/` e não fazem parte do repositório. GitHub Actions está desativado; builds e validações são locais.
 
 ### Candidatos de release
 
-O workflow [`release.yml`](.github/workflows/release.yml) verifica PR/main/tag ou execução manual: testes, tipos, lint, integração PostgreSQL/Keycloak, Linux/Windows normal e beta, Android e atualização de fixtures. Gera checksums SHA-256 e confere versão/tag. **Não publica GitHub Release, não envia binários para artefatos públicos e não adota uma chave permanente.**
+`npm run validate:local` executa testes, tipos, lint, integração PostgreSQL/Keycloak, self-hosted, Linux normal/beta em containers e Android em emulador descartável, com checksums e preservação de SQLite. `npm ci` instala hooks obrigatórios de commit/push; o mesmo conteúdo já aprovado pode reutilizar um recibo recente. Instalação Windows/DPAPI exige Windows descartável e não é marcada como validada em Linux. Veja [pré-requisitos, cobertura e comandos](docs/local-validation.md). **Não publica release, tag ou binários e não usa GitHub Actions.**
 
 A versão de distribuição e o versionCode Android estão em `tools/release/version.json`; a versão desktop e o lockfile devem coincidir. Antes de uma próxima versão, incrementar também o versionCode além de qualquer instalação suportada, rodar `npm run release:validate` e seguir o [guia de release readiness](docs/local-first-sync-release-readiness.md). A escolha da assinatura definitiva e a publicação exigem uma decisão posterior.
 

@@ -58,7 +58,7 @@ A instalação self-hosted cria diretamente o schema atual. Servidores e cliente
 
 `pairing.integration.test.ts` exercita PostgreSQL/Keycloak reais, os dois adapters SQLite, três direções de pareamento e as telas reais Desktop/Mobile. Cobre QR, deep link, fallback, aprovação, chave/primeiro sync, expiração, revogação, replay, adulteração, ausência de OIDC no novo aparelho, restart, perda de rede, rotação, recovery e reset com backup.
 
-`pairingLinks.test.ts` verifica eventos Electron, cold/warm start, single instance, validação e retomada do renderer. `protocol-registration.test.cjs` constrói/inspeciona DEBs normal/beta. Os smokes em `tools/pairing` verificam aplicativos instalados no Windows/Linux e o deep link no APK Android. CI injeta o convite no handler do SO, sem depender de câmera física.
+`pairingLinks.test.ts` verifica eventos Electron, cold/warm start, single instance, validação e retomada do renderer. `protocol-registration.test.cjs` constrói/inspeciona DEBs normal/beta. Os smokes em `tools/pairing` verificam aplicativos instalados no Windows/Linux e o deep link no APK Android. A [validação local](local-validation.md) injeta o convite no handler do SO, sem depender de câmera física; Windows exige host descartável próprio.
 
 `current-onboarding.test.cjs` impede reintrodução do marcador do formato de convite substituído no conteúdo do repositório.
 

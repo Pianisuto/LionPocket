@@ -1,4 +1,4 @@
-const { mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, rmSync } = require('node:fs');
+const { mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 const { tmpdir } = require('node:os');
 const { spawnSync } = require('node:child_process');
@@ -18,7 +18,8 @@ for (const mode of beta ? [true] : [false, true]) {
     db.exec(readFileSync(join(root, 'docs/fixtures/local-first/desktop-v10.sql'), 'utf8'));
     writeFileSync(join(directory, 'before.json'), JSON.stringify(captureDatabaseManifest(db)));
     db.close();
-    const args = [`--release-smoke=${directory}`, ...(mode && !beta ? ['--private-beta'] : []), ...(process.platform === 'linux' ? ['--password-store=basic'] : [])];
+    const container = process.env.LIONPOCKET_DISPOSABLE_CONTAINER === '1' && existsSync('/.dockerenv');
+    const args = [`--release-smoke=${directory}`, ...(mode && !beta ? ['--private-beta'] : []), ...(process.platform === 'linux' ? ['--password-store=basic', ...(container ? ['--no-sandbox'] : [])] : [])];
     const env = {...process.env}; delete env.ELECTRON_RUN_AS_NODE;
     const result = spawnSync(binary, args, { env, encoding: 'utf8', timeout: 90000 });
     if (result.status !== 0) throw new Error(`Packaged app failed (${result.status}): ${result.stderr}`);

@@ -34,7 +34,12 @@ async function main() {
         const binDirectory = join(directory, 'bin'); mkdirSync(binDirectory);
         symlinkSync(binary, join(binDirectory, executable));
         env.PATH = binDirectory + ':' + env.PATH;
-      } else execFileSync('sudo', ['dpkg', '-i', deb], { stdio: 'pipe' });
+      } else {
+        execFileSync('sudo', ['dpkg', '-i', deb], { stdio: 'pipe' });
+        // Container root cannot use Chromium's host sandbox. This wrapper exists only in its disposable filesystem.
+        if (process.env.LIONPOCKET_DISPOSABLE_CONTAINER === '1' && existsSync('/.dockerenv'))
+          writeFileSync(`/usr/local/bin/${executable}`, `#!/bin/sh\nexec ${binary} --no-sandbox "$@"\n`, {mode:0o755});
+      }
       const desktop = readFileSync(desktopPath, 'utf8');
       assert.match(desktop, new RegExp(`Exec=${executable} %u`));
       assert.match(desktop, /MimeType=x-scheme-handler\/lionpocket;/);

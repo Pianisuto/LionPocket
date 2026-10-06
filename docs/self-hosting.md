@@ -161,7 +161,7 @@ npm run sync:self-hosted:validate
 npm run sync:self-hosted:test
 ```
 
-Sobe projeto descartável, TLS com CA de teste **explicitamente confiável**, contas pela ferramenta, login Authorization Code/PKCE, controladores normais sem `privateBeta=true`, SQLite real desktop/mobile, recovery, pareamento, sync bidirecional, restart, falhas, canários, backup/restore e epoch. O harness é evidência de contrato e adapters; não equivale a uma sessão visual real de Custom Tab/Android. As suítes existentes cobrem issuer/audience, replay, assinatura/ciphertext alterado e revogação. CI inclui implantação limpa sem secrets reais, junto do workflow de readiness (suítes/typecheck/lint/builds normal/beta). Isso **não substitui auditoria criptográfica independente**.
+Sobe projeto descartável, TLS com CA de teste **explicitamente confiável**, contas pela ferramenta, login Authorization Code/PKCE, controladores normais sem `privateBeta=true`, SQLite real desktop/mobile, recovery, pareamento, sync bidirecional, restart, falhas, canários, backup/restore e epoch. O harness é evidência de contrato e adapters; não equivale a uma sessão visual real de Custom Tab/Android. As suítes existentes cobrem issuer/audience, replay, assinatura/ciphertext alterado e revogação. Essa implantação limpa também integra o [pipeline local obrigatório](local-validation.md), sem GitHub Actions. Isso **não substitui auditoria criptográfica independente**.
 
 ## Servidor recriado e base local como fonte de verdade
 
