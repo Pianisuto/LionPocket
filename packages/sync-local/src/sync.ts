@@ -1,4 +1,4 @@
-import { unlinkRecreatedServer } from './server-reset';
+import { assertServerResetIntent, type ServerResetIntent, unlinkRecreatedServer } from './server-reset';
 import { createRecoveryPackage, parseRecoveryPackage } from './recovery-package';
 import { parsePairingInvitation, pairingLink, inviteSigningInput, pairingSecurityCode, pairingErrorMessage, verifyPairing, verifyInvite, barePairing, pairingCapabilityInput, type PairingInvite, type NamedPairing } from '@lionpocket/sync-protocol';
 import {
@@ -88,7 +88,7 @@ export interface SyncSession {
 }
 export interface SyncSaved {
   endpoint: string;
-  serverReset?: { phase: 'pending-unlink' | 'ready'; backupPath: string };
+  serverReset?: { phase: 'pending-unlink' | 'ready'; backupPath: string; intent: ServerResetIntent };
   identity?: { issuer: string; subject: string };
   profile?: ProvisionedProfile;
   request?: PairingRequest;
@@ -679,7 +679,7 @@ export class SyncController {
       }
     } else {
       const d = await DeviceProvisioning.prepare(parsed.invite.pin,this.options.secrets,this.crypto());
-      s = { endpoint: parsed.invite.endpoint, discovered:e, profile:d.profile, request:await d.request(), phase:'pairing', pairingInvite:parsed.invite,
+      s = { endpoint: parsed.invite.endpoint, discovered:e, ...(selected?.serverReset ? {serverReset:selected.serverReset} : {}), profile:d.profile, request:await d.request(), phase:'pairing', pairingInvite:parsed.invite,
         deviceName:this.options.deviceName ?? (this.options.dialect === 'android' ? 'Celular Android' : 'Computador'), };
       const capability = this.crypto().decode(parsed.capability);
       try { await this.options.secrets.store(d.scope('pairingCapability'),capability); } finally { this.crypto().erase(capability); }
@@ -858,8 +858,10 @@ export class SyncController {
   async create() {
     await this.resumeServerReset();
     await this.requireRecoveryFinalized();
-    const s = await this.saved(),
-      session = await this.session(s,true,undefined,true),
+    const s = await this.saved();
+    if (s.serverReset?.intent === 'join-existing')
+      throw new Error('Conecte este aparelho pelo convite do aparelho que já recriou o cofre. Este fluxo não cria outro cofre.');
+    const session = await this.session(s,true,undefined,true),
       environment = await this.environment(s.endpoint),
       crypto = this.crypto();
     if (!s.profile) {
@@ -1319,8 +1321,9 @@ export class SyncController {
     return this.status();
   }
   /** Explicit consent is durable only after the full local backup succeeds. No remote deletion occurs. */
-  async resetForRecreatedServer(endpoint: string, confirmed: boolean) {
-    if (!confirmed) throw new Error('Confirme que o remoto anterior não será recuperado e que este banco local será a fonte de verdade.');
+  async resetForRecreatedServer(endpoint: string, intent: ServerResetIntent, confirmed: boolean) {
+    assertServerResetIntent(intent);
+    if (!confirmed) throw new Error('Confirme que o remoto anterior será abandonado e que um backup local será preservado antes da desvinculação.');
     if (this.resetting || this.approvalRunning || this.invitationFlight) throw new Error('Aguarde a operação de sincronização atual terminar.');
     await this.requireRecoveryFinalized();
     this.resetting = true;
@@ -1340,7 +1343,7 @@ export class SyncController {
       catch { throw new Error('Não foi possível preservar o backup local. Nenhum vínculo foi removido.'); }
       if (!backupPath) throw new Error('Não foi possível preservar o backup local.');
       // A crash here is resumed before any onboarding/transport. The old database remains in the backup.
-      await this.options.storage.save({endpoint:normalized,discovered,serverReset:{phase:'pending-unlink',backupPath}});
+      await this.options.storage.save({endpoint:normalized,discovered,serverReset:{phase:'pending-unlink',backupPath,intent}});
       await this.resumeServerReset();
       this.cachedSession = undefined; this.pendingRequests = []; this.pairingError = undefined;
       this.coordinator.error = undefined;
@@ -1349,7 +1352,10 @@ export class SyncController {
   }
   private async resumeServerReset() {
     const s = await this.options.storage.load();
-    if (s?.serverReset?.phase !== 'pending-unlink') return;
+    if (!s?.serverReset) return;
+    // Missing/invalid intent must never silently turn a secondary device into a founder.
+    assertServerResetIntent(s.serverReset.intent);
+    if (s.serverReset.phase !== 'pending-unlink') return;
     if (!s.serverReset.backupPath) throw new Error('reset_backup_missing');
     await this.options.db.run(unlinkRecreatedServer());
     s.serverReset.phase = 'ready';
@@ -1589,7 +1595,7 @@ export class SyncController {
       phase: saved?.phase ?? 'local',
       owner: saved?.owner ?? false,
       recoveryPackage: saved?.pendingRecoveryPackage ?? saved?.recoveryPackage ?? '',
-      resetBackupPath: saved?.serverReset?.backupPath ?? '',
+      serverReset: saved?.serverReset ? { ...saved.serverReset } : undefined,
       deviceId: saved?.profile?.deviceId ?? '',
       devices: [
         ...new Map(

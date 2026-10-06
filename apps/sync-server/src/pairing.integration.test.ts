@@ -1043,7 +1043,7 @@ describe.skipIf(!enabled)(
       c.sync.setForeground(false);
     },30000);
 
-    it.each(['desktop','android'] as const)('%s: empty recreated server + existing bank preserves backup/all financial rows, restarts unlink and baselines without duplicates', async dialect => {
+    it.each(['desktop','android'] as const)('%s: source-of-truth/join-existing survive crashes, preserve complete banks and converge into one recreated vault without secondary OIDC', async dialect => {
       const a = await owner(dialect), b = await client(dialect === 'android' ? 'desktop' : 'android');
       await b.sync.connectInvitation((await a.sync.createInvitation()).link);
       await expect.poll(async () => (await a.sync.status()).pairingRequests.length,{timeout:15000}).toBe(1);
@@ -1052,7 +1052,7 @@ describe.skipIf(!enabled)(
       await b.sync.sync(); expect(await b.rows()).toHaveLength(1);
       b.sync.setForeground(false); await b.sync.coordinator.cancelAndWait();
       a.sync.setForeground(false); await a.sync.coordinator.cancelAndWait();
-      const finance = async () => Object.fromEntries(await Promise.all(Object.keys(financialTableTypes).map(async table => [table,await a.options.db.read(`SELECT * FROM ${table} ORDER BY rowid`)])));
+      const finance = async (c = a) => Object.fromEntries(await Promise.all(Object.keys(financialTableTypes).map(async table => [table,await c.options.db.read(`SELECT * FROM ${table} ORDER BY rowid`)])));
       const before = await finance(), oldSaved = structuredClone(a.profile());
       const directory = mkdtempSync(join(tmpdir(),'lion-reset-')), nextDatabase = 'lion_reset_'+randomUUID().replaceAll('-','');
       let nextPool: pg.Pool | undefined, nextServer: Server | undefined;
@@ -1079,18 +1079,19 @@ describe.skipIf(!enabled)(
           return backupPath;
         });
         a.options.backup = backup;
-        await expect(a.sync.resetForRecreatedServer(nextEndpoint,false)).rejects.toThrow('Confirme');
+        await expect(a.sync.resetForRecreatedServer(nextEndpoint,'source-of-truth',false)).rejects.toThrow('Confirme');
         expect(backup).not.toHaveBeenCalled(); expect(a.profile()).toEqual(oldSaved);
         a.options.backup = async () => {throw new Error('backup unavailable');};
-        await expect(a.sync.resetForRecreatedServer(nextEndpoint,true)).rejects.toThrow('Não foi possível preservar o backup local');
+        await expect(a.sync.resetForRecreatedServer(nextEndpoint,'source-of-truth',true)).rejects.toThrow('Não foi possível preservar o backup local');
         expect(a.profile()).toEqual(oldSaved); expect(await finance()).toEqual(before);
         a.options.backup = backup;
         // Crash after the durable backed-up intent, before local unlink. Startup must resume it.
         const run = a.options.db.run;
         a.options.db.run = async () => {throw new Error('simulated crash before unlink');};
-        await expect(a.sync.resetForRecreatedServer(nextEndpoint,true)).rejects.toThrow('simulated crash');
+        await expect(a.sync.resetForRecreatedServer(nextEndpoint,'source-of-truth',true)).rejects.toThrow('simulated crash');
         a.options.db.run = run;
         expect(existsSync(backupPath)).toBe(true); expect(backup).toHaveBeenCalledTimes(1);
+        expect(a.profile().serverReset).toEqual({phase:'pending-unlink',backupPath,intent:'source-of-truth'});
         const storedBackup = new DatabaseSync(backupPath);
         try {
           for (const table of Object.keys(financialTableTypes)) expect(storedBackup.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(before[table]);
@@ -1098,14 +1099,48 @@ describe.skipIf(!enabled)(
         } finally {storedBackup.close();}
         await a.restart(); a.sync.setForeground(false);
         await a.sync.resumeRecoveryOnStartup();
-        expect(a.profile().serverReset?.phase).toBe('ready'); expect(a.profile().profile).toBeUndefined();
+        expect(a.profile().serverReset).toEqual({phase:'ready',backupPath,intent:'source-of-truth'}); expect(a.profile().profile).toBeUndefined();
+        expect((await a.sync.status()).serverReset?.intent).toBe('source-of-truth');
         expect(await finance()).toEqual(before);
         expect((await a.options.db.read('SELECT binding_id,mode FROM sync_local_state'))[0]).toMatchObject({binding_id:null,mode:'disabled'});
         a.options.backup = async () => {const path=join(directory,'before-baseline.sqlite'); await a.backupTo(path); return path;};
         a.sync.setForeground(true); await a.sync.create(); await a.sync.sync();
         expect(await finance()).toEqual(before); expect(a.profile().profile!.pin.serverId).toBe(environment.serverId);
-        b.options.backup = async () => {const path=join(directory,'secondary-'+crypto.uuid()+'.sqlite'); await b.backupTo(path); return path;};
-        await b.sync.resetForRecreatedServer(nextEndpoint,true);
+        const secondaryBefore = await finance(b), secondaryPath = join(directory,'secondary.sqlite');
+        const secondaryBackup = vi.fn(async () => {
+          expect((await b.options.db.read('SELECT binding_id FROM sync_local_state'))[0].binding_id).toBeTruthy();
+          expect(await finance(b)).toEqual(secondaryBefore);
+          await b.backupTo(secondaryPath); return secondaryPath;
+        });
+        b.options.backup = secondaryBackup;
+        // Crash after unlink but before saving ready: startup repeats only the same authorized unlink.
+        const save = b.options.storage.save;
+        b.options.storage.save = async value => {
+          if (value.serverReset?.phase === 'ready') throw new Error('simulated crash after unlink');
+          await save(value);
+        };
+        await expect(b.sync.resetForRecreatedServer(nextEndpoint,'join-existing',true)).rejects.toThrow('simulated crash');
+        b.options.storage.save = save;
+        expect(secondaryBackup).toHaveBeenCalledTimes(1);
+        expect(b.profile().serverReset).toEqual({phase:'pending-unlink',backupPath:secondaryPath,intent:'join-existing'});
+        expect((await b.options.db.read('SELECT binding_id FROM sync_local_state'))[0].binding_id).toBeNull();
+        expect(await finance(b)).toEqual(secondaryBefore);
+        const secondarySnapshot = new DatabaseSync(secondaryPath);
+        try {
+          expect(secondarySnapshot.prepare('SELECT binding_id FROM sync_local_state').get()!.binding_id).toBeTruthy();
+          for (const table of Object.keys(financialTableTypes)) expect(secondarySnapshot.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(secondaryBefore[table]);
+        } finally { secondarySnapshot.close(); }
+        await b.restart(); b.sync.setForeground(false); await b.sync.resumeRecoveryOnStartup();
+        expect((await b.sync.status()).serverReset).toEqual({phase:'ready',backupPath:secondaryPath,intent:'join-existing'});
+        expect(secondaryBackup).toHaveBeenCalledTimes(1); expect(await finance(b)).toEqual(secondaryBefore);
+        await expect(b.sync.create()).rejects.toThrow('Este fluxo não cria outro cofre');
+        // Reconfiguration and another restart cannot discard the choice or offer a second vault.
+        await b.sync.configure(nextEndpoint); await b.restart();
+        expect((await b.sync.status()).serverReset?.intent).toBe('join-existing');
+        await expect(b.sync.create()).rejects.toThrow('Este fluxo não cria outro cofre');
+        expect(b.login).not.toHaveBeenCalled();
+        expect((await nextPool.query('SELECT count(*)::int AS n FROM sync_vaults')).rows[0].n).toBe(1);
+        b.options.backup = async () => {const path=join(directory,'secondary-baseline-'+crypto.uuid()+'.sqlite'); await b.backupTo(path); return path;};
         b.sync.setForeground(true);
         await b.sync.connectInvitation((await a.sync.createInvitation()).link);
         await expect.poll(async () => (await a.sync.status()).pairingRequests.length,{timeout:15000}).toBe(1);
@@ -1114,6 +1149,8 @@ describe.skipIf(!enabled)(
         await b.sync.sync(); await a.sync.sync(); await b.sync.sync();
         expect(await b.rows()).toHaveLength(1); expect(await a.rows()).toHaveLength(1);
         expect(b.login).not.toHaveBeenCalled();
+        expect((await nextPool.query('SELECT count(*)::int AS n FROM sync_vaults')).rows[0].n).toBe(1);
+        expect(b.profile().serverReset?.intent).toBe('join-existing');
         a.sync.setForeground(false); b.sync.setForeground(false);
         await a.sync.coordinator.cancelAndWait(); await b.sync.coordinator.cancelAndWait();
       } finally {

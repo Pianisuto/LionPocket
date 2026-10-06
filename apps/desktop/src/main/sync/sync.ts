@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
   SyncController,
+  assertServerResetIntent,
   type SyncSaved,
   type SyncStatus,
 } from '@lionpocket/sync-local';
@@ -105,7 +106,8 @@ export async function registerSyncController(bank: LionPocketDatabase) {
       const c = await get();
       switch (action) {
         case 'server-reset':
-          return c.resetForRecreatedServer(String(args[0]),args[1] === true);
+          assertServerResetIntent(args[1]);
+          return c.resetForRecreatedServer(String(args[0]),args[1],args[2] === true);
         case 'server-recovery-prepare':
           return c.prepareServerRecovery(args[0] === true);
         case 'server-recovery-confirm':

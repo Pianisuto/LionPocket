@@ -1,4 +1,9 @@
 import type { SqlWorkflow } from './manual';
+export type ServerResetIntent = 'source-of-truth' | 'join-existing';
+export function assertServerResetIntent(value: unknown): asserts value is ServerResetIntent {
+  if (value !== 'source-of-truth' && value !== 'join-existing')
+    throw new Error('Escolha como este aparelho será conectado ao servidor recriado.');
+}
 /** Unlink only synchronization metadata. Financial rows and import provenance are untouched. */
 export function* unlinkRecreatedServer(): SqlWorkflow {
   // Pending financial choices must be resolved before changing their namespace.

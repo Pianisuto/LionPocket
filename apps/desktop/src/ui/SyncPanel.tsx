@@ -3,7 +3,7 @@ import {
   revisionSummary,
   pairingQr,
 } from '@lionpocket/sync-local';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ArrowRight,
@@ -24,7 +24,7 @@ import {
   Smartphone,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { SyncStatus } from '@lionpocket/sync-local';
+import type { ServerResetIntent, SyncStatus } from '@lionpocket/sync-local';
 import { pairingErrorMessage } from '@lionpocket/sync-protocol';
 
 const recoveryFinalizing = [
@@ -53,6 +53,8 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [confirmedCode, setConfirmedCode] = useState('');
   const [revokeId, setRevokeId] = useState('');
+  const invitationInput = useRef<HTMLTextAreaElement>(null);
+  const [resetIntent, setResetIntent] = useState<ServerResetIntent>();
   const [resetConfirmed, setResetConfirmed] = useState(false);
   const [setup, setSetup] = useState(false);
 
@@ -134,6 +136,8 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   }, [invitation]);
   if (!status) return error ? <p role="alert">{error}</p> : null;
 
+  const resetReady = status.phase === 'local' && status.serverReset?.phase === 'ready';
+  const joiningRecreated = resetReady && status.serverReset?.intent === 'join-existing';
   const connected = status.phase === 'bound';
   const canManage =
     connected &&
@@ -375,20 +379,124 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
         </SyncSection>
       )}
 
-      {status.phase === 'bound' && <SyncDisclosure icon={Server} title="Servidor de sincronização recriado">
-        <p>Use este banco local como fonte de verdade. O remoto anterior não será recuperado. Um backup completo será criado antes de remover o vínculo e iniciar uma nova sincronização.</p>
-        <label className="field"><span>Novo servidor</span><input aria-label="Novo servidor" value={endpoint} onChange={e => setEndpoint(e.target.value)} /></label>
-        <label><input type="checkbox" checked={resetConfirmed} onChange={e => setResetConfirmed(e.target.checked)} /> Entendo que o remoto anterior não será recuperado e escolho os dados deste aparelho.</label>
-        <button className="button" disabled={busy || !resetConfirmed || !endpoint} onClick={() => void run('server-reset',[endpoint,resetConfirmed])}>Preservar backup e preparar novo sync</button>
-      </SyncDisclosure>}
-      {status.resetBackupPath && status.phase === 'local' && <SyncSection icon={HardDrive} title="Banco local preservado">
-        <p>Backup criado: {status.resetBackupPath}</p><p>Agora crie o novo cofre a partir dos dados deste aparelho.</p>
-        <button className="button button--primary" disabled={busy} onClick={() => void run('create')}>Criar novo sync com meus dados locais</button>
-      </SyncSection>}
+      {status.phase === 'bound' && (
+        <SyncSection icon={Server} title="Servidor de sincronização recriado">
+          <p>
+            O remoto anterior será abandonado. Um backup completo será criado
+            antes de remover o vínculo. Seus dados financeiros locais não serão
+            apagados.
+          </p>
+          <fieldset disabled={busy}>
+            <legend>Como este aparelho deve continuar?</legend>
+            <label>
+              <input
+                type="radio"
+                name="server-reset-intent"
+                value="source-of-truth"
+                checked={resetIntent === 'source-of-truth'}
+                onChange={() => {
+                  setResetIntent('source-of-truth');
+                  setResetConfirmed(false);
+                }}
+              />{' '}
+              Usar este aparelho como fonte de verdade
+            </label>
+            <p>
+              Depois do backup e da desvinculação, crie um novo cofre usando os
+              dados deste aparelho. Usar esta opção em mais de um aparelho pode
+              criar cofres independentes.
+            </p>
+            <label>
+              <input
+                type="radio"
+                name="server-reset-intent"
+                value="join-existing"
+                checked={resetIntent === 'join-existing'}
+                onChange={() => {
+                  setResetIntent('join-existing');
+                  setResetConfirmed(false);
+                }}
+              />{' '}
+              Conectar este aparelho a um cofre já recriado
+            </label>
+            <p>
+              Outro aparelho já criou o novo cofre. Depois do backup e da
+              desvinculação, use o convite LPV2 desse aparelho e aguarde sua
+              aprovação. Este fluxo não cria um novo cofre.
+            </p>
+          </fieldset>
+          <label className="field">
+            <span>Novo servidor</span>
+            <input
+              aria-label="Novo servidor"
+              value={endpoint}
+              onChange={(e) => setEndpoint(e.target.value)}
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={resetConfirmed}
+              disabled={busy || !resetIntent}
+              onChange={(e) => setResetConfirmed(e.target.checked)}
+            />{' '}
+            Entendo que o remoto anterior será abandonado e que o backup será
+            preservado antes de remover o vínculo.
+          </label>
+          <button
+            className="button"
+            disabled={busy || !resetIntent || !resetConfirmed || !endpoint.trim()}
+            onClick={() =>
+              void run('server-reset', [endpoint, resetIntent, resetConfirmed])
+            }
+          >
+            Preservar backup e remover vínculo antigo
+          </button>
+        </SyncSection>
+      )}
+      {resetReady && (
+        <SyncSection icon={HardDrive} title="Banco local preservado">
+          <p>Backup criado: {status.serverReset!.backupPath}</p>
+          {status.serverReset!.intent === 'source-of-truth' && (
+            <>
+              <p>
+                Este aparelho foi escolhido como fonte de verdade. Crie o novo
+                cofre usando seus dados locais.
+              </p>
+              <button
+                className="button button--primary"
+                disabled={busy}
+                onClick={() => void run('create')}
+              >
+                Criar novo cofre usando estes dados
+              </button>
+            </>
+          )}
+          {joiningRecreated && (
+            <>
+              <p>
+                Use o convite do aparelho que já recriou o cofre. Abra o link LPV2
+                neste computador ou cole o convite abaixo. Este aparelho pedirá
+                acesso e aguardará aprovação.
+              </p>
+              <button
+                className="button button--primary"
+                disabled={busy}
+                onClick={() => {
+                  invitationInput.current?.focus();
+                  invitationInput.current?.scrollIntoView({ block: 'center' });
+                }}
+              >
+                Conectar por convite
+              </button>
+            </>
+          )}
+        </SyncSection>
+      )}
       {status.phase === 'local' && status.pairingStep === 'preparing' && (
         <p role="status">Preparando conexão…</p>
       )}
-      {status.phase === 'local' && !setup && (
+      {status.phase === 'local' && !resetReady && !setup && (
         <div className="sync-onboarding">
           <div className="sync-onboarding__content">
             <span className="eyebrow">Conecte quando quiser</span>
@@ -433,7 +541,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
 
       {status.phase === 'local' && (
         <>
-          {setup && (
+          {setup && !resetReady && (
             <SyncSection
               icon={Server}
               title="Configurar sincronização"
@@ -465,13 +573,14 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
           )}
           <SyncSection
             icon={Link2}
-            title="Colar convite"
+            title={joiningRecreated ? 'Conectar ao cofre já recriado' : 'Colar convite'}
             description="Se o link não abrir o aplicativo, cole o convite do aparelho conectado."
           >
             <label className="field">
               <span>Convite do cofre</span>
               <textarea
                 aria-label="Convite do cofre"
+                ref={invitationInput}
                 value={invitation}
                 onChange={(e) => setInvitation(e.target.value)}
               />
