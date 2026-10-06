@@ -415,6 +415,7 @@ export function openRecovery(
   const { ciphertext, ...header } = envelope;
   let bytes: Uint8Array | null = null;
   try {
+    try {
     bytes = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
       null,
       device.crypto.decode(ciphertext),
@@ -422,6 +423,7 @@ export function openRecovery(
       device.crypto.decode(envelope.nonce),
       key,
     );
+    } catch { throw new Error("invalid_recovery_code"); }
     if (!bytes) throw new Error("invalid_recovery_code");
     const decoded = decodeCanonical(bytes, 65536);
     const version = (decoded as { formatVersion?: unknown } | null)

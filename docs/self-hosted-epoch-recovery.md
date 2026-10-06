@@ -169,9 +169,9 @@ SecretScopes preservam installation/server/vault e distinguem device B, epoch B,
 
 ### Key base across epochs
 
-`TrustPin.keyVersion` já existe no wire v1 e agora tem semântica explícita de **base imutável da geração** (`baseKeyVersion(pin)`). Nenhum campo extra torna pins legacy permissivos. Cofres antigos permanecem com base 1. B começa em `activeKeyVersionA+1`; `activeKeyVersionB=base`. Checkpoints B começam vazios e rotações posteriores são base+1, base+2. Não são checkpoints A com epoch alterado.
+`TrustPin.keyVersion` já existe no wire v1 e agora tem semântica explícita de **base imutável da geração** (`baseKeyVersion(pin)`). A geração inicial usa base 1. B começa em `activeKeyVersionA+1`; `activeKeyVersionB=base`. Checkpoints B começam vazios e rotações posteriores são base+1, base+2. Não são checkpoints A com epoch alterado.
 
-PostgreSQL persiste `base_key_version` e `active_key_version` em sync_vaults. Migration idempotente usa NULL como sentinel para backfill uma vez: base do pin (1 para legacy), ativa do último checkpoint ou da base. Depois instala defaults/NOT NULL/CHECK. Rotação atualiza a versão ativa transacionalmente. `archive_sync_vaults` ganha as colunas; arquivos antigos mantêm seus valores anteriores, com NULL nas novas colunas históricas. Cópia usa nomes explícitos de colunas para não depender de sua posição.
+PostgreSQL cria `base_key_version` e `active_key_version` diretamente no schema atual de sync_vaults, com defaults, NOT NULL e CHECK. Rotação atualiza a versão ativa transacionalmente. Archives são criados com o mesmo conjunto atual de colunas; cópia usa nomes explícitos para preservar a evidência exata.
 
 `EpochKeyBase` é um artifact separado: formatVersion 1, serverId/serverEpoch/vaultId/restoreId/fromEpoch, baseKeyVersion, previousActiveKeyVersion, previousKeyCheckpointsSha256 e signature. Domínio Ed25519: `LionPocket/epoch-key-base/v1`. Assert estrito exige base=previousActive+1. O begin inclui a história A conhecida, verificada com grants A autorizados e prefixo exato da história restaurada. Assim, rotações A perdidas no restore são preservadas como evidência; não viram cadeia operacional B. O campo `keyCheckpointSha256` do manifesto compromete **o JSON canônico completo desse EpochKeyBase assinado**, sem ambiguidade com checkpoint de rotação.
 
@@ -179,7 +179,7 @@ Delivery cria a chave ativa e, quando necessário, KeyBundle formatVersion 2 com
 
 ### Recovery B
 
-O envelope recovery assinado e a KDF LP1 permanecem v1. Somente seu conteúdo cifrado evolui: RecoveryBundle v2 acrescenta baseKeyVersion. Parsing bifurca estritamente por versão e `exactObject`; v1 continua legível e emitido para gerações base 1, preservando recovery de clientes anteriores. `dataKeys` contém exatamente o intervalo base..active do epoch, até 1000 chaves, sem exigir 1..base-1. Versões de recovery são strings int64: B=versão conhecida A+1, inclusive acima de MAX_SAFE_INTEGER.
+O envelope recovery assinado e a KDF LP1 permanecem v1. Somente seu conteúdo cifrado evolui: RecoveryBundle v2 acrescenta baseKeyVersion. O decoder usa `exactObject`: bundle formato 1 corresponde à geração de base 1; formato 2 inclui a base explícita de gerações recuperadas. Ambos são contratos criptográficos atuais, independentes do pareamento. `dataKeys` contém exatamente o intervalo base..active do epoch, até 1000 chaves, sem exigir 1..base-1. Versões de recovery são strings int64: B=versão conhecida A+1, inclusive acima de MAX_SAFE_INTEGER.
 
 Se master A confirmado está no SecretStore, o recovery A assinado é aberto e seus secrets/authority/versões conferidos contra o contexto confiável. O mesmo master é copiado para B, preservando o código humano. Recovery B é novo ciphertext e aberto novamente antes de confirmação. O servidor recebe apenas o objeto assinado; não aprende que o código foi reutilizado.
 
@@ -251,7 +251,7 @@ Backup operacional produz manifesto **v4**, conservando generationArchiveSha256/
 
 `verify-backup` continua sem mutações na instalação ativa: restaura dumps em bancos temporários, confere o digest e executa o verificador Node em `BEGIN READ ONLY` nesse banco. Verifica schema/triggers, autorização/owner/referências, signatures de registry/key/recovery/envelopes/transition, contiguidade dos batches, grafo/heads/counters/hashes e cadeia final prepared. Incomplete permanece incomplete; prepared permanece prepared, nunca active. Não há DEK nem decrypt.
 
-Manifestos v1/v2/v3 continuam aceitos com seus contratos/digests anteriores. A nova verificação de staging é exclusiva do v4. Schema parcial não é backup v4 válido. Migração de cofres legacy não exige onboarding novo. Checksums não substituem autenticação externa do backup. O verifier não é oracle de plaintext financeiro.
+O manifesto operacional atual exige compromissos de restore, gerações, staging e activation. Schema parcial é rejeitado; instalações anteriores devem ser recriadas. Checksums não substituem autenticação externa do backup. O verifier não é oracle de plaintext financeiro.
 
 ## Validação e limites da evidência
 

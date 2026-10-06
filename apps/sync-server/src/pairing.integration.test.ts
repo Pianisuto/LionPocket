@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import React from 'react';
 import {
   act,
@@ -28,6 +32,7 @@ import {
   SyncController,
   DeviceProvisioning,
   ProvisioningCrypto,
+  financialTableTypes,
   type SyncSaved,
   type SyncOptions,
   type LocalSyncDatabase,
@@ -140,8 +145,10 @@ describe.skipIf(!enabled)(
     async function client(dialect: 'desktop' | 'android', owner = false) {
       let db: LocalSyncDatabase;
       let write: () => Promise<void>, rows: () => Promise<unknown[]>;
+      let backupTo: (path: string) => Promise<void>;
       if (dialect === 'desktop') {
         const bank = new LionPocketDatabase(':memory:');
+        backupTo = async path => {bank.db.prepare('VACUUM INTO ?').run(path);};
         close.push(() => bank.db.close());
         bank.db.exec(
           'DELETE FROM categories; DELETE FROM payment_methods; DELETE FROM cards;',
@@ -159,6 +166,7 @@ describe.skipIf(!enabled)(
         rows = async () => bank.listTransactions({ month: '2026-10' });
       } else {
         const bank = sqliteTestConnection();
+        backupTo = async path => {bank.sqlite.prepare('VACUUM INTO ?').run(path);};
         close.push(() => bank.sqlite.close());
         await migrate(bank.db);
         bank.sqlite.exec(
@@ -226,6 +234,7 @@ describe.skipIf(!enabled)(
         rows,
         profile: () => saved!,
         restart,
+        backupTo,
       };
     }
     async function send(
@@ -593,8 +602,8 @@ describe.skipIf(!enabled)(
       } } });
       try {
         await act(async () => { desktop = create(React.createElement(DesktopSyncPanel, { onChanged: async () => undefined })); });
-        await expect.poll(async () => { await act(async () => { /* Flush pending UI effects. */ }); return desktop!.root.findAllByType('textarea').length; }).toBe(1);
-        await act(async () => desktop!.root.findByType('textarea').props.onChange({ target: { value: link } }));
+        await expect.poll(async () => { await act(async () => { /* Flush pending UI effects. */ }); return desktop!.root.findAllByProps({'aria-label':'Convite do cofre'}).length; }).toBe(1);
+        await act(async () => desktop!.root.findByProps({'aria-label':'Convite do cofre'}).props.onChange({ target: { value: link } }));
         await expect.poll(async () => { await act(async () => { /* Flush pending UI effects. */ }); return renderedText(desktop!.root).includes(new URL(endpoint).host); }).toBe(true);
         const connect = desktop!.root.findAllByType('button').find(n => renderedText(n) === 'Conectar')!;
         await act(async () => connect.props.onClick());
@@ -647,7 +656,7 @@ describe.skipIf(!enabled)(
       }
     }, 30000);
 
-    it('rejects tampering, invalid capability, pin-only access, LPV1 pairing and replay; request recovery is idempotent with a fresh proof', async () => {
+    it('rejects tampering, invalid capability, pin-only access, unsupported format pairing and replay; request recovery is idempotent with a fresh proof', async () => {
       const a = await owner(),
         b = await client('android'),
         { link } = await a.sync.createInvitation();
@@ -684,8 +693,8 @@ describe.skipIf(!enabled)(
         b.sync.connectInvitation(pairingLink(malicious, crypto)),
       ).rejects.toThrow('invite_invalid');
       await expect(
-        b.sync.inspectPairingInvitation((await a.sync.status()).invitation),
-      ).rejects.toThrow('invite_legacy');
+        b.sync.inspectPairingInvitation('unsupported.invalid'),
+      ).rejects.toThrow('invite_invalid');
       malicious.invite.endpoint = invitation.invite.endpoint;
       malicious.capability = crypto.nonce();
       await expect(
@@ -733,13 +742,10 @@ describe.skipIf(!enabled)(
       a.sync.setForeground(false);
       b.sync.setForeground(false);
     }, 30000);
-    it('rejects server substitution or stripping of capability authentication; upgrading an existing owner needs no fresh OIDC', async () => {
+    it('rejects server substitution or stripping of capability authentication; device transport needs no fresh OIDC', async () => {
       const a = await owner(),
         b = await client('android');
       a.sync.setForeground(false);
-      const previous = a.profile();
-      delete previous.deviceTransport;
-      await a.options.storage.save(previous);
       await a.restart();
       const { link } = await a.sync.createInvitation();
       expect(a.login).toHaveBeenCalledTimes(1);
@@ -767,13 +773,7 @@ describe.skipIf(!enabled)(
         ],
       );
       await expect(a.sync.approve(deviceId)).rejects.toThrow('invite_invalid');
-      await pool.query(
-        'UPDATE sync_pairings SET pairing_auth=NULL WHERE vault_id=$1 AND device_id=$2',
-        [vaultId, deviceId],
-      );
-      await expect(a.sync.approve(deviceId)).rejects.toThrow(
-        'client_upgrade_required',
-      );
+      await expect(pool.query('UPDATE sync_pairings SET pairing_auth=NULL WHERE vault_id=$1 AND device_id=$2',[vaultId,deviceId])).rejects.toThrow('not-null constraint');
       expect(
         (
           await pool.query(
@@ -854,7 +854,7 @@ describe.skipIf(!enabled)(
         ).toBe(403);
       expect((await send(d, '/v1/vaults', {})).status).toBe(401);
       expect(
-        (await send(d, `/v1/vaults/${d.profile.pin.vaultId}/registry`, {}))
+        (await send(d, `/v1/vaults/${d.profile.pin.vaultId}/recovery-fetch`, {}))
           .status,
       ).toBe(401);
       a.sync.setForeground(false);
@@ -1006,5 +1006,121 @@ describe.skipIf(!enabled)(
       a.sync.setForeground(false);
       b.sync.setForeground(false);
     }, 30000);
+    it.each(['desktop','android'] as const)('%s generates durable recovery, rejects tampering/wrong code/rollback, and recovers after losing every device', async dialect => {
+      const a = await owner(dialect);
+      a.sync.setForeground(false); await a.sync.coordinator.cancelAndWait();
+      const older = await a.sync.generateRecovery(); await a.sync.confirmRecovery(older.code);
+      const vaultId = a.profile().profile!.pin.vaultId;
+      const previous = (await pool.query('SELECT recovery FROM sync_vaults WHERE vault_id=$1',[vaultId])).rows[0].recovery;
+      const kit = await a.sync.generateRecovery(); await a.sync.confirmRecovery(kit.code);
+      expect(kit.recoveryPackage.startsWith('LPR1.')).toBe(true);
+      expect(kit.recoveryPackage).not.toContain(String.fromCharCode(76,80,86,49));
+      const payload = JSON.parse(new TextDecoder().decode(crypto.decode(kit.recoveryPackage.slice(5))));
+      expect(Object.keys(payload).sort()).toEqual(['checkpoint','endpoint','keyVersion','pin','purpose','recoveryVersion','signature','version']);
+      expect(payload).not.toHaveProperty('authoritySignSeed'); expect(payload).not.toHaveProperty('expiresAt'); expect(payload).not.toHaveProperty('capability');
+      const c = await client(dialect === 'android' ? 'desktop' : 'android',true);
+      c.sync.setForeground(false);
+      for (const changed of [{...payload,endpoint:'https://attacker.invalid'},{...payload,pin:{...payload.pin,authorityPublicKey:crypto.nonce()}},{...payload,pin:{...payload.pin,vaultId:crypto.uuid()}}]) {
+        const altered = 'LPR1.'+crypto.encode(encodeUtf8(canonicalStringify(changed)));
+        await expect(c.sync.recover(altered,kit.code)).rejects.toThrow('Pacote de recuperação inválido');
+        expect(c.profile()).toBeNull();
+      }
+      await expect(c.sync.recover(kit.recoveryPackage,'LP1.'+crypto.nonce())).rejects.toThrow('invalid_recovery_code');
+      let recoveredDevice = new DeviceProvisioning(c.profile().profile!,c.secrets,crypto);
+      expect(await c.secrets.load(recoveredDevice.scope('authoritySeed'))).toBeNull();
+      expect(await c.secrets.load(recoveredDevice.scope('dataKey'))).toBeNull();
+      const latest = (await pool.query('SELECT recovery FROM sync_vaults WHERE vault_id=$1',[vaultId])).rows[0].recovery;
+      await pool.query('UPDATE sync_vaults SET recovery=$2 WHERE vault_id=$1',[vaultId,previous]);
+      try { await expect(c.sync.recover(kit.recoveryPackage,older.code)).rejects.toThrow('recovery_rollback'); }
+      finally {await pool.query('UPDATE sync_vaults SET recovery=$2 WHERE vault_id=$1',[vaultId,latest]);}
+      // Only the separately stored package/code and account remain; no secret from an old device is shared.
+      const state = await c.sync.recover(kit.recoveryPackage,kit.code);
+      expect(state.phase).toBe('bound'); expect(state.owner).toBe(true);
+      c.sync.setForeground(true); await c.sync.sync();
+      expect(await c.rows()).toHaveLength(1);
+      recoveredDevice = new DeviceProvisioning(c.profile().profile!,c.secrets,crypto);
+      expect(await c.secrets.load(recoveredDevice.scope('authoritySeed'))).not.toBeNull();
+      c.sync.setForeground(false);
+    },30000);
+
+    it.each(['desktop','android'] as const)('%s: empty recreated server + existing bank preserves backup/all financial rows, restarts unlink and baselines without duplicates', async dialect => {
+      const a = await owner(dialect), b = await client(dialect === 'android' ? 'desktop' : 'android');
+      await b.sync.connectInvitation((await a.sync.createInvitation()).link);
+      await expect.poll(async () => (await a.sync.status()).pairingRequests.length,{timeout:15000}).toBe(1);
+      await a.sync.approve(b.profile().profile!.deviceId);
+      await expect.poll(async () => (await b.sync.status()).phase,{timeout:15000}).toBe('bound');
+      await b.sync.sync(); expect(await b.rows()).toHaveLength(1);
+      b.sync.setForeground(false); await b.sync.coordinator.cancelAndWait();
+      a.sync.setForeground(false); await a.sync.coordinator.cancelAndWait();
+      const finance = async () => Object.fromEntries(await Promise.all(Object.keys(financialTableTypes).map(async table => [table,await a.options.db.read(`SELECT * FROM ${table} ORDER BY rowid`)])));
+      const before = await finance(), oldSaved = structuredClone(a.profile());
+      const directory = mkdtempSync(join(tmpdir(),'lion-reset-')), nextDatabase = 'lion_reset_'+randomUUID().replaceAll('-','');
+      let nextPool: pg.Pool | undefined, nextServer: Server | undefined;
+      try {
+        await admin.query(`CREATE DATABASE ${nextDatabase}`);
+        nextPool = new pg.Pool({connectionString:`postgresql://liondev:liondev@127.0.0.1:55432/${nextDatabase}`});
+        await nextPool.query(controlSchema+commitSchema+bindingSchema);
+        const environment = await initialize(nextPool);
+        nextServer = controlServer({pool:nextPool,crypto,environment,origin:'http://127.0.0.1:1',identity:keycloakIdentity(issuer),financialEnabled:true,
+          oidc:{issuer,desktopClientId:'lionpocket-desktop-dev',androidClientId:'lionpocket-android-dev',desktopRedirect:'http://127.0.0.1:18761/callback',androidRedirect:'com.lionpocketmobile.syncdev:/callback'}});
+        // Reserve an OS port, then use that exact origin for HTTP proofs.
+        await new Promise<void>(resolve => nextServer!.listen(0,'127.0.0.1',resolve));
+        const port = (nextServer.address() as {port:number}).port, nextEndpoint = `http://127.0.0.1:${port}`;
+        await new Promise<void>(resolve => nextServer!.close(() => resolve()));
+        nextServer = controlServer({pool:nextPool,crypto,environment,origin:nextEndpoint,identity:keycloakIdentity(issuer),financialEnabled:true,
+          oidc:{issuer,desktopClientId:'lionpocket-desktop-dev',androidClientId:'lionpocket-android-dev',desktopRedirect:'http://127.0.0.1:18761/callback',androidRedirect:'com.lionpocketmobile.syncdev:/callback'}});
+        await new Promise<void>(resolve => nextServer!.listen(port,'127.0.0.1',resolve));
+        expect((await nextPool.query('SELECT count(*)::int AS n FROM sync_vaults')).rows[0].n).toBe(0);
+        const backupPath = join(directory,'before-unlink.sqlite');
+        const backup = vi.fn(async () => {
+          expect(a.profile().profile!.pin).toEqual(oldSaved.profile!.pin);
+          expect(await finance()).toEqual(before);
+          await a.backupTo(backupPath);
+          return backupPath;
+        });
+        a.options.backup = backup;
+        await expect(a.sync.resetForRecreatedServer(nextEndpoint,false)).rejects.toThrow('Confirme');
+        expect(backup).not.toHaveBeenCalled(); expect(a.profile()).toEqual(oldSaved);
+        a.options.backup = async () => {throw new Error('backup unavailable');};
+        await expect(a.sync.resetForRecreatedServer(nextEndpoint,true)).rejects.toThrow('Não foi possível preservar o backup local');
+        expect(a.profile()).toEqual(oldSaved); expect(await finance()).toEqual(before);
+        a.options.backup = backup;
+        // Crash after the durable backed-up intent, before local unlink. Startup must resume it.
+        const run = a.options.db.run;
+        a.options.db.run = async () => {throw new Error('simulated crash before unlink');};
+        await expect(a.sync.resetForRecreatedServer(nextEndpoint,true)).rejects.toThrow('simulated crash');
+        a.options.db.run = run;
+        expect(existsSync(backupPath)).toBe(true); expect(backup).toHaveBeenCalledTimes(1);
+        const storedBackup = new DatabaseSync(backupPath);
+        try {
+          for (const table of Object.keys(financialTableTypes)) expect(storedBackup.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(before[table]);
+          expect(storedBackup.prepare('SELECT binding_id FROM sync_local_state').get()!.binding_id).toBeTruthy();
+        } finally {storedBackup.close();}
+        await a.restart(); a.sync.setForeground(false);
+        await a.sync.resumeRecoveryOnStartup();
+        expect(a.profile().serverReset?.phase).toBe('ready'); expect(a.profile().profile).toBeUndefined();
+        expect(await finance()).toEqual(before);
+        expect((await a.options.db.read('SELECT binding_id,mode FROM sync_local_state'))[0]).toMatchObject({binding_id:null,mode:'disabled'});
+        a.options.backup = async () => {const path=join(directory,'before-baseline.sqlite'); await a.backupTo(path); return path;};
+        a.sync.setForeground(true); await a.sync.create(); await a.sync.sync();
+        expect(await finance()).toEqual(before); expect(a.profile().profile!.pin.serverId).toBe(environment.serverId);
+        b.options.backup = async () => {const path=join(directory,'secondary-'+crypto.uuid()+'.sqlite'); await b.backupTo(path); return path;};
+        await b.sync.resetForRecreatedServer(nextEndpoint,true);
+        b.sync.setForeground(true);
+        await b.sync.connectInvitation((await a.sync.createInvitation()).link);
+        await expect.poll(async () => (await a.sync.status()).pairingRequests.length,{timeout:15000}).toBe(1);
+        await a.sync.approve(b.profile().profile!.deviceId);
+        await expect.poll(async () => (await b.sync.status()).phase,{timeout:15000}).toBe('bound');
+        await b.sync.sync(); await a.sync.sync(); await b.sync.sync();
+        expect(await b.rows()).toHaveLength(1); expect(await a.rows()).toHaveLength(1);
+        expect(b.login).not.toHaveBeenCalled();
+        a.sync.setForeground(false); b.sync.setForeground(false);
+        await a.sync.coordinator.cancelAndWait(); await b.sync.coordinator.cancelAndWait();
+      } finally {
+        a.sync.setForeground(false); await a.sync.coordinator.cancelAndWait();
+        nextServer?.closeAllConnections(); if(nextServer) await new Promise<void>(resolve => nextServer!.close(() => resolve()));
+        await nextPool?.end(); await admin.query(`DROP DATABASE IF EXISTS ${nextDatabase}`); rmSync(directory,{recursive:true,force:true});
+      }
+    },45000);
   },
 );

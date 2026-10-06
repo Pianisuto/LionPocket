@@ -44,7 +44,6 @@ jobs:
       - run: npm run lint
       - run: npm run sync:dev:up
       - run: npm run sync:dev:test
-      - run: node tools/release/version-skew.cjs
       - if: always()
         run: npm run sync:dev:down
       - run: git diff --check

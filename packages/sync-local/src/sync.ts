@@ -1,3 +1,5 @@
+import { unlinkRecreatedServer } from './server-reset';
+import { createRecoveryPackage, parseRecoveryPackage } from './recovery-package';
 import { parsePairingInvitation, pairingLink, inviteSigningInput, pairingSecurityCode, pairingErrorMessage, verifyPairing, verifyInvite, barePairing, pairingCapabilityInput, type PairingInvite, type NamedPairing } from '@lionpocket/sync-protocol';
 import {
   prepareAnchorArchive,
@@ -25,14 +27,12 @@ import { bankSyncCoordinator, type SyncCoordinator } from './coordinator';
 import { syncFetchText } from './network';
 import {
   activeDevice,
-  assertTrustPin,
   assertUuid,
   canonicalStringify,
   decodeCanonical,
   encodeUtf8,
   validateGrantChain,
   type PairingRequest,
-  type TrustPin,
 } from '@lionpocket/sync-protocol';
 import {
   DeviceProvisioning,
@@ -41,7 +41,7 @@ import {
   type RegistryResponse,
 } from './provisioning';
 import { ManualSync, fetchSyncHttp, type TransportSodium } from './transport';
-import { DevelopmentSyncActions } from './development';
+import { SyncActions } from './actions';
 import {
   acceptKeyCheckpoints,
   makeKeyCheckpoint,
@@ -88,20 +88,22 @@ export interface SyncSession {
 }
 export interface SyncSaved {
   endpoint: string;
+  serverReset?: { phase: 'pending-unlink' | 'ready'; backupPath: string };
   identity?: { issuer: string; subject: string };
   profile?: ProvisionedProfile;
   request?: PairingRequest;
-  phase?: 'creating' | 'recovery' | 'pairing' | 'bound';
+  phase?: 'creating' | 'pairing' | 'bound';
   discovered?: SyncEnvironment;
   owner?: boolean;
   pendingKeyCheckpoint?: KeyCheckpoint;
   pendingRecovery?: SignedRecovery;
+  pendingRecoveryPackage?: string;
   recoveryVersion?: string;
   pairingInvite?: PairingInvite;
   issuedInvite?: PairingInvite;
   pairingSubmitted?: boolean;
   deviceName?: string;
-  deviceTransport?: boolean;
+  recoveryPackage?: string;
   approvingDevice?: string;
 }
 export interface SyncStorage {
@@ -127,8 +129,6 @@ export interface SyncOptions {
   defaultEndpoint?: string;
   /** Only isolated synthetic harnesses may use loopback HTTP. Native clients never set this. */
   allowLocalDevelopment?: boolean;
-  /** Legacy test fixtures can exercise the old binding order; native onboarding always requires recovery. */
-  requireRecoveryConfirmation?: boolean;
   login(environment: SyncEnvironment): Promise<SyncSession>;
 }
 export function normalizeEndpoint(input: string, allowLocalDevelopment = false): string {
@@ -162,6 +162,7 @@ export class SyncController {
   private pairingError?: string;
   private pairingStep: 'preparing' | 'waiting' | 'connecting' | undefined;
   private approvalRunning = false;
+  private resetting = false;
   constructor(readonly options: SyncOptions) {
     this.coordinator = bankSyncCoordinator(options.db, {
       eligible: async () => {
@@ -174,7 +175,7 @@ export class SyncController {
           'SELECT paused FROM sync_control WHERE id=1',
         );
         return (
-          saved?.phase === 'bound' &&
+          !this.resetting && saved?.phase === 'bound' &&
           state.mode === 'financial' &&
           !!state.binding_id &&
           !control.paused
@@ -476,7 +477,9 @@ export class SyncController {
             : undefined,
         };
         delete next.request;
+        next.recoveryPackage = await createRecoveryPackage(new DeviceProvisioning(profile,this.options.secrets,this.crypto()),s.endpoint,next.recoveryVersion!);
         delete next.pendingRecovery;
+        delete next.pendingRecoveryPackage;
         delete next.pendingKeyCheckpoint;
         await this.options.storage.save(next);
       },
@@ -484,7 +487,7 @@ export class SyncController {
         (await this.options.storage.load())?.profile ?? null,
       firstPull: async (device) => {
         const current = (await this.options.storage.load())!;
-        const session = await this.session(current, interactive);
+        await this.session(current, interactive);
         const engine = new ManualSync(
           this.options.db,
           device,
@@ -493,9 +496,8 @@ export class SyncController {
           s.endpoint,
           fetchSyncHttp(s.endpoint),
           () => true,
-          current.deviceTransport ? "/v2/devices/vaults" : "/v1/vaults",
         );
-        await engine.pull(session.accessToken);
+        await engine.pull();
       },
     };
   }
@@ -516,6 +518,7 @@ export class SyncController {
   }
   /** Native startup calls this before subscribing to foreground. It never reserves new consent. */
   async resumeRecoveryOnStartup() {
+    await this.resumeServerReset();
     const pending = await this.incompleteActivation();
     if (!pending) return;
     await this.coordinator.cancelAndWait();
@@ -550,7 +553,7 @@ export class SyncController {
   }
   /** Foreground polling is single-flight, resumable from public metadata and protected device seeds. */
   private async pollPairing() {
-    if (this.pairingRunning || this.invitationFlight || !this.coordinator.foreground) return;
+    if (this.resetting || this.pairingRunning || this.invitationFlight || !this.coordinator.foreground) return;
     clearTimeout(this.pairingTimer);
     this.pairingAbort = new AbortController();
     this.pairingRunning = true;
@@ -566,7 +569,7 @@ export class SyncController {
           this.pairingStep = 'connecting'; this.pairingChanged();
           const d = this.device(s);
           await d.receive(result); await acceptKeyCheckpoints(d,result);
-          s.profile = d.profile; s.deviceTransport = true;
+          s.profile = d.profile;
           await this.options.storage.save(s);
           await this.bind(s);
           this.pairingStep = undefined;
@@ -575,18 +578,17 @@ export class SyncController {
       } else if (s?.owner && s.phase === 'bound') {
         observe = true;
         if (this.approvalRunning) return;
-        if (s.approvingDevice) { await this.approve(s.approvingDevice,undefined,false); return; }
+        if (s.approvingDevice) { await this.performApproval(s.approvingDevice,false); return; }
         const session = await this.session(s,false,this.pairingAbort.signal);
         const result = await this.control(s,'pairing-list',{},session,false,this.pairingAbort.signal) as unknown as {requests: NamedPairing[]};
-        this.pendingRequests = result.requests.filter(named => Boolean(named.pairingAuth && named.pairingAuth.invite.expiresAt > Date.now())).map(named => {
+        this.pendingRequests = result.requests.map(named => {
           const request = barePairing(named); verifyPairing(request,this.crypto());
-          if (named.pairingAuth) {
-            const auth = named.pairingAuth; verifyInvite(auth.invite,this.crypto());
+          const auth = named.pairingAuth;
+          if (!auth) throw new Error('invite_invalid');
+          verifyInvite(auth.invite,this.crypto());
           if (auth.invite.expiresAt <= Date.now()) throw new Error('invite_expired');
-            if (canonicalStringify(auth.invite.pin) !== canonicalStringify(s.profile!.pin) || !this.crypto().verify(auth.capabilitySignature,pairingCapabilityInput(auth.invite,request,auth.deviceName),auth.invite.capabilityPublicKey)) throw new Error('invite_invalid');
-            return { ...named, deviceName: auth.deviceName, securityCode: pairingSecurityCode(auth.invite.id,request,this.crypto()) };
-          }
-          return { ...named, securityCode: pairingSecurityCode('',request,this.crypto()) };
+          if (canonicalStringify(auth.invite.pin) !== canonicalStringify(s.profile!.pin) || !this.crypto().verify(auth.capabilitySignature,pairingCapabilityInput(auth.invite,request,auth.deviceName),auth.invite.capabilityPublicKey)) throw new Error('invite_invalid');
+          return { ...named, deviceName: auth.deviceName, securityCode: pairingSecurityCode(auth.invite.id,request,this.crypto()) };
         });
       }
     } catch (error) {
@@ -654,6 +656,7 @@ export class SyncController {
     }
   }
   private async beginInvitation(input: string) {
+    await this.resumeServerReset();
     await this.requireRecoveryFinalized();
     const parsed = parsePairingInvitation(input,this.crypto());
     await this.inspectPairingInvitation(input);
@@ -677,7 +680,7 @@ export class SyncController {
     } else {
       const d = await DeviceProvisioning.prepare(parsed.invite.pin,this.options.secrets,this.crypto());
       s = { endpoint: parsed.invite.endpoint, discovered:e, profile:d.profile, request:await d.request(), phase:'pairing', pairingInvite:parsed.invite,
-        deviceName:this.options.deviceName ?? (this.options.dialect === 'android' ? 'Celular Android' : 'Computador'), deviceTransport:true };
+        deviceName:this.options.deviceName ?? (this.options.dialect === 'android' ? 'Celular Android' : 'Computador'), };
       const capability = this.crypto().decode(parsed.capability);
       try { await this.options.secrets.store(d.scope('pairingCapability'),capability); } finally { this.crypto().erase(capability); }
       await this.options.storage.save(s);
@@ -784,6 +787,7 @@ export class SyncController {
     saved: SyncSaved,
     interactive = true,
     signal?: AbortSignal,
+    account = false,
   ) {
     const environment = await this.environment(saved.endpoint, signal);
     if (
@@ -796,15 +800,12 @@ export class SyncController {
         saved.discovered.serverEpoch !== environment.serverEpoch ||
         canonicalStringify(saved.discovered.oidc) !== canonicalStringify(environment.oidc)))
       throw new Error('server_configuration_changed');
-    if (!saved.deviceTransport && saved.phase === 'bound' && environment.pairingVersion === 2 && saved.profile) {
+    if (!account && saved.profile) {
       const registry = validateGrantChain(saved.profile.grants,saved.profile.pin,this.crypto(),saved.profile.checkpoint);
       const own = activeDevice(registry.devices,saved.profile.deviceId);
       if (own.signingPublicKey !== saved.profile.signingPublicKey || own.boxPublicKey !== saved.profile.boxPublicKey) throw new Error('key_mismatch');
-      saved.deviceTransport = true;
-      const latest = await this.options.storage.load();
-      if (latest?.profile?.deviceId === saved.profile.deviceId) await this.options.storage.save({...latest,deviceTransport:true});
+      return { accessToken: '', issuer: '', subject: '', expiresAt: Number.MAX_SAFE_INTEGER };
     }
-    if (saved.deviceTransport) return { accessToken: '', issuer: '', subject: '', expiresAt: Number.MAX_SAFE_INTEGER };
     let session = this.cachedSession;
     if (
       !session ||
@@ -837,26 +838,28 @@ export class SyncController {
     const device = this.device(saved),
       target = create
         ? '/v1/vaults'
-        : `${saved.deviceTransport ? '/v2/devices/vaults' : '/v1/vaults'}/${device.profile.pin.vaultId}/${action}`,
-      body = canonicalStringify(value);
+        : `${['recovery-fetch','recover'].includes(action) ? '/v1/vaults' : '/v2/devices/vaults'}/${device.profile.pin.vaultId}/${action}`,
+      body = canonicalStringify(value),
+      accountToken = create || ['recovery-fetch','recover'].includes(action) ? session.accessToken : '';
     const proof = await device.proof(
       'POST',
       target,
       saved.endpoint,
       body,
-      session.accessToken,
+      accountToken,
     );
     return fetchSyncHttp(saved.endpoint,signal).request(
       target,
       body,
       device.crypto.encode(encodeUtf8(canonicalStringify(proof))),
-      session.accessToken,
+      accountToken,
     ) as Promise<RegistryResponse>;
   }
   async create() {
+    await this.resumeServerReset();
     await this.requireRecoveryFinalized();
     const s = await this.saved(),
-      session = await this.session(s),
+      session = await this.session(s,true,undefined,true),
       environment = await this.environment(s.endpoint),
       crypto = this.crypto();
     if (!s.profile) {
@@ -877,8 +880,6 @@ export class SyncController {
       s.request = await device.request();
       s.phase = 'creating';
       s.owner = true;
-      // New servers offer signed-device control, keeping OIDC for account creation/recovery.
-      s.deviceTransport = environment.pairingVersion === 2;
       await this.options.storage.save(s);
     }
     if (s.phase !== 'creating')
@@ -891,7 +892,7 @@ export class SyncController {
       await this.finishCreation(s);
       return this.status();
     }
-    const grant = await device.grant(s.request!, s.request!.fingerprint);
+    const grant = await device.grant(s.request!);
     let response: RegistryResponse;
     try {
       response = await this.control(
@@ -912,78 +913,7 @@ export class SyncController {
     return this.status();
   }
   private async finishCreation(s: SyncSaved) {
-    if (this.options.requireRecoveryConfirmation === true && !s.recoveryVersion) {
-      s.phase = 'recovery';
-      await this.options.storage.save(s);
-    } else await this.bind(s);
-  }
-  invitation(saved: SyncSaved): string {
-    if (!saved.profile) return '';
-    return (
-      'LPV1.' +
-      this.crypto().encode(
-        encodeUtf8(
-          canonicalStringify({
-            endpoint: saved.endpoint,
-            pin: saved.profile.pin,
-          }),
-        ),
-      )
-    );
-  }
-  async inspectInvitation(invitation: string) {
-    if (!invitation.startsWith('LPV1.') || invitation.length > 4096)
-      throw new Error('Convite inválido.');
-    const bytes = this.crypto().decode(invitation.slice(5));
-    const parsed = decodeCanonical(bytes, 4096) as {
-      endpoint: string;
-      pin: TrustPin;
-    };
-    assertTrustPin(parsed.pin);
-    normalizeEndpoint(parsed.endpoint, this.options.allowLocalDevelopment);
-    return {
-      ...parsed,
-      fingerprint: this.crypto().hash(
-        canonicalStringify({
-          context: 'LionPocket/trust-pin/v1',
-          pin: parsed.pin,
-        }),
-      ),
-    };
-  }
-  async pair(invitation: string, confirmedFingerprint: string) {
-    await this.requireRecoveryFinalized();
-    const invite = await this.inspectInvitation(invitation);
-    const selected = await this.options.storage.load();
-    if (selected?.endpoint && selected.endpoint !== invite.endpoint) throw new Error('O convite pertence a outro servidor. Confira a URL antes de continuar.');
-    if (confirmedFingerprint !== invite.fingerprint)
-      throw new Error(
-        'Confira o código da autoridade no aparelho que criou o cofre.',
-      );
-    await this.configure(invite.endpoint);
-    const s = await this.saved(),
-      session = await this.session(s),
-      e = await this.environment(s.endpoint);
-    if (
-      invite.pin.serverId !== e.serverId ||
-      invite.pin.serverEpoch !== e.serverEpoch
-    )
-      throw new Error('epoch_changed');
-    if (!s.profile) {
-      const d = await DeviceProvisioning.prepare(
-        invite.pin,
-        this.options.secrets,
-        this.crypto(),
-      );
-      s.profile = d.profile;
-      s.request = await d.request();
-      s.phase = 'pairing';
-      await this.options.storage.save(s);
-    }
-    if (canonicalStringify(s.profile.pin) !== canonicalStringify(invite.pin))
-      throw new Error('trust_pin_mismatch');
-    await this.control(s, 'pairings', s.request, session);
-    return this.status();
+    await this.bind(s);
   }
   private async bind(s: SyncSaved) {
     const [state] = await this.options.db.read(
@@ -1000,19 +930,6 @@ export class SyncController {
     s.phase = 'bound';
     await this.options.storage.save(s);
     this.coordinator.request('foreground');
-  }
-  async receive() {
-    await this.requireRecoveryFinalized();
-    const s = await this.saved(),
-      session = await this.session(s),
-      d = this.device(s);
-    const response = await this.control(s, 'registry', {}, session);
-    await d.receive(response);
-    await acceptKeyCheckpoints(d, response);
-    s.profile = d.profile;
-    await this.options.storage.save(s);
-    await this.bind(s);
-    return this.status();
   }
   private async engine(s: SyncSaved, signal?: AbortSignal) {
     const d = this.device(s),
@@ -1035,7 +952,6 @@ export class SyncController {
       s.endpoint,
       fetchSyncHttp(s.endpoint, signal),
       () => !signal?.aborted,
-      s.deviceTransport ? '/v2/devices/vaults' : '/v1/vaults',
     );
   }
   async sync() {
@@ -1045,10 +961,10 @@ export class SyncController {
   private async syncCycle(interactive: boolean, signal: AbortSignal) {
     const s = await this.saved();
     try {
-      const session = await this.session(s, interactive, signal);
+      await this.session(s, interactive, signal);
       if (signal.aborted) throw new Error('foreground_inactive');
       const engine = await this.engine(s, signal);
-      await engine.sync(session.accessToken);
+      await engine.sync();
       const latest = await this.saved();
       const newest = latest.profile;
       if (!newest || (BigInt(newest.checkpoint?.version ?? '0') <= BigInt(engine.device.profile.checkpoint?.version ?? '0') &&
@@ -1065,14 +981,10 @@ export class SyncController {
       throw error;
     }
   }
-  async requests() {
-    const s = await this.saved(),
-      session = await this.session(s);
-    return this.control(s, 'pairing-list', {}, session) as unknown as Promise<{
-      requests: PairingRequest[];
-    }>;
+  async approve(deviceId: string) {
+    return this.performApproval(deviceId,true);
   }
-  async approve(deviceId: string, fingerprint?: string, interactive = true) {
+  private async performApproval(deviceId: string, interactive: boolean) {
     if (this.approvalRunning) throw new Error('pairing_busy');
     this.approvalRunning = true;
     try {
@@ -1088,16 +1000,14 @@ export class SyncController {
         const named = pending.requests.find(r => r.deviceId === deviceId);
         if (!named) throw new Error('pairing_missing');
         const request = barePairing(named);
-        // The new UI must never downgrade an authenticated LPV2 request to public LPV1 metadata.
-        if (!named.pairingAuth && fingerprint === undefined) throw new Error('client_upgrade_required');
-        if (named.pairingAuth) {
-          const auth = named.pairingAuth; verifyInvite(auth.invite,this.crypto());
-          if (auth.invite.expiresAt <= Date.now()) throw new Error('invite_expired');
-          if (canonicalStringify(auth.invite.pin) !== canonicalStringify(s.profile!.pin) || !this.crypto().verify(auth.capabilitySignature,pairingCapabilityInput(auth.invite,request,auth.deviceName),auth.invite.capabilityPublicKey)) throw new Error('invite_invalid');
-        }
+        const auth = named.pairingAuth;
+        if (!auth) throw new Error('invite_invalid');
+        verifyInvite(auth.invite,this.crypto());
+        if (auth.invite.expiresAt <= Date.now()) throw new Error('invite_expired');
+        if (canonicalStringify(auth.invite.pin) !== canonicalStringify(s.profile!.pin) || !this.crypto().verify(auth.capabilitySignature,pairingCapabilityInput(auth.invite,request,auth.deviceName),auth.invite.capabilityPublicKey)) throw new Error('invite_invalid');
         // Durable authorization intent: after a crash, finish exactly the device the human approved.
         s.approvingDevice = deviceId; await this.options.storage.save(s);
-        device.acceptRegistry(await this.control(s,'grants',await device.grant(request,fingerprint ?? request.fingerprint),session));
+        device.acceptRegistry(await this.control(s,'grants',await device.grant(request),session));
       } else if (s.approvingDevice !== deviceId) throw new Error('pairing_missing');
       s.profile = device.profile; await this.options.storage.save(s);
       try { await this.control(s,'deliveries',await device.delivery(deviceId),session); }
@@ -1269,12 +1179,16 @@ export class SyncController {
       created = await makeRecovery(d, this.options.sodium, version);
     s.pendingRecovery = created.recovery;
     await this.options.storage.save(s);
-    return { code: created.code };
+    s.pendingRecoveryPackage = await createRecoveryPackage(d,s.endpoint,version);
+    await this.options.storage.save(s);
+    return { code: created.code, recoveryPackage: s.pendingRecoveryPackage };
   }
   async confirmRecovery(code: string) {
     await this.requireRecoveryFinalized();
     const s = await this.saved();
-    if (!s.pendingRecovery) throw new Error('Gere um código de recovery.');
+    if (!s.pendingRecovery || !s.pendingRecoveryPackage) throw new Error('Gere um pacote e código de recuperação.');
+    const artifact = await this.inspectRecoveryPackage(s.pendingRecoveryPackage);
+    if (canonicalStringify(artifact.pin)!==canonicalStringify(s.profile!.pin) || artifact.recoveryVersion!==s.pendingRecovery.envelope.recoveryVersion || artifact.endpoint!==s.endpoint) throw new Error('recovery_package_invalid');
     openRecovery(this.device(s), this.options.sodium, s.pendingRecovery, code);
     const master = this.crypto().decode(code.slice(4));
     try {
@@ -1292,25 +1206,25 @@ export class SyncController {
       await this.session(s),
     );
     s.recoveryVersion = s.pendingRecovery.envelope.recoveryVersion;
+    s.recoveryPackage = s.pendingRecoveryPackage;
+    delete s.pendingRecoveryPackage;
     delete s.pendingRecovery;
     await this.options.storage.save(s);
-    if (s.phase === 'recovery') await this.bind(s);
     return this.status();
   }
-  async recover(
-    invitation: string,
-    confirmedFingerprint: string,
-    code: string,
-  ) {
+  async inspectRecoveryPackage(input: string) {
+    const artifact = parseRecoveryPackage(input,this.crypto());
+    if (normalizeEndpoint(artifact.endpoint,this.options.allowLocalDevelopment) !== artifact.endpoint) throw new Error('recovery_package_invalid');
+    return artifact;
+  }
+  async recover(recoveryPackage: string, code: string) {
     await this.requireRecoveryFinalized();
-    const invite = await this.inspectInvitation(invitation);
-    if (invite.fingerprint !== confirmedFingerprint)
-      throw new Error('fingerprint_mismatch');
+    const invite = await this.inspectRecoveryPackage(recoveryPackage);
     await this.configure(invite.endpoint);
     const s = await this.saved();
     if (s.phase === 'bound')
       throw new Error('Use uma instalação separada para recuperar.');
-    const session = await this.session(s),
+    const session = await this.session(s,true,undefined,true),
       e = await this.environment(s.endpoint);
     if (
       e.serverId !== invite.pin.serverId ||
@@ -1336,6 +1250,8 @@ export class SyncController {
         session,
       )) as RegistryResponse & { recovery: SignedRecovery | null };
     if (!response.recovery) throw new Error('recovery_unavailable');
+    if (canonicalStringify(response.pin)!==canonicalStringify(invite.pin)) throw new Error('trust_pin_mismatch');
+    if (BigInt(response.recovery.envelope.recoveryVersion) < BigInt(invite.recoveryVersion)) throw new Error('recovery_rollback');
     const bundle = openRecovery(
       d,
       this.options.sodium,
@@ -1347,6 +1263,9 @@ export class SyncController {
       d.profile.pin,
       d.crypto,
     );
+    validateGrantChain(response.grants,d.profile.pin,d.crypto,invite.checkpoint);
+    if (bundle.activeKeyVersion < invite.keyVersion || BigInt(bundle.registryVersion) > BigInt(registry.checkpoint.version)) throw new Error('recovery_rollback');
+    if (validateKeyCheckpoints(response.keyCheckpoints ?? [],d.profile.pin,response.grants,d) !== bundle.activeKeyVersion) throw new Error('recovery_stale');
     d.profile.grants = response.grants;
     d.profile.checkpoint = registry.checkpoint;
     const authority = d.crypto.decode(bundle.authoritySignSeed);
@@ -1380,7 +1299,7 @@ export class SyncController {
     )
       d.acceptRegistry(response);
     else {
-      const grant = await d.grant(s.request!, s.request!.fingerprint);
+      const grant = await d.grant(s.request!);
       d.acceptRegistry(
         await this.control(
           s,
@@ -1392,11 +1311,49 @@ export class SyncController {
     }
     s.profile = d.profile;
     s.owner = true;
+    s.recoveryPackage = recoveryPackage;
     s.recoveryVersion = bundle.recoveryVersion;
     await this.options.storage.save(s);
     await this.rotate(s, session, true);
     await this.bind(s);
     return this.status();
+  }
+  /** Explicit consent is durable only after the full local backup succeeds. No remote deletion occurs. */
+  async resetForRecreatedServer(endpoint: string, confirmed: boolean) {
+    if (!confirmed) throw new Error('Confirme que o remoto anterior não será recuperado e que este banco local será a fonte de verdade.');
+    if (this.resetting || this.approvalRunning || this.invitationFlight) throw new Error('Aguarde a operação de sincronização atual terminar.');
+    await this.requireRecoveryFinalized();
+    this.resetting = true;
+    clearTimeout(this.pairingTimer);
+    this.pairingAbort?.abort();
+    try {
+      while (this.pairingRunning) await new Promise<void>(resolve => setTimeout(resolve,20));
+      await this.coordinator.cancelAndWait();
+      const normalized = normalizeEndpoint(endpoint,this.options.allowLocalDevelopment);
+      const discovered = await this.environment(normalized);
+      if (discovered.pairingVersion !== 2) throw new Error('client_upgrade_required');
+      const conflicts = await this.options.db.read('SELECT conflict_id FROM sync_conflicts WHERE resolution_id IS NULL LIMIT 1');
+      const reviews = await this.options.db.read("SELECT review_id FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance','catalog_projection_audit','restore_reconnect_backup') AND reason NOT LIKE 'import_receipt:%' LIMIT 1");
+      if (conflicts.length || reviews.length) throw new Error('Resolva as revisões locais antes de recriar a sincronização.');
+      let backupPath: string;
+      try { backupPath = await this.options.backup(); }
+      catch { throw new Error('Não foi possível preservar o backup local. Nenhum vínculo foi removido.'); }
+      if (!backupPath) throw new Error('Não foi possível preservar o backup local.');
+      // A crash here is resumed before any onboarding/transport. The old database remains in the backup.
+      await this.options.storage.save({endpoint:normalized,discovered,serverReset:{phase:'pending-unlink',backupPath}});
+      await this.resumeServerReset();
+      this.cachedSession = undefined; this.pendingRequests = []; this.pairingError = undefined;
+      this.coordinator.error = undefined;
+      return this.status();
+    } finally { this.resetting = false; }
+  }
+  private async resumeServerReset() {
+    const s = await this.options.storage.load();
+    if (s?.serverReset?.phase !== 'pending-unlink') return;
+    if (!s.serverReset.backupPath) throw new Error('reset_backup_missing');
+    await this.options.db.run(unlinkRecreatedServer());
+    s.serverReset.phase = 'ready';
+    await this.options.storage.save(s);
   }
   async reconnectRestored(confirm: boolean) {
     await this.requireRecoveryFinalized();
@@ -1494,7 +1451,7 @@ export class SyncController {
     recover: boolean,
   ) {
     const s = await this.saved();
-    await new DevelopmentSyncActions(await this.engine(s)).resolve(
+    await new SyncActions(await this.engine(s)).resolve(
       objectId,
       heads,
       revisionId,
@@ -1510,7 +1467,7 @@ export class SyncController {
       );
     const sync =
       saved?.phase === 'bound'
-        ? await new DevelopmentSyncActions(await this.engine(saved)).status()
+        ? await new SyncActions(await this.engine(saved)).status()
         : null;
     const counts: Record<string, number> = {};
     for (const table of [
@@ -1631,16 +1588,8 @@ export class SyncController {
       endpoint: saved?.endpoint ?? (this.options.defaultEndpoint ?? ''),
       phase: saved?.phase ?? 'local',
       owner: saved?.owner ?? false,
-      invitation: saved?.owner ? this.invitation(saved) : '',
-      authorityFingerprint: saved?.profile
-        ? this.crypto().hash(
-            canonicalStringify({
-              context: 'LionPocket/trust-pin/v1',
-              pin: saved.profile.pin,
-            }),
-          )
-        : '',
-      pairingFingerprint: saved?.request?.fingerprint ?? '',
+      recoveryPackage: saved?.pendingRecoveryPackage ?? saved?.recoveryPackage ?? '',
+      resetBackupPath: saved?.serverReset?.backupPath ?? '',
       deviceId: saved?.profile?.deviceId ?? '',
       devices: [
         ...new Map(

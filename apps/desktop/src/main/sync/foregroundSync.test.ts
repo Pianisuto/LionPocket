@@ -13,12 +13,12 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import sodium from 'libsodium-wrappers-sumo';
 import {
-  BetaSync,
+  SyncController,
   ManualSync,
   ProvisioningCrypto,
   receivePage,
   startFinancialBaseline,
-  type BetaSaved,
+  type SyncSaved,
 } from '@lionpocket/sync-local';
 import {
   canonicalStringify,
@@ -65,7 +65,7 @@ async function setup(path = ':memory:') {
         randomUUID,
       ),
     );
-  let saved: BetaSaved = {
+  let saved: SyncSaved = {
     endpoint: 'https://fixture.invalid',
     profile: client.profile,
     phase: 'bound',
@@ -84,14 +84,14 @@ async function setup(path = ':memory:') {
     dialect: 'desktop' as const,
     storage: {
       load: async () => structuredClone(saved),
-      save: async (s: BetaSaved) => {
+      save: async (s: SyncSaved) => {
         saved = structuredClone(s);
       },
     },
     backup: async () => '/fixture/backup.sqlite',
     login,
   };
-  const beta = new BetaSync(options);
+  const beta = new SyncController(options);
   const remove = bank.onLocalSyncWrite(() => beta.localWriteCommitted());
   cleanup.push(() => {
     remove();
@@ -177,11 +177,11 @@ async function setup(path = ':memory:') {
     close,
   };
 }
-async function foreground(beta: BetaSync) {
+async function foreground(beta: SyncController) {
   beta.setForeground(true);
   await vi.advanceTimersByTimeAsync(0);
 }
-async function manual(beta: BetaSync) {
+async function manual(beta: SyncController) {
   const p = beta.sync();
   await vi.advanceTimersByTimeAsync(0);
   return p;
@@ -221,25 +221,17 @@ describe('financial foreground sync boundaries', () => {
     expect(JSON.parse(s.posts[0]).protocolVersion).toBe(1);
   });
 
-  it('never opens login automatically; manual authenticates and automatic reuses only a valid volatile session', async () => {
+  it('approved devices synchronize without OIDC, including after restart or token expiration', async () => {
     const s = await setup();
     await foreground(s.beta);
-    expect(s.login).not.toHaveBeenCalled();
-    expect((await s.beta.status()).activity).toBe('action-required');
     await manual(s.beta);
-    expect(s.login).toHaveBeenCalledTimes(1);
     s.bank.saveTransaction(input);
     await vi.advanceTimersByTimeAsync(2000);
-    expect(s.login).toHaveBeenCalledTimes(1);
     expect((await s.beta.status()).activity).toBe('synced');
     await vi.advanceTimersByTimeAsync(300000);
-    s.beta.setForeground(true);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(s.login).toHaveBeenCalledTimes(1);
-    expect((await s.beta.status()).activity).toBe('action-required');
-    expect(JSON.stringify(await s.options.storage.load())).not.toContain(
-      'only-in-memory',
-    );
+    s.beta.setForeground(true); await vi.advanceTimersByTimeAsync(0);
+    expect(s.login).not.toHaveBeenCalled();
+    expect((await s.beta.status()).activity).toBe('synced');
   });
   it('sends without legacy combination approval and leaves real restore decisions specific to their records', async () => {
     const s = await setup();
@@ -323,7 +315,7 @@ describe('financial foreground sync boundaries', () => {
     // Open the same durable SQLite, with a fresh controller (sessions are not restored).
     const reopened = new LionPocketDatabase(path);
     cleanup.push(() => reopened.db.close());
-    const next = new BetaSync({ ...s.options, db: reopened.syncDatabase() });
+    const next = new SyncController({ ...s.options, db: reopened.syncDatabase() });
     cleanup.push(() => next.coordinator.dispose());
     expect(reopened.db.prepare('SELECT * FROM sync_outbox').all()).toEqual(
       pending,
@@ -331,7 +323,7 @@ describe('financial foreground sync boundaries', () => {
     const calls = s.fetch.mock.calls.length;
     await foreground(next);
     expect(s.fetch.mock.calls.length).toBe(calls + 1);
-    expect(s.login).toHaveBeenCalledTimes(1);
+    expect(s.login).not.toHaveBeenCalled();
     expect((await next.status()).sync?.pending).toBe(1);
   });
   it('a pending debounce stays local while paused or inactive, then resumes on an explicit foreground event', async () => {
@@ -483,22 +475,6 @@ describe('financial foreground sync boundaries', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(s.posts[0]).toBe(attempted[0]);
     expect((await s.beta.status()).sync?.pending).toBe(0);
-  });
-  it('preserves a manual request across the temporary lifecycle blur of an intentional system-browser login', async () => {
-    const s = await setup();
-    await foreground(s.beta);
-    const login = s.login.getMockImplementation()!;
-    s.login.mockImplementation(async () => {
-      s.beta.setForeground(false);
-      const session = await login();
-      s.beta.setForeground(true);
-      return session;
-    });
-    const result = s.beta.sync();
-    await vi.advanceTimersByTimeAsync(1);
-    await result;
-    expect(s.login).toHaveBeenCalledTimes(1);
-    expect((await s.beta.status()).activity).toBe('synced');
   });
   it('never labels pending reviews/quarantine as synced and cofre errors retain pending', async () => {
     const s = await setup();

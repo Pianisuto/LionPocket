@@ -49,7 +49,7 @@ const unsignedProof = {
   vaultId: fields.vaultId,
   deviceId: fields.deviceId,
   method: 'POST',
-  target: `/v1/vaults/${fields.vaultId}/pairings`,
+  target: `/v2/devices/vaults/${fields.vaultId}/registry`,
   origin: 'http://127.0.0.1:8787',
   issuedAt: 1790769600000,
   nonce: fields.nonce,

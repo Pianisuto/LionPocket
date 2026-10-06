@@ -6,7 +6,6 @@ O usuário autorizou, em 30/09/2026, um próximo PR com escopo grande para poder
 
 Entregar um fluxo testável pelas telas dos dois apps, com servidor de teste acessível pelo celular, onboarding revisado de bases preenchidas e sincronização dos principais dados financeiros. Reunir Etapas 2 e 3 da proposta e os requisitos de operação necessários para essa beta privada em um PR coerente, com commits internos por bloco e validação contínua. O pedido por velocidade não elimina os critérios de preservação dos dados.
 
-Fontes: [Visão e Decisões no vault](</home/lvulczak/Documentos/Obsidian/Pessoal/Lion Pocket/Visão e Decisões.md>), [proposta](local-first-sync-proposal.md), [contratos](local-first-sync-contracts.md), [provisioning](local-first-sync-stage1-provisioning.md) e [piloto vertical validado](local-first-sync-stage1-transport.md). Consultar a versão atual antes de implementar. Usar `docs/fixtures/local-first/stage1-transport-results.json` como evidência de partida; o piloto não habilita uso real por si só.
 
 ## Escopo
 

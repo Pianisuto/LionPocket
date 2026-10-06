@@ -52,7 +52,7 @@ describe('beta recovery and key lifecycle', () => {
         a.crypto,
       ),
       request = await b.request(),
-      grant = await a.grant(request, request.fingerprint);
+      grant = await a.grant(request);
     a.acceptRegistry({
       pin: a.profile.pin,
       grants: [...a.profile.grants, grant],
@@ -90,7 +90,7 @@ describe('beta recovery and key lifecycle', () => {
         a,
       ),
     ).toThrow('invalid_key_recipients');
-    const revoke = await a.grant(request, request.fingerprint, 'revoked');
+    const revoke = await a.grant(request, 'revoked');
     a.acceptRegistry({
       pin: a.profile.pin,
       grants: [...a.profile.grants, revoke],

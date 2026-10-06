@@ -1,5 +1,4 @@
 import { SyncPanel } from '../SyncPanel';
-import { DevelopmentSync } from '../DevelopmentSync';
 import { useState } from 'react';
 import { DatabaseBackup, Download, FileJson, FileSpreadsheet, HardDrive, LockKeyhole, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
 import type { CatalogInput, Catalogs, MoneyKind } from '@lionpocket/core/types';
@@ -88,7 +87,6 @@ export const Settings = ({ catalogs, month, showPriorities, onShowPrioritiesChan
   return (
     <section className="page-section settings-grid">
       <SyncPanel onChanged={onSyncChanged} />
-      <DevelopmentSync onChanged={onSyncChanged} />
       <div className="panel settings-panel">
         <header className="panel__header"><div className="settings-icon"><HardDrive size={20} /></div><div><h3>Seus dados</h3><p>Importe a planilha, faça cópias e leve seus lançamentos com você.</p></div></header>
         <div className="settings-actions">

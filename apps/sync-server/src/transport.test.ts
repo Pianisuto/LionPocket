@@ -35,7 +35,7 @@ import { loginDevelopmentOidc } from '../../desktop/src/main/sync/oidc';
 import { controlServer, initialize } from './server';
 import { commitSchema, controlSchema, bindingSchema } from './schema';
 import { keycloakIdentity } from './identity';
-import { founder, syntheticBrowserLogin } from './testSupport';
+import { founder, syntheticBrowserLogin, submitTestPairing } from './testSupport';
 import {
   DeviceProvisioning as Provisioning,
   ProvisioningCrypto,
@@ -81,14 +81,15 @@ describe.skipIf(!enabled)(
       const target =
           action === 'create'
             ? '/v1/vaults'
-            : `/v1/vaults/${a.profile.pin.vaultId}/${action}`,
+            : `/v2/devices/vaults/${a.profile.pin.vaultId}/${action}`,
         body = canonicalStringify(value),
-        proof = await client.proof('POST', target, endpoint, body, token);
+        accountToken = action === 'create' ? token : '',
+        proof = await client.proof('POST', target, endpoint, body, accountToken);
       return http().request(
         target,
         body,
         crypto.encode(new TextEncoder().encode(canonicalStringify(proof))),
-        token,
+        accountToken,
       ) as Promise<RegistryResponse>;
     }
     async function start() {
@@ -142,9 +143,8 @@ describe.skipIf(!enabled)(
         new (await import('./testSupport')).TestSecrets(),
         crypto,
       );
-      const request = await b.request();
-      await control(b, 'pairings', request);
-      const grant = await a.grant(request, request.fingerprint);
+      const request = await submitTestPairing(a,b,endpoint);
+      const grant = await a.grant(request);
       a.acceptRegistry(await control(a, 'grants', grant));
       const delivery = await a.delivery(b.profile.deviceId);
       await control(a, 'deliveries', delivery);
@@ -207,15 +207,13 @@ describe.skipIf(!enabled)(
         },
       };
       await expect(
-        new ManualSync(da.db, a, sodium, 'desktop', endpoint, flaky).sync(
-          token,
-        ),
+        new ManualSync(da.db, a, sodium, 'desktop', endpoint, flaky).sync(),
       ).rejects.toThrow('lost_response');
       expect(
         (await da.db.read('SELECT state,envelope_json FROM sync_outbox'))[0],
       ).toMatchObject({ state: 'retry', envelope_json: first });
-      await da.sync(token);
-      await mb.sync(token);
+      await da.sync();
+      await mb.sync();
       expect(
         (await pool.query('SELECT count(*)::int n FROM sync_commits')).rows[0]
           .n,
@@ -238,8 +236,8 @@ describe.skipIf(!enabled)(
         status: 'paid',
         settledDate: '2026-09-30',
       });
-      await mb.sync(token);
-      await da.sync(token);
+      await mb.sync();
+      await da.sync();
       expect(
         desktop.db
           .prepare('SELECT actual_cents,status FROM transactions WHERE id=?')
@@ -284,8 +282,8 @@ describe.skipIf(!enabled)(
           'SELECT envelope_json,envelope_sha256,receipt_json FROM sync_outbox',
         ),
       ).toEqual(before);
-      await mb.sync(token).catch(() => mb.sync(token));
-      await da.sync(token);
+      await mb.sync().catch(() => mb.sync());
+      await da.sync();
       expect(
         (await pool.query('SELECT count(*)::int n FROM sync_commits')).rows[0]
           .n,
@@ -305,9 +303,9 @@ describe.skipIf(!enabled)(
         id: await localId(),
         description: 'SYNTHETIC Android branch',
       });
-      await Promise.all([da.sync(token), mb.sync(token)]);
-      await da.sync(token);
-      await mb.sync(token);
+      await Promise.all([da.sync(), mb.sync()]);
+      await da.sync();
+      await mb.sync();
       const [conflict] = await da.db.read(
         'SELECT * FROM sync_conflicts WHERE resolution_id IS NULL',
       );
@@ -343,8 +341,8 @@ describe.skipIf(!enabled)(
           randomUUID,
         ),
       );
-      await da.sync(token);
-      await mb.sync(token);
+      await da.sync();
+      await mb.sync();
       expect(
         await mb.db.read(
           'SELECT * FROM sync_conflicts WHERE resolution_id IS NULL',
@@ -362,9 +360,9 @@ describe.skipIf(!enabled)(
         id: await localId(),
         description: 'SYNTHETIC edit beside deletion',
       });
-      await Promise.all([da.sync(token), mb.sync(token)]);
-      await da.sync(token);
-      await mb.sync(token);
+      await Promise.all([da.sync(), mb.sync()]);
+      await da.sync();
+      await mb.sync();
       expect(await da.db.read('SELECT * FROM transactions')).toHaveLength(0);
       expect(await mb.db.read('SELECT * FROM transactions')).toHaveLength(0);
       const [conflict] = await mb.db.read(
@@ -403,8 +401,8 @@ describe.skipIf(!enabled)(
           randomUUID,
         ),
       );
-      await mb.sync(token);
-      await da.sync(token);
+      await mb.sync();
+      await da.sync();
       expect(await da.db.read('SELECT * FROM transactions')).toHaveLength(0);
       expect(await mb.db.read('SELECT * FROM sync_heads')).toHaveLength(1);
       expect(await mb.db.read('SELECT * FROM sync_revisions')).toHaveLength(8);
@@ -414,8 +412,8 @@ describe.skipIf(!enabled)(
         ...input,
         description: 'SYNTHETIC stale heads base',
       });
-      await da.sync(token);
-      await mb.sync(token);
+      await da.sync();
+      await mb.sync();
       const [identity] = await da.db.read(
         'SELECT object_id FROM sync_identity WHERE local_id=?',
         [transaction.id],
@@ -436,9 +434,9 @@ describe.skipIf(!enabled)(
         id: mobileId,
         description: 'SYNTHETIC stale B',
       });
-      await Promise.all([da.sync(token), mb.sync(token)]);
-      await da.sync(token);
-      await mb.sync(token);
+      await Promise.all([da.sync(), mb.sync()]);
+      await da.sync();
+      await mb.sync();
       const [conflict] = await da.db.read(
         'SELECT * FROM sync_conflicts WHERE object_id=? AND resolution_id IS NULL',
         [objectId],
@@ -516,13 +514,13 @@ describe.skipIf(!enabled)(
       desktop.db.exec(
         "CREATE TEMP TRIGGER fail_rejection AFTER INSERT ON sync_rejected BEGIN SELECT RAISE(ABORT,'rejection crash'); END",
       );
-      await expect(da.sync(token)).rejects.toThrow('rejection crash');
+      await expect(da.sync()).rejects.toThrow('rejection crash');
       expect(
         await da.db.read("SELECT * FROM sync_outbox WHERE state='blocked'"),
       ).toHaveLength(0);
       expect(await da.db.read('SELECT * FROM sync_rejected')).toHaveLength(0);
       desktop.db.exec('DROP TRIGGER fail_rejection');
-      await expect(da.sync(token)).rejects.toThrow('heads_changed');
+      await expect(da.sync()).rejects.toThrow('heads_changed');
       expect(await da.db.read('SELECT * FROM sync_rejected')).toHaveLength(1);
       const [updated] = await da.db.read(
         'SELECT * FROM sync_conflicts WHERE object_id=? AND resolution_id IS NULL',
@@ -536,8 +534,8 @@ describe.skipIf(!enabled)(
       await da.db.run(
         resolveConflict(objectId, heads, revision, 'desktop', randomUUID),
       );
-      await da.sync(token);
-      await mb.sync(token);
+      await da.sync();
+      await mb.sync();
       expect(
         await da.db.read('SELECT * FROM sync_heads WHERE object_id=?', [
           objectId,
@@ -559,7 +557,7 @@ describe.skipIf(!enabled)(
       });
       await pool.query(`CREATE FUNCTION fail_transport() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic injected failure'; END $$;
         CREATE TRIGGER fail_transport AFTER INSERT ON sync_operations FOR EACH ROW EXECUTE FUNCTION fail_transport()`);
-      await expect(da.sync(token)).rejects.toThrow('temporary_failure');
+      await expect(da.sync()).rejects.toThrow('temporary_failure');
       expect(
         (await pool.query('SELECT log_position::text FROM sync_vaults')).rows[0]
           .log_position,
@@ -570,7 +568,7 @@ describe.skipIf(!enabled)(
       await pool.query(
         'DROP TRIGGER fail_transport ON sync_operations; DROP FUNCTION fail_transport()',
       );
-      await da.sync(token);
+      await da.sync();
       expect(
         (
           await da.db.read(
@@ -598,7 +596,7 @@ describe.skipIf(!enabled)(
         ...input,
         description: 'SYNTHETIC beyond horizon',
       });
-      await da.sync(token);
+      await da.sync();
       const rest = (await control(a, 'changes', {
         formatVersion: 1,
         bindingId,
@@ -618,7 +616,7 @@ describe.skipIf(!enabled)(
       expect(
         await control(a, 'commits', JSON.parse(String(original.envelope_json))),
       ).toEqual(JSON.parse(String(original.receipt_json)));
-      await mb.sync(token);
+      await mb.sync();
     });
     it('backup/staging preserves transport and conflict history; restore keeps state but disables session', async () => {
       validateSyncBackup(
@@ -661,9 +659,9 @@ describe.skipIf(!enabled)(
         'idempotency_mismatch',
       );
       const request = await b.request(),
-        grant = await a.grant(request, request.fingerprint, 'revoked');
+        grant = await a.grant(request, 'revoked');
       a.acceptRegistry(await control(a, 'grants', grant));
-      await expect(mb.sync(token)).rejects.toThrow('device_revoked');
+      await expect(mb.sync()).rejects.toThrow('device_revoked');
       await closeServer();
       desktop.saveTransaction({
         ...input,

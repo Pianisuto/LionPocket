@@ -387,7 +387,7 @@ describe('durable inbox quarantine and local crash boundaries', () => {
         'desktop',
         engine.endpoint,
         http,
-      ).sync('synthetic-test-token'),
+      ).sync(),
     ).rejects.toThrow('receipt_mismatch');
     expect(
       (

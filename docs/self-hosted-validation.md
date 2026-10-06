@@ -10,7 +10,6 @@ Base: `main` em `73ce2ced49e93c087636e0f4d125baa5278ba326`. Nenhuma decisão de 
 | Regressões operacionais | `npm run sync:self-hosted:unit` e clean-install | Verify com admin ativo A/backup real B conserva quatro segredos, `.env`, CA, bancos, identidade e serviços; bancos temporários removidos; checksum inválido sem alterações; caminhos internos/symlinks recusados; falhas de restore deixam writers parados |
 | Suítes sem stack | `npm test` | Core 61, desktop 110, Android 90, protocolo 39, sync-local 25, servidor 29, release 2 passaram; 25 casos de integração são condicionais |
 | PostgreSQL/Keycloak existentes, sintéticos | `npm run sync:dev:test` | 53 passaram; 1 teste condicionado à implementação antiga executado separadamente abaixo |
-| Cliente anterior v1 | `node tools/release/version-skew.cjs` | 3 passaram; motor/controller anterior de `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` contra servidor atual |
 | Instalação limpa oficial | `npm run sync:self-hosted:test` | API/PostgreSQL/Keycloak/Caddy descartáveis; 12 fases de contrato normal passaram |
 | Tipagem | `npm run typecheck` | Todos os workspaces, harnesses existentes e self-hosted passaram |
 | Lint | `npm run lint` | Sem erros; há avisos de estilo/non-null |

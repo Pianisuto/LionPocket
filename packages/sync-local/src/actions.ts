@@ -9,7 +9,7 @@ import {
   type ConflictReview,
 } from './transport-state';
 import { ManualSync } from './transport';
-export interface DevelopmentSyncStatus {
+export interface SyncActionStatus {
   enabled: boolean;
   received: string;
   applied: string;
@@ -19,9 +19,9 @@ export interface DevelopmentSyncStatus {
   conflicts: ConflictReview[];
 }
 /** UI actions receive public IDs/heads only; the engine and cofre stay outside renderer state. */
-export class DevelopmentSyncActions {
+export class SyncActions {
   constructor(readonly engine: ManualSync) {}
-  async status(): Promise<DevelopmentSyncStatus> {
+  async status(): Promise<SyncActionStatus> {
     const [s] = await this.engine.db.read(
       'SELECT * FROM sync_local_state WHERE id=1',
     );

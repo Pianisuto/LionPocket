@@ -38,9 +38,6 @@ export interface LionPocketApi {
   onSyncChanged?(listener: () => void): () => void;
   syncStatus?(): Promise<import('@lionpocket/sync-local').SyncStatus|null>;
   syncCommand?(action:string,args:unknown[]):Promise<unknown>;
-  developmentSyncStatus?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus | null>;
-  developmentSyncRun?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus>;
-  developmentSyncResolve?(objectId: string, heads: string[], revisionId: string, recover: boolean): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus>;
   getCatalogs(): Promise<Catalogs>;
   createCatalogItem(input: CatalogInput): Promise<void>;
   deleteCatalogItem(type: 'category' | 'card', id: string): Promise<void>;

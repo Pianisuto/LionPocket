@@ -113,7 +113,7 @@ describe('provisioning trust', () => {
       store = new TestSecrets();
     const b = await DeviceProvisioning.prepare(a.profile.pin, store, crypto);
     const request = await b.request(),
-      grant = await a.grant(request, request.fingerprint);
+      grant = await a.grant(request);
     const response = {
       pin: a.profile.pin,
       grants: [...a.profile.grants, grant],
@@ -130,7 +130,7 @@ describe('provisioning trust', () => {
     );
     expect(b.profile.checkpoint?.version).toBe('2');
   });
-  it('requires fingerprint confirmation and proof of possession', async () => {
+  it('verifies the signed request fingerprint and proof of possession', async () => {
     const { client: a } = await founder(crypto),
       b = await DeviceProvisioning.prepare(
         a.profile.pin,
@@ -138,8 +138,8 @@ describe('provisioning trust', () => {
         crypto,
       ),
       request = await b.request();
-    await expect(a.grant(request, crypto.nonce())).rejects.toThrow(
-      'fingerprint_mismatch',
+    await expect(a.grant({...request,fingerprint:crypto.nonce()})).rejects.toThrow(
+      'invalid_signature',
     );
     expect(() =>
       verifyPairing({ ...request, boxPublicKey: crypto.nonce() }, crypto),
@@ -159,7 +159,7 @@ describe('provisioning trust', () => {
         crypto,
       ),
       request = await b.request();
-    const grant = await a.grant(request, request.fingerprint),
+    const grant = await a.grant(request),
       chain = [...a.profile.grants, grant];
     const result = validateGrantChain(chain, a.profile.pin, crypto);
     expect(() =>
@@ -204,7 +204,7 @@ describe('provisioning trust', () => {
         crypto,
       ),
       request = await b.request();
-    const grant = await a.grant(request, request.fingerprint);
+    const grant = await a.grant(request);
     const { signature: unused, ...unsigned } = grant;
     void unused;
     const seed = await a.secrets.load(a.scope('signingSeed'));
@@ -229,7 +229,7 @@ describe('provisioning trust', () => {
       grants: [...a.profile.grants, grant],
       delivery: null,
     });
-    const revoked = await a.grant(request, request.fingerprint, 'revoked');
+    const revoked = await a.grant(request, 'revoked');
     const response = {
       pin: a.profile.pin,
       grants: [...a.profile.grants, revoked],
@@ -240,10 +240,10 @@ describe('provisioning trust', () => {
     await expect(a.delivery(b.profile.deviceId)).rejects.toThrow(
       'device_revoked',
     );
-    await expect(a.grant(request, request.fingerprint)).rejects.toThrow(
+    await expect(a.grant(request)).rejects.toThrow(
       'invalid_device_transition',
     );
-    await expect(b.grant(request, request.fingerprint)).rejects.toThrow(
+    await expect(b.grant(request)).rejects.toThrow(
       'founder_required',
     );
   });
@@ -266,7 +266,7 @@ describe('provisioning trust', () => {
       store = new TestSecrets(),
       b = await DeviceProvisioning.prepare(a.profile.pin, store, crypto),
       request = await b.request();
-    const grant = await a.grant(request, request.fingerprint),
+    const grant = await a.grant(request),
       response = {
         pin: a.profile.pin,
         grants: [...a.profile.grants, grant],
@@ -354,7 +354,7 @@ describe('provisioning trust', () => {
           crypto,
         ),
         r = await b.request(),
-        grant = await a.grant(r, r.fingerprint);
+        grant = await a.grant(r);
       a.acceptRegistry({
         pin: a.profile.pin,
         grants: [...a.profile.grants, grant],
@@ -367,15 +367,15 @@ describe('provisioning trust', () => {
         crypto,
       ),
       r = await b.request();
-    await expect(a.grant(r, r.fingerprint)).rejects.toThrow('device_limit');
+    await expect(a.grant(r)).rejects.toThrow('device_limit');
   });
 });
 describe('HTTP request signature', () => {
   it('binds method, target, origin, token, bytes, epoch and freshness', async () => {
     const { client } = await founder(crypto),
-      target = `/v1/vaults/${client.profile.pin.vaultId}/registry`;
+      target = `/v2/devices/vaults/${client.profile.pin.vaultId}/registry`;
     const proof = await client.proof(
-      'GET',
+      'POST',
       target,
       'http://127.0.0.1:8787',
       '',
@@ -383,7 +383,7 @@ describe('HTTP request signature', () => {
     );
     const expected = {
       scope: client.profile.pin,
-      method: 'GET',
+      method: 'POST',
       target,
       origin: proof.origin,
       body: '',
@@ -393,7 +393,7 @@ describe('HTTP request signature', () => {
     };
     expect(() => verifyHttpProof(proof, expected, crypto)).not.toThrow();
     for (const change of [
-      { method: 'POST' },
+      { method: 'GET' },
       { target: target + '/other' },
       { origin: 'http://other' },
       { token: 'different' },

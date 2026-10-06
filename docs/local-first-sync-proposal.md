@@ -127,25 +127,24 @@ Snapshots incluem também dependências de domínio, como as revisões de cadast
 
 ## 5. Protocolo e servidor
 
-### 5.1 Stack e implantação propostas
+### 5.1 Stack e implantação
 
-Adicionar `apps/sync-server` em Node.js/TypeScript com [Fastify](https://fastify.dev/docs/latest/) e PostgreSQL, `packages/sync-protocol` para DTOs/validação/versionamento e `packages/sync-engine` para ancestralidade, filas e conflitos sem dependência de Electron/React Native. Regras financeiras continuam em `packages/core`; drivers SQLite, rede, arquivos e cofres do SO ficam nos apps. Não introduzir Redis, broker ou microserviços no primeiro fluxo.
+`apps/sync-server` usa Node.js/TypeScript e PostgreSQL; `packages/sync-protocol` concentra DTOs/validação/versionamento e `packages/sync-local` concentra ancestralidade, filas e conflitos sem dependência de Electron/React Native. Regras financeiras continuam em `packages/core`; drivers SQLite, rede, arquivos e cofres do SO ficam nos apps.
 
-Distribuir a mesma imagem AGPL para Cloud e self-hosted, com migrations do serviço e composição reproduzível de API + PostgreSQL + provedor OIDC + HTTPS. O provedor exato é uma decisão pendente; self-hosted precisa de um caminho documentado e empacotado para contas, sem depender do login oficial. Cloud acrescenta operação, billing e monitoramento ao redor dessa API; o motor de sync e a criptografia não mudam.
+Self-hosted usa a composição reproduzível de API + PostgreSQL + Keycloak OIDC + HTTPS, com schema inicial atual e ferramenta operacional para contas. Veja [instalação limpa e reset](self-hosting.md). Cloud permanece uma implantação futura.
 
-### 5.2 Endpoints v1
+### 5.2 Endpoints atuais
 
 | Endpoint | Contrato |
 | --- | --- |
 | `GET /.well-known/lionpocket` | `serverId`, `serverEpoch`, versões suportadas, suites criptográficas, limites, issuer OIDC e audience. Não contém dados pessoais |
 | `POST /v1/vaults` | Cria vault e registra configuração criptográfica/primeiro dispositivo, após autenticação |
-| `POST /v1/devices/enroll` | Cadastro pendente com chaves públicas e prova de posse; não dá acesso ao conteúdo sozinho |
-| `POST /v1/devices/{id}/approve` | Aprovação assinada pelo proprietário e envelope de chave para o novo dispositivo |
-| `GET /v1/devices` / `DELETE /v1/devices/{id}` | Lista estados e revoga dispositivo/sessões; não apaga seu banco remoto/local automaticamente |
-| `POST /v1/vaults/{id}/commits` | Envia um commit atômico, ou vários commits independentes com recibo individual; ACK somente após persistência durável |
-| `GET /v1/vaults/{id}/changes?after=...&limit=...` | Página de commits completos, `nextCursor` e limite superior consistente do ciclo |
-| `GET /v1/vaults/{id}/revisions?ids=...` | Recupera ancestrais/dependências sem avançar o cursor de alterações |
-| `GET /v1/vaults/{id}/snapshot` | Baseline consistente identificado por epoch/cursor e manifesto; implementação após o fluxo mínimo |
+| `POST /v2/pair/{inviteId}/request` / `status` | LPV2 autenticado por capability; pedido assinado, aprovação obrigatória e polling de entrega. A inspeção do convite é local |
+| `POST /v2/devices/vaults/{id}/pairing-list` / `pairing-deny` | Lista pedidos LPV2 e permite recusar; exige grant ativo e prova assinada |
+| `POST /v2/devices/vaults/{id}/grants` / `deliveries` | Aprovação/revogação assinada pela autoridade e entrega cifrada ao aparelho aprovado |
+| `POST /v2/devices/vaults/{id}/commits` | Envia commits com recibo individual; ACK somente após persistência durável |
+| `POST /v2/devices/vaults/{id}/changes` | Página de commits completos, `nextCursor` e limite superior consistente do ciclo |
+| `POST /v1/vaults/{id}/recovery-fetch` / `recover` | Recuperação própria com OIDC do proprietário, pacote público e código secreto |
 
 `POST commits` devolve `accepted`/`alreadyAccepted`, posição no log e heads atuais. Uma edição baseada em pai antigo é aceita como ramo concorrente, não descartada. `409 idempotency_mismatch` significa que um ID/sequência foi reutilizado com bytes diferentes. `409 heads_changed` vale para reconciliação condicional. Pais desconhecidos retornam `missing_parents`, sem gravar parte do commit; enviar dependências e repetir os mesmos bytes. Não considerar `2xx` sem recibo completo como ACK.
 
@@ -245,7 +244,7 @@ O IdP pode oferecer passkeys/MFA; reset de login não recupera chaves de dados. 
 
 Cada instalação cria chaves de assinatura e troca de chaves, prova posse no cadastro e recebe sessão vinculada ao `device_id`. Requisições de sync exigem token e assinatura HTTP de método, destino, hash do corpo e nonce recente do servidor, usando biblioteca compatível com [HTTP Message Signatures, RFC 9421](https://www.rfc-editor.org/rfc/rfc9421.html). Assinatura de transporte é nova por retry; o commit armazenado continua idêntico. Essa assinatura não torna um aparelho comprometido confiável; evita aceitar apenas um token roubado e permite revogação por dispositivo.
 
-Pareamento: dispositivo novo autentica, registra chaves públicas e fica pendente; um aparelho autorizado confirma fingerprint/código por QR ou comparação manual, assina a autorização e entrega envelope criptografado da chave do vault. Não basta o servidor dizer que uma chave pública é de um aparelho confiável. Recovery também exige código de recuperação e autenticação de conta, sem aprovação manual do operador sobre dados em claro. V1 tem um proprietário; compartilhamento/múltiplos papéis é trabalho posterior.
+Pareamento: dispositivo novo recebe LPV2 por QR/deep link/clipboard, confirma Conectar e registra um pedido autenticado pela capability; um aparelho autorizado compara o SAS visual, aprova e entrega o envelope criptografado da chave do cofre. Não basta o servidor dizer que uma chave pública é de um aparelho confiável. Recovery também exige código de recuperação e autenticação de conta, sem aprovação manual do operador sobre dados em claro. V1 tem um proprietário; compartilhamento/múltiplos papéis é trabalho posterior.
 
 Revogar dispositivo bloqueia leituras, envios e refresh imediatamente na API, mesmo que access token ainda não tenha expirado. Não existe apagamento remoto garantido do SQLite de um aparelho offline. Logout ou desconectar sync conserva dados locais; opção de apagar dados é outra ação explícita. Falhas de conta não mudam as permissões de uso offline.
 

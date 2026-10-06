@@ -156,7 +156,6 @@ export class ManualSync {
     readonly endpoint: string,
     readonly http: SyncHttp = fetchSyncHttp(endpoint),
     readonly canTransport: () => boolean = () => true,
-    readonly routePrefix = '/v1/vaults',
   ) {}
   private async state() {
     const [state] = await this.db.read(
@@ -180,23 +179,23 @@ export class ManualSync {
       throw new Error('binding_changed');
     return state;
   }
-  private async request(action: string, value: unknown, token: string) {
+  private async request(action: string, value: unknown) {
     if (!this.canTransport()) throw new Error('foreground_inactive');
     const body = canonicalStringify(value),
-      target = `${this.routePrefix}/${this.device.profile.pin.vaultId}/${action}`;
+      target = `/v2/devices/vaults/${this.device.profile.pin.vaultId}/${action}`;
     const proof = await this.device.proof(
       'POST',
       target,
       this.endpoint,
       body,
-      token,
+      '',
     );
     if (!this.canTransport()) throw new Error('foreground_inactive');
     return this.http.request(
       target,
       body,
       this.device.crypto.encode(encodeUtf8(canonicalStringify(proof))),
-      token,
+      '',
     );
   }
   async prepare(commitId: string): Promise<string> {
@@ -518,7 +517,7 @@ export class ManualSync {
     }
     await this.db.run(appliedCursor());
   }
-  async pull(token:string):Promise<void>{
+  async pull():Promise<void>{
     let more = true;
     while (more) {
       const state = await this.state();
@@ -535,7 +534,6 @@ export class ManualSync {
         upperBound: state.pull_upper_bound,
         limit: 50,
         },
-        token,
       );
       const page = this.page(value, state);
       await this.db.run(
@@ -552,8 +550,8 @@ export class ManualSync {
     }
     await this.applyInbox();
   }
-  /** One ordered pass; the foreground coordinator owns scheduling and session interaction. */
-  async sync(token: string): Promise<void> {
+  /** One ordered pass; the foreground coordinator owns scheduling. */
+  async sync(): Promise<void> {
     if (this.running) throw new Error('sync_in_progress');
     this.running = true;
     try {
@@ -566,12 +564,11 @@ export class ManualSync {
       const response = (await this.request(
         'registry',
         {},
-        token,
       )) as RegistryResponse;
       this.device.acceptRegistry(response);
       if (localState.mode==='financial') await acceptKeyCheckpoints(this.device,response);
       await this.db.run(updateRegistry(this.device.profile));
-      if (localState.mode==='financial') { await this.pull(token);await this.db.run(reissueForKeyVersion(this.device.profile.activeKeyVersion??this.device.profile.pin.keyVersion,()=>this.device.crypto.uuid())); }
+      if (localState.mode==='financial') { await this.pull();await this.db.run(reissueForKeyVersion(this.device.profile.activeKeyVersion??this.device.profile.pin.keyVersion,()=>this.device.crypto.uuid())); }
       const rows = await this.db.read(
         "SELECT commit_id FROM sync_outbox WHERE state!='acknowledged' AND state!='blocked' ORDER BY length(local_seq),local_seq",
       );
@@ -582,7 +579,7 @@ export class ManualSync {
           const bytes = await this.prepare(id),
             envelope = decodeCommit(encodeUtf8(bytes));
           await this.db.run(mark(id, 'in_flight', null));
-          const value = await this.request('commits', envelope, token);
+          const value = await this.request('commits', envelope);
           await this.db.run(acknowledge(this.receipt(value, envelope)));
         } catch (error) {
           const code =
@@ -608,7 +605,7 @@ export class ManualSync {
           break;
         }
       }
-      await this.pull(token);
+      await this.pull();
       if (sendError) throw sendError;
     } finally {
       this.running = false;

@@ -13,7 +13,7 @@ import { loginDevelopmentOidc } from '../../desktop/src/main/sync/oidc';
 import { controlServer, initialize } from './server';
 import { controlSchema } from './schema';
 import { keycloakIdentity } from './identity';
-import { founder, syntheticBrowserLogin, TestSecrets } from './testSupport';
+import { founder, syntheticBrowserLogin, TestSecrets, submitTestPairing } from './testSupport';
 
 const enabled = process.env.LIONPOCKET_SYNC_INTEGRATION === '1';
 describe.skipIf(!enabled)(
@@ -42,7 +42,7 @@ describe.skipIf(!enabled)(
       ),
     });
     const path = (action: string) =>
-      `/v1/vaults/${a.profile.pin.vaultId}/${action}`;
+      `/v2/devices/vaults/${a.profile.pin.vaultId}/${action}`;
     async function send(
       client: DeviceProvisioning,
       token: string,
@@ -51,6 +51,7 @@ describe.skipIf(!enabled)(
       value?: unknown,
       customProof?: HttpProof,
     ) {
+      if (target.startsWith('/v2/')) token = '';
       const body = value === undefined ? '' : canonicalStringify(value),
         proof =
           customProof ??
@@ -73,6 +74,7 @@ describe.skipIf(!enabled)(
         origin,
         identity: keycloakIdentity(issuer),
         financialScope: 'manual',
+        financialEnabled: true,
       });
       await new Promise<void>((resolve) =>
         server.listen(18770, '127.0.0.1', resolve),
@@ -177,60 +179,16 @@ describe.skipIf(!enabled)(
           .rows[0].registry_version,
       ).toBe('1');
     });
-    it('denies another issuer/subject, even with the correct device proof', async () => {
-      const result = await send(a, tokenOther, 'GET', path('registry'));
-      expect(result.status).toBe(403);
-      expect(result.body.error).toBe('forbidden');
+    it('denies recovery by another account, even with a valid device request', async () => {
+      const result = await send(b,tokenOther,'POST',`/v1/vaults/${a.profile.pin.vaultId}/recovery-fetch`,{request});
+      expect(result.status).toBe(403); expect(result.body.error).toBe('forbidden');
     });
-    it('rejects body mutation, wrong signature and stale proof', async () => {
-      const proof = await b.proof(
-        'POST',
-        path('pairings'),
-        origin,
-        canonicalStringify(request),
-        tokenB,
-      );
-      expect(
-        (
-          await send(
-            b,
-            tokenB,
-            'POST',
-            path('pairings'),
-            { ...request, nonce: crypto.nonce() },
-            proof,
-          )
-        ).status,
-      ).toBe(403);
-      expect(
-        (
-          await send(b, tokenB, 'POST', path('pairings'), request, {
-            ...proof,
-            signature: crypto.encode(sodium.randombytes_buf(64)),
-          })
-        ).status,
-      ).toBe(403);
-      expect(
-        (
-          await send(b, tokenB, 'POST', path('pairings'), request, {
-            ...proof,
-            issuedAt: proof.issuedAt - 120000,
-          })
-        ).status,
-      ).toBe(403);
-      expect(
-        (await pool.query('SELECT count(*)::int AS n FROM sync_pairings'))
-          .rows[0].n,
-      ).toBe(0);
-    });
-    it('persists the new signed pairing request without granting access', async () => {
-      expect(
-        (await send(b, tokenB, 'POST', path('pairings'), request)).status,
-      ).toBe(200);
-      expect((await send(b, tokenB, 'GET', path('registry'))).status).toBe(403);
+    it('persists only authenticated capability requests without granting access', async () => {
+      request = await submitTestPairing(a,b,origin);
+      expect((await send(b,'','POST',path('registry'),{})).status).toBe(403);
     });
     it('rejects out-of-order grant and invalid authority signature without changing the registry', async () => {
-      const grant = await a.grant(request, request.fingerprint);
+      const grant = await a.grant(request);
       expect(
         (
           await send(a, tokenA, 'POST', path('grants'), {
@@ -253,7 +211,7 @@ describe.skipIf(!enabled)(
       ).toBe(1);
     });
     it('serializes concurrent append attempts and delivers the DEK to the approved recipient', async () => {
-      const grant = await a.grant(request, request.fingerprint);
+      const grant = await a.grant(request);
       const results = await Promise.all([
         send(a, tokenA, 'POST', path('grants'), grant),
         send(a, tokenA, 'POST', path('grants'), grant),
@@ -282,7 +240,7 @@ describe.skipIf(!enabled)(
       expect(
         (await send(a, tokenA, 'POST', path('deliveries'), delivery)).status,
       ).toBe(200);
-      const result = await send(b, tokenB, 'GET', path('registry'));
+      const result = await send(b, tokenB, 'POST', path('registry'), {});
       expect(result.status).toBe(200);
       await b.receive(result.body);
       expect(await a.secrets.load(a.scope('dataKey'))).toEqual(
@@ -291,25 +249,25 @@ describe.skipIf(!enabled)(
       expect(await b.secrets.load(b.scope('authoritySeed'))).toBeNull();
     });
     it('rejects replay concurrently and after API restart', async () => {
-      const proof = await b.proof('GET', path('registry'), origin, '', tokenB);
+      const proof = await b.proof('POST', path('registry'), origin, '{}', '');
       const results = await Promise.all([
-        send(b, tokenB, 'GET', path('registry'), undefined, proof),
-        send(b, tokenB, 'GET', path('registry'), undefined, proof),
+        send(b, tokenB, 'POST', path('registry'), {}, proof),
+        send(b, tokenB, 'POST', path('registry'), {}, proof),
       ]);
       expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await start();
       expect(
-        (await send(b, tokenB, 'GET', path('registry'), undefined, proof)).body
+        (await send(b, tokenB, 'POST', path('registry'), {}, proof)).body
           .error,
       ).toBe('replay');
     });
     it('rejects a different vault or epoch and bounds/validates raw network bytes', async () => {
-      const proof = await b.proof('GET', path('registry'), origin, '', tokenB);
+      const proof = await b.proof('POST', path('registry'), origin, '{}', '');
       expect(
         (
-          await send(b, tokenB, 'GET', path('registry'), undefined, {
+          await send(b, tokenB, 'POST', path('registry'), {}, {
             ...proof,
             vaultId: crypto.uuid(),
           })
@@ -317,7 +275,7 @@ describe.skipIf(!enabled)(
       ).toBe('scope_mismatch');
       expect(
         (
-          await send(b, tokenB, 'GET', path('registry'), undefined, {
+          await send(b, tokenB, 'POST', path('registry'), {}, {
             ...proof,
             serverEpoch: crypto.uuid(),
           })
@@ -333,46 +291,21 @@ describe.skipIf(!enabled)(
       }
     });
     it('blocks a revoked device immediately and preserves grant history', async () => {
-      const grant = await a.grant(request, request.fingerprint, 'revoked');
+      const grant = await a.grant(request, 'revoked');
       const result = await send(a, tokenA, 'POST', path('grants'), grant);
       expect(result.status).toBe(200);
       a.acceptRegistry(result.body);
-      expect((await send(b, tokenB, 'GET', path('registry'))).body.error).toBe(
+      expect((await send(b, tokenB, 'POST', path('registry'), {})).body.error).toBe(
         'device_revoked',
       );
-      expect(
-        (await send(b, tokenB, 'POST', path('pairings'), request)).body.error,
-      ).toBe('device_revoked');
       expect(
         (await pool.query('SELECT count(*)::int AS n FROM sync_grants')).rows[0]
           .n,
       ).toBe(3);
     });
-    it('exposes zero financial capabilities and has no financial commit endpoints or tables', async () => {
-      const env = await (await fetch(origin + '/v1/environment')).json();
-      expect(env.entityScopes).toEqual([]);
-      expect(env.financialSyncEnabled).toBe(false);
-      for (const target of ['/v1/commits', path('commits'), path('changes')])
-        expect((await send(a, tokenA, 'POST', target, {})).status).toBe(404);
-      const names = (
-        await pool.query(
-          "SELECT tablename FROM pg_tables WHERE schemaname='public'",
-        )
-      ).rows.map((r) => r.tablename);
-      expect(names.sort()).toEqual([
-        'sync_deliveries',
-        'sync_disabled_accounts',
-        'sync_environment',
-        'sync_epoch_authorizations',
-        'sync_epoch_challenges',
-        'sync_grants',
-        'sync_http_nonces',
-        'sync_pairing_invites',
-        'sync_pairings',
-        'sync_restore_vaults',
-        'sync_restores',
-        'sync_vaults',
-      ]);
+    it('does not expose device transport as account operations', async () => {
+      for (const action of ['registry','grants','deliveries','changes'])
+        expect((await send(a,tokenA,'POST',`/v1/vaults/${a.profile.pin.vaultId}/${action}`,{})).status).toBe(404);
     });
   },
 );

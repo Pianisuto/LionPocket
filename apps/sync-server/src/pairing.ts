@@ -21,10 +21,14 @@ CREATE TABLE IF NOT EXISTS sync_pairing_invites (
  envelope jsonb NOT NULL, capability_hash text NOT NULL, expires_at bigint NOT NULL,
  revoked boolean NOT NULL DEFAULT false, device_id uuid
 );
-ALTER TABLE sync_pairings ADD COLUMN IF NOT EXISTS invite_id uuid;
-ALTER TABLE sync_pairings ADD COLUMN IF NOT EXISTS device_name text;
-ALTER TABLE sync_pairings ADD COLUMN IF NOT EXISTS pairing_auth jsonb;
-ALTER TABLE sync_pairings ADD COLUMN IF NOT EXISTS denied boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS sync_pairings (
+ vault_id uuid NOT NULL REFERENCES sync_vaults(vault_id), device_id uuid NOT NULL,
+ fingerprint text NOT NULL, request jsonb NOT NULL,
+ invite_id uuid NOT NULL REFERENCES sync_pairing_invites(invite_id),
+ device_name text NOT NULL, pairing_auth jsonb NOT NULL,
+ approved boolean NOT NULL DEFAULT false, denied boolean NOT NULL DEFAULT false,
+ PRIMARY KEY(vault_id,device_id), UNIQUE(vault_id,fingerprint)
+);
 CREATE INDEX IF NOT EXISTS sync_invites_vault ON sync_pairing_invites(vault_id);
 `;
 export async function managePairing(
@@ -198,7 +202,7 @@ export async function onboardPairing(
     if (!prior) {
       const count = (
         await tx.query(
-          'SELECT count(*)::int AS n FROM sync_pairings p LEFT JOIN sync_pairing_invites i ON i.invite_id=p.invite_id WHERE p.vault_id=$1 AND NOT p.approved AND NOT p.denied AND (p.invite_id IS NULL OR (NOT i.revoked AND i.expires_at>$2))',
+          'SELECT count(*)::int AS n FROM sync_pairings p JOIN sync_pairing_invites i ON i.invite_id=p.invite_id WHERE p.vault_id=$1 AND NOT p.approved AND NOT p.denied AND NOT i.revoked AND i.expires_at>$2',
           [row.vault_id, Date.now()],
         )
       ).rows[0].n;
@@ -266,16 +270,16 @@ export async function onboardPairing(
 export function namedRequest(
   row: {
     request: PairingRequest;
-    device_name?: string;
-    invite_id?: string;
-    pairing_auth?: unknown;
+    device_name: string;
+    invite_id: string;
+    pairing_auth: unknown;
   },
   crypto: ProvisioningCrypto,
 ) {
   return {
     ...row.request,
-    pairingAuth: row.pairing_auth ?? null,
-    deviceName: row.device_name || 'Novo aparelho',
-    securityCode: pairingSecurityCode(row.invite_id ?? '', row.request, crypto),
+    pairingAuth: row.pairing_auth,
+    deviceName: row.device_name,
+    securityCode: pairingSecurityCode(row.invite_id, row.request, crypto),
   };
 }

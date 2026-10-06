@@ -55,7 +55,7 @@ describe('OS LPV2 entry points', () => {
     expect(inbox.take()).toEqual({ invitation: link, endpoint: 'https://sync.example.org', id: 'id' });
     expect(inbox.take()).toBeNull();
   });
-  it.each(['https://attacker.invalid', 'lionpocket://pair/LPV1.secret', link + '?redirect=evil', 'lionpocket://other/LPV2.secret'])('rejects malformed transport without starting onboarding: %s', async value => {
+  it.each(['https://attacker.invalid', 'lionpocket://pair/unsupported.secret', link + '?redirect=evil', 'lionpocket://other/LPV2.secret'])('rejects malformed transport without starting onboarding: %s', async value => {
     const inspect = vi.fn(), inbox = new PairingLinkInbox(inspect, vi.fn());
     await inbox.receive(value);
     expect(inbox.take()).toEqual({ error: 'Convite inválido' });

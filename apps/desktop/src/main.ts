@@ -11,12 +11,9 @@ import { observePairingSmoke, pairingSmokeDirectory } from './main/pairingSmoke'
 import type { UpdateInfo } from './api';
 import { LionPocketDatabase } from './main/database';
 import { registerIpcHandlers } from './main/ipc';
-import { desktopSyntheticDirectory, registerDevelopmentSync } from './main/sync/development';
-const syntheticDirectory = desktopSyntheticDirectory();
 const smokeDirectory = releaseSmokeDirectory();
 const pairingDirectory = pairingSmokeDirectory();
 if (privateBeta) app.setPath('userData', path.join(app.getPath('appData'), 'LionPocket Beta'));
-if (syntheticDirectory) app.setPath('userData', path.join(syntheticDirectory, 'electron-app'));
 
 if (smokeDirectory) app.setPath('userData', path.join(smokeDirectory, privateBeta ? 'LionPocket Beta' : 'LionPocket'));
 if (pairingDirectory) app.setPath('userData', path.join(pairingDirectory, 'profile'));
@@ -29,12 +26,12 @@ if (started) app.quit();
 else startPrimary();
 
 function startPrimary() {
-  let inspectInvitation: (link: string) => Promise<{ id: string; endpoint: string }>;
+  let inspectPairingLink: (link: string) => Promise<{ id: string; endpoint: string }>;
   let syncReadyResolve: () => void;
   const syncReady = new Promise<void>(resolve => { syncReadyResolve = resolve; });
   const pairingInbox = new PairingLinkInbox(async link => {
     await syncReady;
-    return inspectInvitation(link);
+    return inspectPairingLink(link);
   }, () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pairing:available');
     showMainWindow();
@@ -210,12 +207,10 @@ function startPrimary() {
       app.setAppUserModelId(privateBeta ? 'com.squirrel.lionpocket_beta.lionpocket-beta' : 'com.squirrel.lionpocket.lionpocket');
     }
 
-    const databasePath = syntheticDirectory ? path.join(syntheticDirectory, 'manual.sqlite') : path.join(app.getPath('userData'), 'lionpocket.sqlite');
-    database = new LionPocketDatabase(databasePath);
+    database = new LionPocketDatabase(path.join(app.getPath('userData'),'lionpocket.sqlite'));
     registerIpcHandlers(database);
-    await registerDevelopmentSync(database, syntheticDirectory);
     const sync = await registerSyncController(database);
-    inspectInvitation = sync.inspectInvitation;
+    inspectPairingLink = sync.inspectPairingLink;
     syncReadyResolve!();
     createWindow();
     if (pairingDirectory) observePairingSmoke(mainWindow!, pairingDirectory, () => pairingInbox.receivedCount);

@@ -32,7 +32,7 @@ async function banks() {
       crypto,
     ),
     request = await b.request(),
-    grant = await a.grant(request, request.fingerprint);
+    grant = await a.grant(request);
   a.acceptRegistry({
     pin: a.profile.pin,
     grants: [...a.profile.grants, grant],

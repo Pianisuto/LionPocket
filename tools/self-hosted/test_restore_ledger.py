@@ -52,7 +52,7 @@ class LedgerTest(unittest.TestCase):
                 ledger.validate(fixture)
 
     def test_epoch_and_record_are_written_in_one_transaction_owned_by_api(self):
-        sql = Mock(side_effect=['0', ''])
+        sql = Mock(side_effect=[str(len(ledger.TABLES)), json.dumps({t: [] for t in ledger.TABLES}), ''])
         restore_id, epoch = ledger.record(sql, {}, 'CREATE TABLE IF NOT EXISTS fixture(id uuid);',
                                          dict(serverId=uid(2), serverEpoch=uid(3)), 'a' * 64, history(), uid(4))
         query = sql.call_args.args[1]

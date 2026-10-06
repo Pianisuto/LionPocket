@@ -104,6 +104,8 @@ export async function registerSyncController(bank: LionPocketDatabase) {
         throw new Error('Invalid sync action.');
       const c = await get();
       switch (action) {
+        case 'server-reset':
+          return c.resetForRecreatedServer(String(args[0]),args[1] === true);
         case 'server-recovery-prepare':
           return c.prepareServerRecovery(args[0] === true);
         case 'server-recovery-confirm':
@@ -123,7 +125,7 @@ export async function registerSyncController(bank: LionPocketDatabase) {
         case 'recovery-confirm':
           return c.confirmRecovery(String(args[0]));
         case 'recover':
-          return c.recover(String(args[0]), String(args[1]), String(args[2]));
+          return c.recover(String(args[0]), String(args[1]));
         case 'invite-create': return c.createInvitation();
         case 'invite-revoke': return c.cancelInvitation();
         case 'pairing-inspect': return c.inspectPairingInvitation(String(args[0]));
@@ -134,18 +136,10 @@ export async function registerSyncController(bank: LionPocketDatabase) {
           return c.configure(String(args[0]));
         case 'create':
           return c.create();
-        case 'inspect':
-          return c.inspectInvitation(String(args[0]));
-        case 'pair':
-          return c.pair(String(args[0]), String(args[1]));
-        case 'receive':
-          return c.receive();
         case 'sync':
           return c.sync();
-        case 'requests':
-          return c.requests();
         case 'approve':
-          return c.approve(String(args[0]), args[1] === undefined ? undefined : String(args[1]));
+          return c.approve(String(args[0]));
         case 'pause':
           return c.pause(args[0] === true);
         case 'resolve':
@@ -160,6 +154,6 @@ export async function registerSyncController(bank: LionPocketDatabase) {
       }
     },
   );
-  return { inspectInvitation: async (link: string) => (await get()).inspectPairingInvitation(link) };
+  return { inspectPairingLink: async (link: string) => (await get()).inspectPairingInvitation(link) };
 }
 export type DesktopSyncStatus = SyncStatus;

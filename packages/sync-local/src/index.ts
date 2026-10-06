@@ -5,11 +5,10 @@ export * from './backup';
 export * from './provisioning';
 export * from './transport-state';
 export * from './transport';
-export * from './development';
+export * from './actions';
 export * from './financial';
 export * from './financial-projection';
 export * from './sync';
-export * from './beta';
 export * from './security';
 export * from './reemission';
 export * from './merge';
@@ -27,3 +26,5 @@ export * from './epoch-preparation';
 export * from './epoch-preparation-secrets';
 export * from './epoch-activation';
 export * from './pairing-qr';
+
+export * from './recovery-package';

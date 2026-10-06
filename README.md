@@ -150,3 +150,9 @@ O ambiente com Keycloak/PostgreSQL e pareamento está no [guia de provisioning](
 ### Sincronização opcional em servidor próprio
 
 O LionPocket normal continua local-first e oferece sincronização E2EE por uma única URL HTTPS em Configurações → Sincronização. Veja o [guia de instalação e operação self-hosted](docs/self-hosting.md) e o [pareamento por QR e deep link LPV2](docs/device-pairing-lpv2.md).
+
+### Pareamento e recuperação atuais
+
+LPV2 é o único convite de pareamento: **Desktop → Mobile por QR**, **Mobile → Desktop por link/deep link**, com copiar/colar como fallback. Aprovação, chave e primeiro sync seguem o [fluxo atual](docs/device-pairing-lpv2.md). Recovery tem [pacote público LPR1 e código secreto](docs/recovery.md) próprios. Aparelhos aprovados usam exclusivamente transporte assinado.
+
+A instalação self-hosted anterior deve ser recriada. Preserve o banco local escolhido e use **Servidor de sincronização recriado** para backup, desvinculação e novo baseline sem apagar dados financeiros. Siga o [procedimento completo](docs/self-hosting.md#servidor-recriado-e-base-local-como-fonte-de-verdade).

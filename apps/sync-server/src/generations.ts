@@ -13,7 +13,7 @@ export const generationArchiveKeys = {
   sync_remote_bindings: ['binding_id'],
 } as const;
 
-/** Runs after the v1 control/log/binding schemas. Safe to repeat, including on restored v1/v2 backups. */
+/** Runs after the v1 control/log/binding schemas. Safe to repeat on current backups. */
 export const generationSchema = `
 CREATE TABLE IF NOT EXISTS sync_generations (
   vault_id uuid NOT NULL REFERENCES sync_vaults(vault_id), server_epoch uuid NOT NULL,
@@ -64,10 +64,6 @@ DROP TRIGGER IF EXISTS immutable_archive ON archive_${table};
 CREATE TRIGGER immutable_archive BEFORE INSERT OR UPDATE OR DELETE ON archive_${table}
 FOR EACH ROW EXECUTE FUNCTION sync_immutable_generation_archive();
 `).join('') + `
--- Existing archive rows preserve the exact legacy pin and checkpoint chain.
-ALTER TABLE archive_sync_vaults ADD COLUMN IF NOT EXISTS base_key_version bigint;
-ALTER TABLE archive_sync_vaults ADD COLUMN IF NOT EXISTS active_key_version bigint;
--- Backfill is deliberately performed only before the archive immutability trigger is restored by this migration.
 CREATE INDEX IF NOT EXISTS archive_sync_commits_position ON archive_sync_commits(vault_id,generation_epoch,log_position);
 CREATE INDEX IF NOT EXISTS archive_sync_operations_object ON archive_sync_operations(vault_id,generation_epoch,object_id);
 `;

@@ -9,7 +9,6 @@ import {
   type PairingRequest,
 } from './provisioning';
 
-/** LPV1 remains public recovery metadata. Only this purpose-scoped, signed version is a capability. */
 export interface PairingInvite {
   version: 2;
   purpose: 'device-pairing';
@@ -26,9 +25,9 @@ export interface PairingInvitation {
   capability: string;
 }
 export interface NamedPairing extends PairingRequest {
-  deviceName?: string;
-  securityCode?: string;
-  pairingAuth?: {
+  deviceName: string;
+  securityCode: string;
+  pairingAuth: {
     invite: PairingInvite;
     deviceName: string;
     capabilitySignature: string;
@@ -89,7 +88,6 @@ export function parsePairingInvitation(
   },
 ): PairingInvitation {
   const text = input.trim().replace(/^lionpocket:\/\/pair\//, '');
-  if (text.startsWith('LPV1.')) throw new Error('invite_legacy');
   if (!text.startsWith('LPV2.') || text.length > 4096)
     throw new Error('invite_invalid');
   try {
@@ -175,12 +173,17 @@ export function pairingErrorMessage(error: unknown): string {
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, string> = {
     invite_invalid: 'Convite inválido',
+    invalid_recovery_code: 'Código de recuperação incorreto.',
+    recovery_package_invalid: 'Pacote de recuperação inválido ou adulterado.',
+    'Pacote de recuperação inválido ou adulterado.': 'Pacote de recuperação inválido ou adulterado.',
+    recovery_stale: 'A recuperação disponível está desatualizada. Use o pacote e código atuais.',
+    recovery_rollback: 'O servidor apresentou uma recuperação anterior à versão guardada.',
+    recovery_unavailable: 'Nenhum backup de recuperação disponível neste servidor.',
+    trust_pin_mismatch: 'Os dados de recuperação não pertencem a este cofre.',
     invite_expired: 'Convite expirado',
     invite_revoked: 'Convite cancelado',
     invite_consumed:
       'Este convite já foi usado. Gere outro no aparelho conectado.',
-    invite_legacy:
-      'Convite antigo. Abra Adicionar aparelho no aparelho conectado para gerar um novo.',
     pairing_denied: 'Pedido recusado',
     client_upgrade_required: 'Atualização do aplicativo necessária',
     unsupported_version: 'Atualização do aplicativo necessária',
@@ -189,7 +192,7 @@ export function pairingErrorMessage(error: unknown): string {
     pairing_unavailable:
       'Este aparelho não pode autorizar outros. Use o aparelho que criou o cofre.',
   };
-  if (Object.values(messages).includes(code)) return code;
+  if (Object.values(messages).includes(code) || code.startsWith('Pacote de recuperação') || code.startsWith('Confirme que o remoto') || code.startsWith('Resolva as revisões') || code.startsWith('Não foi possível preservar') || code.startsWith('Aguarde a operação')) return code;
   for (const [internal, message] of Object.entries(messages))
     if (code === internal || code.endsWith(': ' + internal)) return message;
   if (code === 'Leitor indisponível. Cole o convite.') return code;

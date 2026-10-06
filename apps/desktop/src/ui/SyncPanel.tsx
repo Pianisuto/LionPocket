@@ -40,7 +40,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [endpoint, setEndpoint] = useState('');
   const [invitation, setInvitation] = useState('');
-  const [authority, setAuthority] = useState('');
+  const [recoveryPackage, setRecoveryPackage] = useState('');
   const [inviteInfo, setInviteInfo] = useState<{
     id: string;
     endpoint: string;
@@ -53,6 +53,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [confirmedCode, setConfirmedCode] = useState('');
   const [revokeId, setRevokeId] = useState('');
+  const [resetConfirmed, setResetConfirmed] = useState(false);
   const [setup, setSetup] = useState(false);
 
   const refresh = async () => {
@@ -90,8 +91,6 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
         setRecoveryCode('');
         setConfirmedCode('');
       }
-      if (action === 'inspect')
-        setAuthority((result as { fingerprint: string }).fingerprint);
       if (action === 'invite-create') {
         setPairingLink((result as { link: string }).link);
         setAdding(true);
@@ -376,6 +375,16 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
         </SyncSection>
       )}
 
+      {status.phase === 'bound' && <SyncDisclosure icon={Server} title="Servidor de sincronização recriado">
+        <p>Use este banco local como fonte de verdade. O remoto anterior não será recuperado. Um backup completo será criado antes de remover o vínculo e iniciar uma nova sincronização.</p>
+        <label className="field"><span>Novo servidor</span><input aria-label="Novo servidor" value={endpoint} onChange={e => setEndpoint(e.target.value)} /></label>
+        <label><input type="checkbox" checked={resetConfirmed} onChange={e => setResetConfirmed(e.target.checked)} /> Entendo que o remoto anterior não será recuperado e escolho os dados deste aparelho.</label>
+        <button className="button" disabled={busy || !resetConfirmed || !endpoint} onClick={() => void run('server-reset',[endpoint,resetConfirmed])}>Preservar backup e preparar novo sync</button>
+      </SyncDisclosure>}
+      {status.resetBackupPath && status.phase === 'local' && <SyncSection icon={HardDrive} title="Banco local preservado">
+        <p>Backup criado: {status.resetBackupPath}</p><p>Agora crie o novo cofre a partir dos dados deste aparelho.</p>
+        <button className="button button--primary" disabled={busy} onClick={() => void run('create')}>Criar novo sync com meus dados locais</button>
+      </SyncSection>}
       {status.phase === 'local' && status.pairingStep === 'preparing' && (
         <p role="status">Preparando conexão…</p>
       )}
@@ -481,86 +490,17 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
             )}
           </SyncSection>
           <SyncDisclosure icon={KeyRound} title="Recuperar um cofre existente">
-            <p>
-              Use o convite de recuperação e o código guardados fora do
-              aplicativo.
-            </p>
-            <button
-              className="button"
-              disabled={busy || !invitation}
-              onClick={() => void run('inspect', [invitation])}
-            >
-              Verificar convite de recuperação
-            </button>
-            {authority && (
-              <>
-                <input
-                  aria-label="Código de recuperação"
-                  type="password"
-                  value={confirmedCode}
-                  onChange={(e) => setConfirmedCode(e.target.value)}
-                />
-                <button
-                  className="button"
-                  disabled={busy || !confirmedCode}
-                  onClick={() =>
-                    void run('recover', [invitation, authority, confirmedCode])
-                  }
-                >
-                  Entrar e recuperar cofre
-                </button>
-              </>
-            )}
+            <p>Use o pacote de recuperação e o código guardados fora do aplicativo.</p>
+            <label className="field"><span>Pacote de recuperação</span>
+              <textarea aria-label="Pacote de recuperação" value={recoveryPackage} onChange={e => setRecoveryPackage(e.target.value)} />
+            </label>
+            <label className="field"><span>Código de recuperação</span>
+              <input aria-label="Código de recuperação" type="password" value={confirmedCode} onChange={e => setConfirmedCode(e.target.value)} />
+            </label>
+            <button className="button" disabled={busy || !recoveryPackage || !confirmedCode} onClick={() => void run('recover',[recoveryPackage,confirmedCode])}>Recuperar cofre</button>
           </SyncDisclosure>
         </>
       )}
-      {status.phase === 'recovery' && (
-        <SyncSection
-          icon={KeyRound}
-          title="Guarde seu código de recuperação"
-          description="Ele permite recuperar os dados criptografados se você perder todos os aparelhos. Guarde o código e o convite juntos, em um lugar seguro fora do aplicativo."
-        >
-          {!recoveryCode ? (
-            <div className="sync-actions sync-actions--end">
-              <button
-                className="button button--primary"
-                disabled={busy}
-                onClick={() => void run('recovery-generate')}
-              >
-                <KeyRound size={16} aria-hidden="true" />
-                Mostrar código de recuperação
-              </button>
-            </div>
-          ) : (
-            <RecoveryCode
-              code={recoveryCode}
-              confirmed={confirmedCode}
-              onConfirmChange={setConfirmedCode}
-              busy={busy}
-              confirmLabel="Ativar sincronização"
-              onConfirm={() => void run('recovery-confirm', [confirmedCode])}
-              recoveryDetails={{
-                endpoint: status.endpoint,
-                invitation: status.invitation,
-              }}
-              onRegenerate={() => void run('recovery-generate')}
-            />
-          )}
-          {!recoveryCode && (
-            <SyncDisclosure icon={Link2} title="Convite para recuperação">
-              <label className="field">
-                <span>Guarde junto do código de recuperação</span>
-                <textarea
-                  readOnly
-                  aria-label="Convite para recuperação"
-                  value={status.invitation}
-                />
-              </label>
-            </SyncDisclosure>
-          )}
-        </SyncSection>
-      )}
-
       {status.phase === 'creating' && (
         <SyncSection
           icon={RefreshCw}
@@ -760,6 +700,10 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                   </span>
                   <span>Versão da chave: {status.activeKeyVersion}</span>
                 </div>
+                {!!status.recoveryPackage && <label className="field"><span>Pacote atual de recuperação · guarde junto do código</span>
+                  <textarea readOnly aria-label="Pacote atual de recuperação" value={status.recoveryPackage} />
+                  <small>Atualize a cópia guardada após recuperar o servidor.</small>
+                </label>}
                 <div className="sync-subsection">
                   <div className="sync-setting-row">
                     <div>
@@ -792,7 +736,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                       }
                       recoveryDetails={{
                         endpoint: status.endpoint,
-                        invitation: status.invitation,
+                        recoveryPackage: status.recoveryPackage,
                       }}
                       onRegenerate={() => void run('recovery-generate')}
                     />
@@ -1080,7 +1024,7 @@ function RecoveryCode({
   busy: boolean;
   confirmLabel: string;
   onConfirm: () => void;
-  recoveryDetails?: { endpoint: string; invitation: string };
+  recoveryDetails?: { endpoint: string; recoveryPackage: string };
   onRegenerate?: () => void;
 }) {
   return (
@@ -1101,17 +1045,17 @@ function RecoveryCode({
             <details className="sync-recovery-kit">
               <summary>
                 <Link2 size={14} aria-hidden="true" />
-                Convite e informações para guardar
+                Pacote de recuperação para guardar
                 <ChevronDown size={14} aria-hidden="true" />
               </summary>
               <label className="field">
                 <span>
-                  Guarde o código, o convite e o endereço do servidor juntos
+                  Guarde o pacote e o código de recuperação juntos
                 </span>
                 <textarea
                   readOnly
                   aria-label="Informações para recuperar seus dados"
-                  value={`Servidor: ${recoveryDetails.endpoint}\nCódigo de recuperação: ${code}\nConvite: ${recoveryDetails.invitation}`}
+                  value={`Servidor: ${recoveryDetails.endpoint}\nCódigo de recuperação: ${code}\nPacote de recuperação: ${recoveryDetails.recoveryPackage}`}
                 />
               </label>
             </details>

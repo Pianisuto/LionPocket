@@ -127,7 +127,8 @@ try {
     const {link} = await a.createInvitation();
     await b.connectInvitation(link);
     assert.equal((await b.status()).endpoint, endpoint);
-    await assert.rejects(b.receive()); // Unapproved device receives no financial keys/log.
+    assert.equal((await b.status()).phase,'pairing');
+    assert.equal((await b.status()).sync,null); // Unapproved devices have no financial transport.
     const waitFor = async (ready: () => Promise<boolean>) => {
       const deadline = Date.now() + 40000;
       while (!(await ready())) {
@@ -150,7 +151,7 @@ try {
     const other = await login(discovery, false, 'fixture-mallory');
     const { DeviceProvisioning, ProvisioningCrypto, fetchSyncHttp } = await import('@lionpocket/sync-local');
     const device = new DeviceProvisioning(saved.desktop!.profile!, secrets, new ProvisioningCrypto(sodium));
-    const target = `/v1/vaults/${device.profile.pin.vaultId}/registry`, body = canonicalStringify({});
+    const target = `/v1/vaults/${device.profile.pin.vaultId}/recovery-fetch`, body = canonicalStringify({request:await device.request()});
     const proof = await device.proof('POST', target, endpoint, body, other.accessToken);
     const encoded = device.crypto.encode(new TextEncoder().encode(canonicalStringify(proof)));
     await assert.rejects(fetchSyncHttp(endpoint).request(target, body, encoded, other.accessToken), /forbidden/);

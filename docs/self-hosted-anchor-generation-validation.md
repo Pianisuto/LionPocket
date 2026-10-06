@@ -14,8 +14,6 @@ O [modelo de fechamento, mapping, replay e reviews](self-hosted-epoch-recovery.m
 | `npm run lint` | Zero erros; warnings de non-null assertions/regras existentes |
 | `git diff --check` | Passou |
 | `npm run release:validate` | 0.3.10 / Android versionCode 3 |
-| `npm run sync:dev:test` | PostgreSQL/Keycloak: 61 passaram; cliente anterior executado separadamente |
-| `node tools/release/version-skew.cjs` | 3 passaram, engine/controller anterior de `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` sem alteração |
 | `npm run sync:self-hosted:validate` | Compose/TLS/CA/proxy com fixtures externos passaram |
 | `npm run sync:self-hosted:test` | 21 unitários; clean install/normal sync/backup/verify/restore/TLS/offline/canários passaram |
 

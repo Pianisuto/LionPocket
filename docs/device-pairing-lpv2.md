@@ -1,129 +1,69 @@
-# Pareamento de aparelhos por convite LPV2
+# Pareamento de aparelhos por LPV2
 
-Desktop → Mobile mantém quatro ações humanas, contando a leitura do QR:
+LPV2 é o único contrato de convite. O mesmo `lionpocket://pair/LPV2.<payload>` serve para Android, Desktop, QR, compartilhamento e clipboard. O aparelho novo não faz login OIDC nem digita fingerprint ou código de segurança.
 
-1. No aparelho que criou o cofre, abrir **Adicionar aparelho**.
-2. No novo aparelho, escanear o QR ou abrir o link.
-3. No novo aparelho, conferir o cofre/domínio e tocar **Conectar**.
-4. No aparelho autorizado, conferir o código curto e tocar **Aprovar aparelho**.
+## Caminhos recomendados
 
-O restante é automático: discovery, validação do servidor, preparação de identidade, pedido, consulta de aprovação, registry, grant, delivery selada, checkpoints, backup local, vinculação e primeiro sync. Não há login no aparelho novo, campos de fingerprint ou botões para conferir convite, buscar pedidos, entregar/receber chave. As decisões que permanecem são escolher o cofre e autorizar acesso. Comparar o código não exige digitá-lo nem abrir outra tela.
+**Desktop → Mobile:** Adicionar aparelho → mostrar QR Code → celular escaneia → Conectar → aprovar no Desktop.
 
-## Dois caminhos naturais com o mesmo LPV2
+**Mobile → Desktop:** Adicionar aparelho → Compartilhar convite ou Copiar link → abrir o link no computador → Conectar → aprovar no celular.
 
-**Desktop → Mobile:** Adicionar aparelho no Desktop → mostrar QR Code → celular escaneia → Conectar → aprovar no Desktop.
+A apresentação oferece QR, Compartilhar convite e Copiar link, sem perguntar antecipadamente qual será o destino: **“Escaneie com outro celular ou abra o link no computador.”** O convite vale por 15 minutos e um aparelho. **Copiar convite / Colar convite** é o fallback universal.
 
-**Mobile → Desktop:** Adicionar aparelho no celular → Compartilhar convite ou Copiar link → abrir o link no computador → Conectar → aprovar no celular. O Desktop recebe a chave e faz o primeiro sync automaticamente. A transferência inclui compartilhar/copiar e abrir o link; não é preciso escolher antecipadamente o tipo de aparelho destino.
+Após a aprovação, polling, grant, delivery selada, checkpoints, backup local, vinculação e primeiro sync são automáticos. Os dois aparelhos exibem o mesmo código curto para comparação visual, sem digitação.
 
-Nos dois aparelhos, a apresentação diz **“Escaneie com outro celular ou abra o link no computador”**, mantém QR local, Compartilhar convite, Copiar link e Copiar convite, e informa a validade de 15 minutos. No Android, a cópia usa o clipboard nativo com indicação de conteúdo sensível quando disponível. A UI não mostra o LPV2 bruto. **Colar convite** continua sendo fallback universal caso o sistema/aplicativo de mensagens não abra o link.
+## Deep link no Desktop instalado
 
-### Entrada direta no Desktop instalado
+Abrir um convite válido mostra diretamente **Conectar a este cofre**, domínio do servidor, explicação da aprovação e **Cancelar / Conectar**. Somente Conectar cria o pedido. Abrir ou cancelar o link não entrega chave, aprova aparelho ou concede acesso.
 
-`lionpocket://pair/LPV2....` é o mesmo formato usado no Android, QR, clipboard e compartilhamento. O Desktop valida assinatura, capability, finalidade, versão, endpoint e expiração antes de mostrar **Conectar a este cofre**, domínio do servidor e somente **Cancelar / Conectar**. Não exige Configurações, Sincronização, Tenho convite, Conferir convite, câmera ou fingerprint. Somente **Conectar** cria o pedido; abrir ou cancelar o link não prepara identidade, entrega chave ou autoriza acesso. A revogação/consumo são verificados pelo servidor no pedido autenticado, sem criar uma API anônima de consulta ou relaxar as regras LPV2.
+O processo principal recebe `argv` na abertura fria, encaminha `second-instance` à instância com `requestSingleInstanceLock`, restaura/foca a janela e trata `open-url` em macOS. A segunda instância termina antes de abrir banco ou janela. A caixa de entrada mantém o convite em memória até o renderer confirmar o recebimento, inclusive durante React StrictMode. Reabrir o mesmo link preserva identidade e pedido, sem duplicação.
 
-O processo principal recebe o URI de `argv` na abertura fria, encaminha `second-instance` para a instância que possui `requestSingleInstanceLock`, restaura/foca a janela e também registra `open-url` para macOS. Um processo secundário termina antes de abrir banco, registrar IPC ou criar janela. A caixa de entrada conserva o convite em memória até o renderer confirmar o recebimento, inclusive durante o ciclo de subscribe/unsubscribe do React StrictMode. Validações antigas não substituem um link mais recente. Não há URI como navegação web, persistência extra da capability, impressão de argumentos ou segunda instância duradoura.
+- Linux/Zorin/Ubuntu: o `.deb` instala `MimeType=x-scheme-handler/lionpocket;`, `Exec=lionpocket %u` e atualização do desktop database. O pacote depende de `desktop-file-utils`.
+- Windows: o executável instalado registra o protocolo durante Squirrel install/update e inicialização normal. Uninstall remove a associação. O comando aponta para o aplicativo instalado.
+- Normal e beta usam o mesmo scheme; o SO seleciona a associação. Desenvolvimento não substitui o aplicativo instalado.
 
-- **Linux / Zorin / Ubuntu-like:** o `.deb` produzido por `build-linux-deb.sh` instala `MimeType=x-scheme-handler/lionpocket;`, `Exec=lionpocket %u` (ou `lionpocket-beta %u`), executável/atalho e atualização do banco de desktop no postinst/postrm. `desktop-file-utils` é dependência do pacote. Funciona através do handler MIME do ambiente instalado, sem `npm run dev`.
-- **Windows:** o executável instalado registra o protocolo com `setAsDefaultProtocolClient` durante Squirrel install/update/primeira execução e inicialização normal; uninstall remove o registro. O instalador mantém atalhos e o comando aponta para o executável instalado, com URI como argumento. O tratamento local de Squirrel evita o log de `argv[1]` que a dependência anterior fazia sob `DEBUG`.
-- Normal e beta usam o mesmo scheme; a associação selecionada no sistema determina qual instalação abre o link. O modo de desenvolvimento não substitui essa associação.
+O Desktop não exige câmera, leitor de QR, navegação por Configurações ou colagem manual. Android usa [Google Code Scanner](https://developers.google.com/ml-kit/vision/barcode-scanning/code-scanner); sem o módulo Play Services, o link e o clipboard continuam disponíveis.
 
-Após Conectar, a UI mostra **Aguardando aprovação no outro aparelho…** e o SAS para comparação visual, sem digitação. Cliques concorrentes são serializados e preservam identidade/pedido imutável; reabrir o mesmo convite em espera ou depois da aprovação não cria outro pedido. Grant, delivery, TrustPin, checkpoints, replay, revogação e approval continuam protegidos pelo fluxo existente.
+## Convite e autenticação
 
-## Antes e depois
+O envelope canônico contém versão 2, purpose `device-pairing`, UUID, endpoint HTTPS, TrustPin completo, expiração, hash/verificador da capability e assinatura da autoridade. QR/link incluem uma seed aleatória de 256 bits, que permite somente solicitar entrada. Ela não é chave financeira nem sessão de conta.
 
-A sequência relatada no pedido tem 13 interações no aplicativo: nove no aparelho novo e quatro no autorizado, incluindo preencher servidor/convite/códigos e os botões intermediários. Logins OIDC, troca de aparelho e navegação adicional ficam fora dessa contagem; portanto ela é conservadora. Desktop → Mobile tem quatro ações no total, incluindo escanear: duas no aparelho novo e duas no autorizado. O E2E preserva essa sequência; um segundo E2E monta Android fundador → Desktop novo com compartilhar/copiar e abertura pelo handler do sistema.
+O novo aparelho verifica assinatura, formato, finalidade, versão, endpoint, expiração, hash da seed e chave pública derivada. Discovery valida servidor/epoch, versões e capacidades. O aparelho cria suas próprias chaves e assina o pedido. A capability assina um transcript que inclui convite, pedido e nome do aparelho. O servidor não recebe a seed.
 
-A primeira configuração também foi reduzida: **Configurar sincronização → URL HTTPS → Conectar → login OIDC → sincronização pronta**. Conectar inclui criar o cofre e fazer backup/vincular; discovery e preparação de chaves não são decisões humanas separadas.
+A autoridade verifica novamente esse transcript antes de `approve(deviceId)`. Todos os pedidos persistidos têm convite, nome e autenticação obrigatórios. Grant assinado, delivery selada e aprovação humana permanecem necessários. Convites cancelados, expirados, consumidos, adulterados ou destinados a outro servidor são rejeitados.
 
-## Convite temporário, finalidade limitada
+O SAS de seis dígitos vincula convite e fingerprint criptográfico do pedido, incluindo chaves, nonce e escopo. O nome autenticado ajuda a identificar o pedido, mas não prova a identidade física do usuário.
 
-Escolhemos a opção A: cada **Adicionar aparelho** emite um convite aleatório válido por 15 minutos, vinculado a um único pedido/dispositivo. Gerar outro cancela convites anteriores ainda não utilizados, sem afetar aparelhos conectados. **Cancelar convite** revoga explicitamente o convite exibido. A validade limita exposição de QR fotografado/encaminhado e spam futuro; não acrescenta passos ao caso normal. Um QR permanente espalharia um segredo duradouro sem benefício para a sequência de quatro ações.
-
-O texto compartilhável é `lionpocket://pair/LPV2.<base64url-canônico>`. O envelope contém versão, finalidade `device-pairing`, UUID do convite, endpoint HTTPS, TrustPin completo, expiração, hash da capability, chave pública de verificação da capability e assinatura da autoridade. O QR/link também contém uma seed aleatória de 256 bits. Ela é a capability, não uma chave financeira nem uma credencial de conta.
-
-A autoridade assina todos os campos públicos, incluindo endpoint/TrustPin/verificador. O aparelho novo valida assinatura, hash da seed e correspondência da chave pública derivada antes de usar o endpoint. Depois faz discovery e verifica `controlVersion=2`, `protocolVersion=1`, `domainSchema=1`, suite, escopo financeiro, `pairingVersion=2`, identidade e epoch do servidor. URLs não canônicas, HTTP em produção, convite alterado, versão incompatível e troca de servidor/epoch são recusados.
-
-## Autenticação sem entregar a capability ao servidor
-
-A seed gera um par Ed25519. O novo aparelho assina, com ela, um transcript canônico com separação de domínio que inclui o envelope do convite, pedido assinado e nome do aparelho. O pedido também é assinado pela identidade própria do aparelho e inclui as duas chaves públicas e nonce. O servidor guarda apenas envelope público, hash/verificador, expiração, revogação e vínculo do único dispositivo. A seed nunca é enviada à API.
-
-O aparelho autorizado verifica novamente a assinatura da autoridade e a assinatura da capability sobre o pedido/nome antes de emitir o grant. Assim, um servidor malicioso não pode substituir chaves ou renomear o pedido apenas por conhecer o banco de convites. A UI LPV2 não aceita downgrade silencioso para um pedido sem autenticação da capability.
-
-O código de segurança de seis dígitos é derivado do identificador do convite e do fingerprint criptográfico do pedido, que inclui ambas as chaves do aparelho, nonce e escopo. Os dois aparelhos mostram o mesmo código. Essa comparação visual continua útil para selecionar o aparelho correto quando alguém obteve uma cópia do convite; não há campo para redigitá-lo. O nome é informativo, sanitizado e autenticado no transcript, mas não prova a identidade física de quem está usando o celular.
-
-## Contratos separados de conta, convite e aparelho autorizado
+## Contratos atuais
 
 | Contrato | Autorização | Poderes |
 | --- | --- | --- |
-| `POST /v2/pair/:invite/request` | Capability assinando pedido + prova da chave do novo aparelho | Somente criar o pedido daquele cofre |
-| `POST /v2/pair/:invite/status` | Prova assinada do único aparelho vinculado ao convite | Estado; após aprovação, registry/checkpoints públicos e apenas a própria delivery selada |
-| `POST /v2/devices/vaults/:vault/:action` | Grant ativo assinado + prova HTTP da chave do aparelho | Operações do aparelho; mutações de autoridade ainda exigem assinatura da autoridade |
-| `/v1/...` | OIDC e as verificações/provas existentes | Criação da conta/cofre, recuperação e contratos antigos |
+| `POST /v2/pair/:invite/request` | Capability e prova do aparelho | Criar um único pedido |
+| `POST /v2/pair/:invite/status` | Prova do aparelho vinculado | Espera; após aprovação, registry/checkpoints e própria delivery |
+| `POST /v2/devices/vaults/:vault/:action` | Grant ativo e prova assinada | Transporte e operações de dispositivos; mutações de autoridade exigem sua assinatura |
+| `POST /v1/vaults` | OIDC, request e grant fundador assinados | Criar cofre |
+| `/v1/vaults/:vault/recovery-*`, `recover`, `epoch-*` | OIDC e verificações criptográficas específicas | Recuperação durável, epoch/staging/activation |
 
-As novas rotas de convite não tornam `/v1` pública. Possuir endpoint, TrustPin, convite ou assinatura da capability não permite ler commits/dados, emitir grants, aprovar/revogar aparelhos, criar checkpoints ou buscar delivery de outro dispositivo. Antes de existir grant ativo **e** delivery, status retorna somente `waiting`; recusa mantém o aparelho sem chave. Conta desabilitada continua bloqueada em todos os transportes.
+Dispositivos aprovados usam exclusivamente signed-device transport. A prova HTTP cobre método, caminho real, origem, corpo, escopo e nonce, com digest vazio de token de conta. O ledger rejeita replay; uma prova nova para o mesmo pedido imutável permite retomar uma resposta perdida. Conta desabilitada e grant revogado bloqueiam acesso.
 
-O novo transporte de dispositivos permite sync após a aprovação sem compartilhar sessão OIDC. Perfis já conectados podem migrar automaticamente ao transporte por grant/prova, validando o registry local assinado, quando o servidor anuncia LPV2. Criação inicial e recuperação continuam usando OIDC. Futuro compartilhamento entre contas deverá ter um contrato separado: o convite LPV2 não altera membros/contas de um cofre.
+Gerar outro convite cancela os ainda não utilizados. Cancelar convite revoga explicitamente o convite exibido. O limite é dez pedidos ativos por cofre e 90 chamadas/minuto por IP nas rotas de onboarding. Seed, URI completo, chaves e código de recovery não aparecem nos logs.
 
-Proof HTTP assina método, caminho real, origem, corpo, escopo e nonce. O ledger de nonces rejeita replay, inclusive após operações rejeitadas cuja prova válida foi consumida. Uma nova prova para o mesmo pedido imutável pode receber resposta idempotente: necessário quando a resposta anterior se perdeu. Outro dispositivo não pode reutilizar o convite consumido. O limite é de dez pedidos ativos por cofre e 90 chamadas/minuto por IP nas rotas de onboarding, incluindo polling; não confiamos em `X-Forwarded-For`. Atrás de um proxy que concentra IPs, várias sessões simultâneas podem compartilhar esse limite.
+## Recovery e instalação
 
-## Aprovação, continuidade e recuperação
+Recovery usa um [pacote próprio LPR1 e código secreto](recovery.md), sem capability temporária. Criação e recovery mantêm OIDC; pareamento e sync de aparelhos aprovados não exigem sessão de conta.
 
-**Aprovar aparelho** executa grant, delivery selada para a chave pública do destinatário e rotação/checkpoint no modelo atual. A intenção de aprovação é persistida antes da primeira mutação; se a rede cair ou o app reiniciar, o owner conclui a mesma operação automaticamente. Uma falha após concluir a rotação, antes de limpar a intenção, pode causar uma rotação adicional segura; nunca autoriza um dispositivo diferente.
+A instalação self-hosted cria diretamente o schema atual. Servidores e clientes incompatíveis não são suportados. A instalação anterior deve ser recriada, após preservar o banco financeiro local escolhido; siga o [procedimento de reset e rebaseline](self-hosting.md#servidor-recriado-e-base-local-como-fonte-de-verdade).
 
-Polling foreground de três segundos é single-flight. Pedidos aparecem sem refresh; o novo aparelho recebe aprovação, valida grant/registry/checkpoints, abre a delivery localmente, faz backup, vincula e inicia sync. Identidade e pedido são persistidos antes da requisição; a capability fica no SecretStore protegido somente até o ACK durável. Restart e perda de ACK retomam com nova prova e a mesma identidade. O aplicativo retoma o modal de espera no Android. Após expiração/recusa/cancelamento, um convite novo pode reutilizar a identidade do pedido ainda não aprovado.
+## Testes
 
-Primeira criação pode ativar sync antes de salvar recovery: não existe dependência criptográfica entre confirmação humana do código e sigilo/grant/baseline. A UI mostra **Proteja seu cofre** persistentemente até guardar/confirmar a recuperação. Perder todos os aparelhos antes disso continua significando perder acesso; a ação de guardar recovery permanece disponível. A confirmação do código e os contratos de recovery/restauração, incluindo Recovery B, escrow, staging e ativação de epoch, continuam protegidos. Um consumidor que exige a política anterior pode manter `requireRecoveryConfirmation=true`.
+`pairing.integration.test.ts` exercita PostgreSQL/Keycloak reais, os dois adapters SQLite, três direções de pareamento e as telas reais Desktop/Mobile. Cobre QR, deep link, fallback, aprovação, chave/primeiro sync, expiração, revogação, replay, adulteração, ausência de OIDC no novo aparelho, restart, perda de rede, rotação, recovery e reset com backup.
 
-Na recuperação LPV1, o convite deve vir da cópia guardada junto do código, como orienta a tela. Redigitar o fingerprint calculado dessa mesma cópia não autenticava uma fonte adicional. A segurança continua em `openRecovery`: assinatura do envelope, AEAD com chave derivada do código secreto, associated data de escopo/versão, autoridade pública do bundle igual ao TrustPin e chave pública derivada da seed igual à autoridade. Um servidor que substitua o convite/autoridade não consegue produzir um bundle que abra com o código original. Essas verificações e a confirmação de guardar o código não foram removidas.
+`pairingLinks.test.ts` verifica eventos Electron, cold/warm start, single instance, validação e retomada do renderer. `protocol-registration.test.cjs` constrói/inspeciona DEBs normal/beta. Os smokes em `tools/pairing` verificam aplicativos instalados no Windows/Linux e o deep link no APK Android. CI injeta o convite no handler do SO, sem depender de câmera física.
 
-E2EE, grant chain, deliveries seladas, checkpoints antirollback, rotação, revogação, isolamento de vault e backups continuam no motor existente. O QR é gerado localmente; a imagem Android é um PNG em memória, sem serviço remoto ou arquivo temporário. Não registramos convite/seed/chaves em logs da aplicação. Compartilhar/copiar deliberadamente o link dá acesso à capability de solicitar entrada, mas nunca às chaves sem aprovação.
-
-## LPV1 e atualização self-hosted
-
-LPV1 permanece metadata pública para recuperação e contratos antigos. Não recebe novos poderes. Colar LPV1 no novo pareamento mostra explicitamente que é preciso gerar outro convite em **Adicionar aparelho**. O novo painel mostra/aprova pedidos autenticados LPV2; clientes antigos ainda podem usar seu fluxo `/v1` com OIDC e verificação explícita original. A API legada `approve(deviceId, fingerprint)` continua disponível para esses consumidores. Não convertê-los silenciosamente evita downgrade de autenticação.
-
-Servidor e aplicativos precisam da versão com `pairingVersion=2` para o fluxo novo. `controlVersion`, protocolo financeiro e schema de domínio não mudam. A migração PostgreSQL é aditiva/idempotente: tabela `sync_pairing_invites` e campos de convite/nome/autenticação/recusa em `sync_pairings`. Não há nova configuração OIDC, conta compartilhada, porta, serviço ou segredo no `.env`. Atualize a imagem com `./lpctl up`, preservando identidade/epoch, volumes e backups. Clientes antigos seguem nas rotas antigas; servidor antigo recebe mensagem de atualização no pareamento LPV2. Android precisa ser recompilado para registrar o deep link e o módulo de QR.
-
-O leitor integrado usa [Google Code Scanner](https://developers.google.com/ml-kit/vision/barcode-scanning/code-scanner), processa no aparelho e depende do módulo Play Services. Sem esse módulo, pode-se usar a câmera externa que abre o link ou colar o convite. Desktop exibe QR, copia link e usa compartilhamento quando o ambiente oferece essa API. Ao receber o link, abre diretamente a confirmação; câmera ou leitor de QR no computador não são necessários.
-
-## Evidências e limites dos testes
-
-`apps/sync-server/src/pairing.integration.test.ts` usa PostgreSQL e Keycloak reais, SQLite/adapters Desktop e Android e controladores completos. O E2E de quatro ações monta os componentes reais Desktop/Mobile; somente primitivas nativas, leitor e transporte IPC são adaptados ao runner. O deep link equivalente à leitura da câmera é injetado como permitido para CI.
-
-| Requisitos do pedido | Evidência |
-| --- | --- |
-| 1–4: entrada direta, endpoint, discovery, sem OIDC novo | E2E de telas + smoke em APK instalado + três direções de adapters |
-| 5–13: sem chave antes de aprovação, pedido automático, uma aprovação, sem digitação, grant/delivery/checkpoints/primeiro sync | E2E de telas e testes de cofre com lançamento financeiro cifrado replicado |
-| 14–20: alteração/capability/expiração/revogação/replay/pin-only/atacante/recusa | Testes negativos via contratos HTTP reais e ausência de chave no SecretStore |
-| 21–23: restart/rede/LPV1 | Perda de ACK, restart de ambos os controladores, aprovação interrompida e rejeição explícita LPV1 |
-| 24–26: Desktop ↔ Android, Android ↔ Android | Três combinações de adapters/SQLite reais; Android como fundador nos casos em que autoriza |
-| 27: rotação/revogação | Teste LPV2 e suítes existentes de checkpoint/recovery/epoch |
-| 28: segredos | Ausência de seed no banco/profile público; smoke verifica logs da aplicação Android; nenhum convite é impresso pelo harness |
-| Servidor malicioso/downgrade | Autenticação de capability alterada/removida não produz delivery |
-| Upgrade do owner | Perfil sem novo transporte passa a grant/prova sem outro login |
-
-A matriz adicional cobre os 17 requisitos Desktop/Mobile: abertura fria/quente e instância única; confirmação direta; convite inválido/expirado/revogado; cancelar sem pedido; duplo clique/link repetido; registro Windows/Linux; Android → Desktop sem QR; Desktop → Android por QR preservado; colagem manual; logs sem capability e ausência de chave/acesso antes de aprovação. Os testes de erros UI usam assinatura e revogação reais, além dos contratos negativos existentes.
-
-`apps/desktop/src/main/pairingLinks.test.ts` cobre os eventos do Electron, registro Squirrel, caixa de entrada, erros e retomada do renderer. `squirrelStartup.test.ts` cobre atalhos e ausência de logs. `tools/release/protocol-registration.test.cjs` constrói e inspeciona DEBs normal/beta e valida o desktop entry/cache, não apenas o texto-fonte.
-
-`tools/pairing/desktop-deeplink-smoke.cjs` usa o aplicativo empacotado e o handler do SO, verificando abertura fria/quente, mesmo PID/uma janela, confirmação direta sem inputs/câmera, cancelamento, expiração, convite inválido, ausência de pedido/acesso antes da confirmação e logs sem capability. O workflow instala o `.deb` com dpkg no Linux e usa o Squirrel instalado no Windows. Localmente, `--deb-extracted` registra o desktop entry do `.deb` extraído em diretórios XDG temporários, preservando a instalação/dados do usuário; `--packaged` testa argv sem associação do SO. O teste nativo não substitui o E2E completo de approval/chave/primeiro sync.
-
-`tools/pairing/android-deeplink-smoke.cjs` abre um LPV2 sintético no APK normal instalado, usando usuário Android temporário em emulador descartável, e verifica um único **Conectar**, domínio obtido do convite e ausência de segredo nos logs da aplicação. O workflow Android executa o teste depois de preservar/verificar fixtures de atualização. Não simula câmera física nem afirma um teste de pareamento completo entre aparelhos físicos.
-
-Verificação visual: painel Desktop, confirmação de deep link no Desktop empacotado e modal no Android instalado. Capturas usam somente dados sintéticos; a imagem de aprovação não contém capability.
+`current-onboarding.test.cjs` impede reintrodução do marcador do formato de convite substituído no conteúdo do repositório.
 
 ![Aprovação Desktop com nome e código curto](images/pairing-desktop-approval.png)
 
-![Deep link abre diretamente a confirmação Desktop](images/pairing-desktop-confirmation.png)
+![Deep link abre a confirmação Desktop](images/pairing-desktop-confirmation.png)
 
-![Deep link abre diretamente a confirmação Android](images/pairing-android-confirmation.png)
-
-Validação do LPV2 e da melhoria Desktop (ver descrição do PR para a execução mais recente):
-
-- `npm test`: validação completa local; suítes de integração ficam opt-in nesse comando. Contagens finais estão na descrição do PR.
-- `npm run sync:dev:test`: inclui os E2Es Desktop → Android por QR e Android fundador → Desktop por link, fallback e erros amigáveis reais. Um teste de skew precisa do artefato antigo que o workflow prepara e fica skipped localmente.
-- `npm run typecheck`, lint sem erros e `git diff --check`.
-- `npm run sync:self-hosted:validate`, 25 testes de operação e smoke completo com TLS, contas, LPV2, privacidade, offline e restauração E1 → E2 → E3.
-- Android debug e release com assinatura explícita de desenvolvimento; deep link no APK normal instalado em emulador Android 36. Câmera física e pareamento entre aparelhos físicos não foram executados localmente.
-
-O modelo de autoridade existente foi preservado: **Adicionar aparelho/Aprovar** ficam disponíveis no fundador/owner que possui a seed da autoridade, incluindo Android quando ele criou o cofre. Um aparelho secundário com grant de sync não recebe essa seed ou novos poderes de autoridade implicitamente.
+![Deep link abre a confirmação Android](images/pairing-android-confirmation.png)

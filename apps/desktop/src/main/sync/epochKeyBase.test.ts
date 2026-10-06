@@ -81,7 +81,7 @@ describe("key base belongs to a generation", () => {
           a.crypto,
         ),
         request = await b.request();
-      const grant = await a.grant(request, request.fingerprint);
+      const grant = await a.grant(request);
       a.acceptRegistry({
         pin: a.profile.pin,
         grants: [...a.profile.grants, grant],
@@ -128,7 +128,7 @@ describe("key base belongs to a generation", () => {
         a.crypto,
       ),
       request = await b.request();
-    const grant = await a.grant(request, request.fingerprint);
+    const grant = await a.grant(request);
     a.acceptRegistry({
       pin: a.profile.pin,
       grants: [...a.profile.grants, grant],

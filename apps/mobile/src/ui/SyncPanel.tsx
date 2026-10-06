@@ -29,14 +29,14 @@ export function SyncPanel({
     [invitation, setInvitation] = useState(initialInvitation ?? ''),
     [inviteInfo, setInviteInfo] = useState<{ id: string; endpoint: string }>(),
     [pairingLink, setPairingLink] = useState(''),
-    [fingerprint, setFingerprint] = useState(''),
-    [authority, setAuthority] = useState(''),
+    [recoveryPackage, setRecoveryPackage] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [reviewed, setReviewed] = useState(false),
     [recoveryCode, setRecoveryCode] = useState(''),
     [confirmedCode, setConfirmedCode] = useState(''),
     [revokeId, setRevokeId] = useState(''),
+    [resetConfirmed, setResetConfirmed] = useState(false),
     [setup, setSetup] = useState(false),
     [advanced, setAdvanced] = useState(false),
     [adding, setAdding] = useState(false);
@@ -151,6 +151,17 @@ export function SyncPanel({
           acontece enquanto o aplicativo está ativo.
         </Text>
       )}
+      {status.phase === 'bound' && advanced && <View>
+        <Text style={styles.heading}>Servidor de sincronização recriado</Text>
+        <Text style={styles.text}>O remoto anterior não será recuperado. Escolha este banco local como fonte de verdade. Um backup completo será criado antes de remover o vínculo.</Text>
+        <TextInput style={styles.input} accessibilityLabel="Novo servidor" value={endpoint} onChangeText={setEndpoint} autoCapitalize="none" />
+        <Button label={resetConfirmed ? 'Fonte de verdade confirmada' : 'Entendo e escolho os dados deste aparelho'} onPress={() => setResetConfirmed(!resetConfirmed)} />
+        <Button label="Preservar backup e preparar novo sync" disabled={busy || !resetConfirmed || !endpoint} onPress={() => act(c => c.resetForRecreatedServer(endpoint,resetConfirmed))} />
+      </View>}
+      {!!status.resetBackupPath && status.phase === 'local' && <View>
+        <Text style={styles.text}>Backup criado: {status.resetBackupPath}</Text>
+        <Button label="Criar novo sync com meus dados locais" disabled={busy} onPress={() => act(c => c.create())} />
+      </View>}
       {status.phase === 'local' && status.pairingStep === 'preparing' && (
         <Text style={styles.text}>Preparando conexão…</Text>
       )}
@@ -233,109 +244,14 @@ export function SyncPanel({
               />
             </>
           )}
-          {!initialInvitation && (
-            <Button
-              label="Recuperação de um cofre antigo"
-              onPress={() => setAdvanced(!advanced)}
-            />
-          )}
-          {advanced && (
-            <Button
-              label="Verificar convite de recuperação"
-              disabled={busy || !invitation}
-              onPress={() =>
-                act(async (c) => {
-                  const info = await c.inspectInvitation(invitation);
-                  setAuthority(info.fingerprint);
-                  setFingerprint(info.fingerprint);
-                })
-              }
-            />
-          )}
+          {!initialInvitation && <Button label="Recuperar um cofre existente" onPress={() => setAdvanced(!advanced)} />}
+          {advanced && <>
+            <Text style={styles.text}>Use o pacote e o código guardados fora do aplicativo.</Text>
+            <TextInput style={styles.input} accessibilityLabel="Pacote de recuperação" value={recoveryPackage} onChangeText={setRecoveryPackage} autoCapitalize="none" autoCorrect={false} />
+            <TextInput style={styles.input} accessibilityLabel="Código de recuperação" secureTextEntry value={confirmedCode} onChangeText={setConfirmedCode} autoCapitalize="none" />
+            <Button label="Recuperar cofre" disabled={busy || !recoveryPackage || !confirmedCode} onPress={() => act(c => c.recover(recoveryPackage,confirmedCode))} />
+          </>}
         </>
-      )}
-      {status.phase === 'local' && authority && (
-        <>
-          <Text style={styles.heading}>Recuperar cofre em nova instalação</Text>
-          <TextInput
-            style={styles.input}
-            accessibilityLabel="Código de recuperação"
-            secureTextEntry
-            value={confirmedCode}
-            onChangeText={setConfirmedCode}
-            autoCapitalize="none"
-          />
-          <Button
-            label="Entrar e recuperar cofre"
-            disabled={busy || fingerprint !== authority || !confirmedCode}
-            onPress={() =>
-              act((c) => c.recover(invitation, fingerprint, confirmedCode))
-            }
-          />
-        </>
-      )}
-      {status.phase === 'recovery' && (
-        <View>
-          <Text style={styles.heading}>Guarde seu código de recuperação</Text>
-          <Text style={styles.text}>
-            Este código é necessário para recuperar seus dados criptografados se
-            você perder todos os dispositivos. Guarde-o junto do convite fora do
-            aplicativo.
-          </Text>
-          <Button
-            label={
-              recoveryCode
-                ? 'Gerar outro código'
-                : 'Mostrar código de recuperação'
-            }
-            disabled={busy}
-            onPress={() =>
-              act(async (c) =>
-                setRecoveryCode((await c.generateRecovery()).code),
-              )
-            }
-          />
-          {!!recoveryCode && (
-            <>
-              <Text style={styles.text} selectable>
-                {recoveryCode}
-              </Text>
-              <Text style={styles.muted}>Guarde estas informações juntas:</Text>
-              <Text
-                style={styles.text}
-                selectable
-              >{`Servidor: ${status.endpoint}\nCódigo de recuperação: ${recoveryCode}\nConvite: ${status.invitation}`}</Text>
-              <TextInput
-                style={styles.input}
-                accessibilityLabel="Digite o código que você guardou"
-                placeholder="Digite o código que você guardou"
-                secureTextEntry
-                value={confirmedCode}
-                onChangeText={setConfirmedCode}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <Button
-                label="Guardei o código · Ativar sincronização"
-                tone="primary"
-                disabled={busy || confirmedCode !== recoveryCode}
-                onPress={() =>
-                  act(async (c) => {
-                    await c.confirmRecovery(confirmedCode);
-                    setRecoveryCode('');
-                    setConfirmedCode('');
-                  })
-                }
-              />
-            </>
-          )}
-          <Text style={styles.muted}>
-            Convite para recuperação (guarde também):
-          </Text>
-          <Text style={styles.text} selectable>
-            {status.invitation}
-          </Text>
-        </View>
       )}
       {status.phase === 'creating' && (
         <Button
@@ -535,6 +451,10 @@ export function SyncPanel({
             {status.owner && advanced && (
               <>
                 <Text style={styles.heading}>Recuperação e proteção</Text>
+                {!!status.recoveryPackage && <>
+                  <Text style={styles.muted}>Pacote atual · guarde com o código e atualize a cópia após recuperar o servidor.</Text>
+                  <Text style={styles.text} selectable>{status.recoveryPackage}</Text>
+                </>}
                 <Text style={styles.text}>
                   Versão da chave: {status.activeKeyVersion} · Recuperação
                   confirmada: {status.recoveryVersion !== '0' ? 'Sim' : 'Não'}
@@ -555,7 +475,7 @@ export function SyncPanel({
                       autoridade.
                     </Text>
                     <Text style={styles.text} selectable>
-                      {recoveryCode}
+                      {`Pacote de recuperação: ${status.recoveryPackage}\nCódigo de recuperação: ${recoveryCode}`}
                     </Text>
                     <TextInput
                       style={styles.input}
