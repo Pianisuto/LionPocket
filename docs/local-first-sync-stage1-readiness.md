@@ -66,7 +66,7 @@ A [fundação local do piloto manual](local-first-sync-stage1-local-foundation.m
 
 ## Continuação: provisioning implementado
 
-O [fluxo de provisioning/trust/pareamento sintético](local-first-sync-stage1-provisioning.md) agora implementa API de controle com PostgreSQL/Keycloak, PKCE, grants encadeados, comparação de fingerprint, entrega de DEK cifrada, decoder limitado e prova HTTP com nonces duráveis. As afirmações acima sobre API/login/trust pendentes registram o estado de entrada ou o recorte anterior. Envio financeiro, cursores, inbox/outbox remota, projeção e conflitos permanecem pendentes; capabilities financeiras seguem vazias.
+O [fluxo de provisioning/trust/pareamento sintético](local-first-sync-stage1-provisioning.md) agora implementa API de controle com PostgreSQL/Keycloak, PKCE no fundador, grants encadeados, SAS visual e entrega automática de DEK cifrada, decoder limitado e prova HTTP com nonces duráveis. As afirmações acima sobre API/login/trust pendentes registram o estado de entrada ou o recorte anterior. Envio financeiro, cursores, inbox/outbox remota, projeção e conflitos permanecem pendentes; capabilities financeiras seguem vazias.
 
 ## Continuação: transporte manual
 

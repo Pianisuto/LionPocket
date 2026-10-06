@@ -11,7 +11,7 @@ export const devOidc = {
   },
 } as const;
 export type DevClientId = keyof typeof devOidc.clients;
-/** Shared system-browser flow. Only the legacy synthetic wrapper enables loopback HTTP. */
+/** Shared system-browser flow. Only isolated synthetic fixtures enable loopback HTTP. */
 async function authenticateOidc(
   config: { issuer: string; clientId: string; redirectUri: string },
   openExternal: (url: string) => Promise<void>,
@@ -147,7 +147,7 @@ async function authenticateOidc(
 export function loginOidc(config: { issuer: string; clientId: string; redirectUri: string }, open: (url: string) => Promise<void>) {
   return authenticateOidc(config, open, 180000);
 }
-/** Compatibility entry point restricted to the isolated synthetic deployment. */
+/** Test entry point for the isolated synthetic Keycloak deployment. */
 export async function loginDevelopmentOidc(
   clientId: DevClientId, openExternal: (url: string) => Promise<void>, timeoutMs = 180000,
 ) {

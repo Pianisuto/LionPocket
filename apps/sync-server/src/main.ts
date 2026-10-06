@@ -8,7 +8,7 @@ import { keycloakIdentity } from './identity';
 import { manualTransactionAcceptancePassed } from './acceptance';
 
 const development = process.env.LIONPOCKET_SYNC_DEV === 'synthetic-only';
-const betaChannel = process.env.LIONPOCKET_PRIVATE_BETA === 'isolated'; // Legacy deployment alias only.
+const betaChannel = process.env.LIONPOCKET_PRIVATE_BETA === 'isolated'; // Selects the isolated channel's OIDC clients and redirect.
 const required = (name: string) => {
   const value = process.env[name];
   if (!value) throw new Error(`Missing ${name}. See docs/self-hosting.md.`);

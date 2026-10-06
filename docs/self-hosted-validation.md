@@ -50,12 +50,12 @@ Na regressão clean-install, a senha do administrador da fixture foi trocada par
 
 O restore real na stack descartável manteve serverId, gerou novo serverEpoch e permitiu criar outra conta pela ferramenta oficial (administrador/configuração restaurados). Cliente detectou epoch diferente **antes de envio**, conservando SQLite e a outbox byte a byte. A infraestrutura permaneceu saudável após o restore.
 
-**Bloqueio preservado:** a retomada de cofres existentes entre epochs exige migração/reconciliação revisada ainda não implementada. Pins/envelopes/grants antigos permanecem assinados no epoch anterior; não são reescritos nem expostos como histórico atual. Restore operacional é restaurável/ensaiável, mas não é retomada automática dos cofres antigos. Mesma limitação para troca de operador/domínio. Veja [o guia](self-hosting.md#restore-operacional-e-serverepoch).
+A retomada entre epochs usa preparação, Recovery B, staging e ativação explícita pelo aparelho âncora. O ensaio operacional E1 → E2 → E3 confirma duas ativações e retorno ao sync normal. Outros aparelhos permanecem preservados e precisam de reconexão; não há migração automática das suas alterações offline. Instalação vazia usa o fluxo separado de servidor recriado/rebaseline. Veja [o guia](self-hosting.md#restore-operacional-e-serverepoch).
 
 ## Limites desta entrega
 
-- Sem LionPocket Cloud público, billing, background/push Android, QR, migração automática ou purge/GC.
+- Sem LionPocket Cloud público, billing, background/push Android, migração automática ou purge/GC.
 - Não muda applicationId/identidade de assinatura normal. APK normal local é candidato de desenvolvimento; assinatura pública continua sendo a decisão pendente já documentada em release readiness.
 - Builds Windows/AVD permanecem no CI de readiness existente; nesta máquina a execução nativa foi Linux e compilação Android x86_64, não Android físico.
 - Nome/realm/redirect/default endpoint/perfil/pacote e instalador diferem por channel; protocolo, segurança e escopo financeiro são os mesmos. A beta real não foi alterada no homelab.
-- Aliases temporários `BetaSync`, `Beta*`, `beta-security`, `betaControl`, módulos/UI antigos preservam compatibilidade de código. Contextos assinados contendo `beta` e nomes históricos `ManualSync`/`DevelopmentSyncActions` conservados deliberadamente; não existe segundo motor nem gate beta para capacidades completas.
+- Normal e beta usam o mesmo controller, LPV2, pacote LPR1 e transporte assinado. Contextos criptográficos contendo `beta` conservam os bytes das assinaturas atuais; os canais diferem somente na configuração operacional.
