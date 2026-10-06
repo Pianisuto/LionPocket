@@ -11,3 +11,4 @@ export * from './epoch-transition';
 
 export * from './epoch-staging';
 export * from './epoch-activation';
+export * from './pairing-invite';

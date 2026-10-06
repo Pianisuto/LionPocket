@@ -1,3 +1,4 @@
+import { onboardPairing, managePairing, namedRequest } from './pairing';
 import { vaultControl, vaultRecoveryRequest } from './vaultControl';
 import { epochActivation, type ActivationFault } from './epochActivation';
 import { epochStaging } from './epochStaging';
@@ -66,6 +67,7 @@ async function chain(tx: PoolClient, vaultId: string): Promise<DeviceGrant[]> {
   ).rows.map((row) => row.grant_envelope);
 }
 const knownErrors: Record<string, number> = {
+  invite_invalid: 403, invite_expired: 410, invite_revoked: 410, invite_consumed: 409, pairing_denied: 403,
   recovery_confirmation_required: 409,
   invalid_key_base: 400,
   invalid_staging: 400,
@@ -146,6 +148,7 @@ export function controlServer(options: {
   activationFault?: ActivationFault;
 }) {
   const { pool, crypto, environment, origin, identity } = options;
+  const attempts = new Map<string, { n: number; reset: number }>();
   const server = createServer(async (req, res) => {
     const respond = (status: number, body: unknown) => {
       let text = canonicalStringify(body);
@@ -163,7 +166,10 @@ export function controlServer(options: {
     let tx: PoolClient | undefined;
     let proofConsumed = false;
     try {
-      const target = req.url ?? '',
+      const rawTarget = req.url ?? '';
+      const onboarding = /^\/v2\/pair\/([0-9a-f-]{36})\/(request|status)$/.exec(rawTarget);
+      const deviceRoute = /^\/v2\/devices\/vaults\/([0-9a-f-]{36})\/(invite-create|invite-revoke|pairing-deny|pairing-list|grants|deliveries|key-checkpoints|recovery-store|registry|commits|changes)$/.exec(rawTarget);
+      const target = rawTarget,
         method = req.method ?? '';
       if (method === 'GET' && ['/v1/environment', '/.well-known/lionpocket'].includes(target)) {
         respond(200, {
@@ -173,6 +179,7 @@ export function controlServer(options: {
           ...(options.oidc ? {oidc:options.oidc} : {}),
           audience: 'lionpocket-sync-api',
           cryptoSuites: ['lp-sodium-v1'],
+          ...(options.financialEnabled ? {pairingVersion: 2} : {}),
           controlVersion: 2,
           protocolVersion: 1,
           domainSchema: 1,
@@ -180,20 +187,14 @@ export function controlServer(options: {
         });
         return;
       }
+      if ((onboarding || deviceRoute) && !options.financialEnabled) { respond(404,{error:'not_found'}); return; }
+      if ((onboarding || deviceRoute) && method !== 'POST') { respond(404,{error:'not_found'}); return; }
       // Opt-in controls the only financial routes; every other domain remains absent.
       const create = method === 'POST' && target === '/v1/vaults';
-      const match =
-        /^\/v1\/vaults\/([0-9a-f-]{36})\/(pairings|pairing-list|grants|deliveries|registry|commits|changes|recovery-fetch|recover|recovery-store|key-checkpoints|epoch-recovery-challenge|epoch-recovery-authorize|epoch-staging-begin|epoch-staging-batch|epoch-staging-validate|epoch-staging-prepare|epoch-staging-status|epoch-activation|epoch-activation-status)$/.exec(
-          target,
-        );
-      if (
-        !create &&
-        (!match ||
-          (method !== 'POST' &&
-            !(method === 'GET' && ['registry', 'pairings'].includes(match[2]))))
-      ) {
-        respond(404, { error: 'not_found' });
-        return;
+      const accountRoute = /^\/v1\/vaults\/([0-9a-f-]{36})\/(recovery-fetch|recover|epoch-recovery-challenge|epoch-recovery-authorize|epoch-staging-begin|epoch-staging-batch|epoch-staging-validate|epoch-staging-prepare|epoch-staging-status|epoch-activation|epoch-activation-status)$/.exec(target);
+      const match = deviceRoute ?? accountRoute;
+      if (!create && !onboarding && (!match || method !== 'POST')) {
+        respond(404,{error:'not_found'}); return;
       }
       if (
         match &&
@@ -203,31 +204,38 @@ export function controlServer(options: {
         respond(404, { error: 'not_found' });
         return;
       }
-      // Discovery makes v0.3.11 stop before preparing any envelope. Enforce the
-      // same floor here for already-running clients, cached sessions and requests
-      // in flight across a server upgrade. No proof is consumed or state mutated.
-      // This compatibility declaration supplements, never replaces, authorization.
+      // Reject incompatible clients before consuming a proof or mutating state.
       if (req.headers['x-lionpocket-control-version'] !== '2') {
         respond(426, { error: 'client_upgrade_required', controlVersion: 2 });
         return;
       }
-      const authorization = req.headers.authorization;
-      if (!authorization?.startsWith('Bearer ') || authorization.length > 16384)
-        throw new Error('unauthenticated');
-      const token = authorization.slice(7);
-      let account: Identity;
-      try {
-        account = await identity(token);
-      } catch {
-        throw new Error('unauthenticated');
+      let token = '', account: Identity;
+      if (onboarding) {
+        // Bound memory and work before expensive signature/DB verification. Do not trust proxy headers.
+        const now = Date.now(), key = req.socket.remoteAddress ?? 'unknown';
+        for (const [ip,bucket] of attempts) if (bucket.reset <= now) attempts.delete(ip);
+        if (attempts.size >= 10000 && !attempts.has(key)) throw new Error('rate_limited');
+        const bucket = attempts.get(key) ?? { n: 0, reset: now + 60000 };
+        attempts.set(key,bucket);
+        if (++bucket.n > 90) throw new Error('rate_limited');
+        account = { issuer: '', subject: '' };
+      } else if (deviceRoute) {
+        // Separate device transport: no capability or bearer token authorizes this route.
+        // Existing /v1 account routes retain OIDC. The signed active grant and proof are checked below.
+        const owner = (await pool.query('SELECT owner_issuer,owner_subject FROM sync_vaults WHERE vault_id=$1',[deviceRoute[1]])).rows[0];
+        if (!owner) throw new Error('forbidden');
+        account = { issuer: owner.owner_issuer, subject: owner.owner_subject };
+      } else {
+        const authorization = req.headers.authorization;
+        if (!authorization?.startsWith('Bearer ') || authorization.length > 16384) throw new Error('unauthenticated');
+        token = authorization.slice(7);
+        try { account = await identity(token); } catch { throw new Error('unauthenticated'); }
       }
-      if ((await pool.query('SELECT 1 FROM sync_disabled_accounts WHERE issuer=$1 AND subject=$2', [account.issuer, account.subject])).rowCount)
-        throw new Error('forbidden');
+      if (!onboarding && (await pool.query('SELECT 1 FROM sync_disabled_accounts WHERE issuer=$1 AND subject=$2', [account.issuer, account.subject])).rowCount) throw new Error('forbidden');
       const body = await readBody(
         req,
         match?.[2].startsWith('epoch-staging-') ? stagingLimits.requestBytes : match?.[2] === 'commits' ? 1048576 : 65536,
       );
-      if (method === 'GET' && body.text) throw new Error('invalid_envelope');
       if (
         method === 'POST' &&
         req.headers['content-type'] !== 'application/json'
@@ -284,7 +292,7 @@ export function controlServer(options: {
           {
             scope: proof,
             method,
-            target,
+            target: rawTarget,
             origin,
             body: body.text,
             token,
@@ -303,6 +311,10 @@ export function controlServer(options: {
         await transaction.query('SAVEPOINT control_mutation');
         proofConsumed = true;
       };
+      if (onboarding) {
+        const result = await onboardPairing(tx, onboarding[2] as 'request' | 'status', onboarding[1], body.value, proof, crypto, key => checkProof(proof,key));
+        await tx.query('COMMIT'); respond(200,result); return;
+      }
       let pin: TrustPin,
         grants: DeviceGrant[],
         request: PairingRequest | undefined;
@@ -365,43 +377,13 @@ export function controlServer(options: {
           const result=await vaultRecoveryRequest(tx,action,body.value,pin,grants,proof.deviceId,crypto,key=>checkProof(proof,key));
           await tx.query('COMMIT'); respond(200,result);return;
         }
-        if (action === 'pairings' && method === 'POST') {
-          request = body.value as PairingRequest;
-          verifyPairing(request, crypto);
-          sameScope(request, pin);
-          if (request.deviceId !== proof.deviceId) throw new Error('forbidden');
-          const existing = registry.devices.get(request.deviceId);
-          if (existing?.status === 'revoked') throw new Error('device_revoked');
-          if (existing) throw new Error('pairing_exists');
-          await checkProof(proof, request.signingPublicKey);
-          const previousRequest = (
-            await tx.query(
-              'SELECT request FROM sync_pairings WHERE vault_id=$1 AND device_id=$2',
-              [vaultId, request.deviceId],
-            )
-          ).rows[0]?.request;
-          if (
-            previousRequest &&
-            canonicalStringify(previousRequest) !== canonicalStringify(request)
-          )
-            throw new Error('pairing_exists');
-          const pending = (
-            await tx.query(
-              'SELECT count(*)::int AS n FROM sync_pairings WHERE vault_id=$1 AND NOT approved',
-              [vaultId],
-            )
-          ).rows[0].n;
-          if (!previousRequest && pending >= 10)
-            throw new Error('rate_limited');
-          const inserted = await tx.query(
-            'INSERT INTO sync_pairings(vault_id,device_id,fingerprint,request) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING device_id',
-            [vaultId, request.deviceId, request.fingerprint, request],
-          );
-          if (!inserted.rowCount && !previousRequest)
-            throw new Error('pairing_exists');
-        } else {
+        {
           const author = activeDevice(registry.devices, proof.deviceId);
           await checkProof(proof, author.signingPublicKey);
+          if (['invite-create','invite-revoke','pairing-deny'].includes(action)) {
+            const result = await managePairing(tx,action,body.value,vaultId,crypto);
+            await tx.query('COMMIT'); respond(200,result); return;
+          }
           if (['key-checkpoints','recovery-store'].includes(action)) {
             await vaultControl(tx,action,body.value,pin,grants,crypto);
           }
@@ -423,15 +405,15 @@ export function controlServer(options: {
             respond(200, result);
             return;
           }
-          if (action === 'pairings' || action === 'pairing-list') {
+          if (action === 'pairing-list') {
             if (options.financialScope === 'manual' && proof.deviceId !== pin.founderDeviceId)
               throw new Error('forbidden');
             const requests = (
               await tx.query(
-                'SELECT request FROM sync_pairings WHERE vault_id=$1 AND NOT approved ORDER BY device_id',
-                [vaultId],
+                'SELECT p.request,p.device_name,p.invite_id,p.pairing_auth FROM sync_pairings p JOIN sync_pairing_invites i ON i.invite_id=p.invite_id WHERE p.vault_id=$1 AND NOT p.approved AND NOT p.denied AND NOT i.revoked AND i.expires_at>$2 ORDER BY p.device_id',
+                [vaultId,Date.now()],
               )
-            ).rows.map((r) => r.request);
+            ).rows.map((r) => namedRequest(r,crypto));
             await tx.query('COMMIT');
             respond(200, { requests });
             return;
@@ -443,12 +425,15 @@ export function controlServer(options: {
             assertDeviceGrant(grant);
             validateGrantChain([...grants, grant], pin, crypto);
             if (grant.status === 'approved') {
-              const pairing = (
+              const pendingPairing = (
                 await tx.query(
-                  'SELECT request FROM sync_pairings WHERE vault_id=$1 AND device_id=$2 AND NOT approved',
+                  'SELECT p.request,i.revoked,i.expires_at FROM sync_pairings p JOIN sync_pairing_invites i ON i.invite_id=p.invite_id WHERE p.vault_id=$1 AND p.device_id=$2 AND NOT p.approved AND NOT p.denied',
                   [vaultId, grant.deviceId],
                 )
-              ).rows[0]?.request as PairingRequest | undefined;
+              ).rows[0];
+              if (pendingPairing?.revoked) throw new Error('invite_revoked');
+              if (pendingPairing && Number(pendingPairing.expires_at) <= Date.now()) throw new Error('invite_expired');
+              const pairing = pendingPairing?.request as PairingRequest | undefined;
               if (!pairing) throw new Error('pairing_missing');
               verifyPairing(pairing, crypto);
               if (

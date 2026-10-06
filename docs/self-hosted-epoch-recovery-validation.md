@@ -11,8 +11,6 @@ Execução local em 2026-10-01, branch `codex/restore-epoch-continuity`, base `5
 | `npm run lint` | Passou; 0 erros, 17 warnings |
 | `git diff --check` | Passou |
 | `npm run release:validate` | Passou, versão 0.3.10 / Android versionCode 3 |
-| `npm run sync:dev:test` | PostgreSQL/Keycloak: 60 passaram, 1 condicional de cliente anterior não executado |
-| `node tools/release/version-skew.cjs` | 3 passaram; cliente de `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` compilado sem alterar seu engine/controller; interoperabilidade e bloqueio após restore |
 | `npm run sync:self-hosted:unit` | 17 passaram, incluindo rollback operacional e journal após perda do processo/banco |
 | `npm run sync:self-hosted:validate` | Compose Caddy/proxy próprio/CA validados com secrets externos sintéticos |
 | `npm run sync:self-hosted:test` | Clean-install, OIDC/PKCE, adapters SQLite desktop/mobile, restart, falhas de serviços/TLS, privacidade e backup/verify/restore passaram |

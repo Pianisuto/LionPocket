@@ -119,11 +119,11 @@ npm run make:linux
 npm run make
 ```
 
-Os artefatos gerados localmente ficam em `apps/desktop/out/` e não fazem parte do repositório. O workflow [`release.yml`](.github/workflows/release.yml) compila as versões para Windows e Linux.
+Os artefatos gerados localmente ficam em `apps/desktop/out/` e não fazem parte do repositório. GitHub Actions está desativado; builds e validações são locais.
 
 ### Candidatos de release
 
-O workflow [`release.yml`](.github/workflows/release.yml) verifica PR/main/tag ou execução manual: testes, tipos, lint, integração PostgreSQL/Keycloak, Linux/Windows normal e beta, Android e atualização de fixtures. Gera checksums SHA-256 e confere versão/tag. **Não publica GitHub Release, não envia binários para artefatos públicos e não adota uma chave permanente.**
+`npm run validate:local` e os hooks de commit/push executam testes offline, tipos, lint e metadados, com deadline de 55 segundos. O mesmo conteúdo aprovado pode reutilizar um recibo recente. Integração PostgreSQL/Keycloak, self-hosted, pacotes Linux normal/beta e Android em emulador descartável ficam no comando manual `npm run validate:full`; não bloqueiam cada commit. Instalação Windows/DPAPI exige Windows descartável e não é marcada como validada em Linux. Veja [pré-requisitos, cobertura e comandos](docs/local-validation.md). **Não publica release, tag ou binários e não usa GitHub Actions.**
 
 A versão de distribuição e o versionCode Android estão em `tools/release/version.json`; a versão desktop e o lockfile devem coincidir. Antes de uma próxima versão, incrementar também o versionCode além de qualquer instalação suportada, rodar `npm run release:validate` e seguir o [guia de release readiness](docs/local-first-sync-release-readiness.md). A escolha da assinatura definitiva e a publicação exigem uma decisão posterior.
 
@@ -149,4 +149,10 @@ O ambiente com Keycloak/PostgreSQL e pareamento está no [guia de provisioning](
 
 ### Sincronização opcional em servidor próprio
 
-O LionPocket normal continua local-first e oferece sincronização E2EE por uma única URL HTTPS em Configurações → Sincronização. Veja o [guia de instalação e operação self-hosted](docs/self-hosting.md).
+O LionPocket normal continua local-first e oferece sincronização E2EE por uma única URL HTTPS em Configurações → Sincronização. Veja o [guia de instalação e operação self-hosted](docs/self-hosting.md) e o [pareamento por QR e deep link LPV2](docs/device-pairing-lpv2.md).
+
+### Pareamento e recuperação atuais
+
+LPV2 é o único convite de pareamento: **Desktop → Mobile por QR**, **Mobile → Desktop por link/deep link**, com copiar/colar como fallback. Aprovação, chave e primeiro sync seguem o [fluxo atual](docs/device-pairing-lpv2.md). Recovery tem [pacote público LPR1 e código secreto](docs/recovery.md) próprios. Aparelhos aprovados usam exclusivamente transporte assinado.
+
+A instalação self-hosted anterior deve ser recriada. Preserve o banco local escolhido e use **Servidor de sincronização recriado** para backup, desvinculação e novo baseline sem apagar dados financeiros. Siga o [procedimento completo](docs/self-hosting.md#servidor-recriado-e-base-local-como-fonte-de-verdade).

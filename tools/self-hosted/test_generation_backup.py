@@ -28,9 +28,10 @@ class GenerationBackupTest(unittest.TestCase):
             return json.dumps((tables or {}).get(table, [])[offset:offset+100])
         return sql, calls
 
-    def test_legacy_absent_and_partial_schema(self):
+    def test_missing_and_partial_schema(self):
         sql, calls = self.reader(count=0)
-        self.assertIsNone(generations.commitment(sql, {}, 'lp_verify_fixture'))
+        with self.assertRaisesRegex(ValueError, 'incompleta'):
+            generations.commitment(sql, {}, 'lp_verify_fixture')
         self.assertEqual(len(calls), 1)
         sql, _ = self.reader(count=2)
         with self.assertRaisesRegex(ValueError, 'incompleta'):

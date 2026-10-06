@@ -4574,6 +4574,12 @@ button.goal-mini {
 .sync-overview.is-attention .sync-overview__icon { color: var(--gold); background: color-mix(in srgb, var(--gold) 12%, transparent); }
 .sync-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .sync-actions--end { justify-content: flex-end; }
+.pairing-onboarding { display: grid; gap: 20px; padding: 22px 24px 24px; }
+.pairing-onboarding p { margin: 0; color: var(--text-soft); line-height: 1.6; }
+.pairing-onboarding__server { display: grid; gap: 6px; }
+.pairing-onboarding__server > span { color: var(--text-muted); font-size: 12px; }
+.pairing-onboarding__server > strong { overflow-wrap: anywhere; }
+.pairing-onboarding .sync-actions { justify-content: flex-end; }
 .sync-connection { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin: 0; padding: 16px 0 0 58px; border-top: 1px solid var(--line-2); }
 .sync-connection > div { min-width: 0; }
 .sync-connection dt { display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: 11.5px; }

@@ -10,7 +10,7 @@ export interface SecretScope {
   serverEpoch: string;
   vaultId: string;
   purpose:
-    "authoritySeed" | "signingSeed" | "boxSeed" | "dataKey" | "recoveryMaster";
+    "authoritySeed" | "signingSeed" | "boxSeed" | "dataKey" | "recoveryMaster" | "pairingCapability";
   keyVersion: number;
 }
 /** Located before B has a device ID. This namespace never aliases operational secrets. */
@@ -85,6 +85,7 @@ export function secretContext(scope: StoredSecretScope): string {
       "boxSeed",
       "dataKey",
       "recoveryMaster",
+      "pairingCapability",
     ].includes(scope.purpose) ||
     !Number.isSafeInteger(scope.keyVersion) ||
     scope.keyVersion < 1

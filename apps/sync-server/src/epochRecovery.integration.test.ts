@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { verifyStagingBackup } from './stagingBackup';
@@ -12,7 +12,7 @@ import pg from 'pg';
 import sodium from 'libsodium-wrappers-sumo';
 import {
   requestAnchorActivation, resumeAnchorActivation, type AnchorActivationOptions, ManualSync, fetchSyncHttp,
-  authorizeEpochRecovery, authorizeEpochRecoveryWithCode, DeviceProvisioning, ProvisioningCrypto,
+  authorizeEpochRecovery, authorizeEpochRecoveryWithCode, DeviceProvisioning, ProvisioningCrypto, parseRecoveryPackage,
   SyncController, syncTables, type SyncSaved, type SyncSession, type SignedRecovery,
   financialTableTypes, prepareAnchorArchive, planAnchorBaseline, prepareOperationalB, stageOperationalB, makeRecovery, openRecovery, epochPreparationSecretScope,
 } from '@lionpocket/sync-local';
@@ -41,7 +41,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
   let owner: SyncController, secondary: SyncController, saved: SyncSaved | null = null, paired: SyncSaved | null = null;
   let session: SyncSession, other: SyncSession, code: string, restoreId: string, epochA: string;
   const canary = 'LP_EPOCH_PRIVATE_DESCRIPTION_729134';
-  const tables = ['sync_vaults', 'sync_grants', 'sync_pairings', 'sync_deliveries', 'sync_http_nonces', 'sync_commits', 'sync_operations', 'sync_remote_heads', 'sync_remote_bindings'];
+  const tables = ['sync_vaults', 'sync_grants', 'sync_pairing_invites', 'sync_pairings', 'sync_deliveries', 'sync_http_nonces', 'sync_commits', 'sync_operations', 'sync_remote_heads', 'sync_remote_bindings'];
   const input = { kind: 'expense' as const, description: canary, plannedAmount: 12.34, dueDate: '2026-10-02', status: 'planned' as const };
   const ownerProfile = () => {
     if (!saved?.profile) throw new Error('fixture_owner_unavailable');
@@ -147,10 +147,11 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     owner.setForeground(true); secondary.setForeground(true);
     await owner.configure(endpoint); await owner.create();
     code = (await owner.generateRecovery()).code; await owner.confirmRecovery(code);
-    const first = await owner.status(), invite = await secondary.inspectInvitation(first.invitation);
-    await secondary.pair(first.invitation, invite.fingerprint);
-    const pairing = (await owner.requests()).requests[0]; await owner.approve(pairing.deviceId, pairing.fingerprint);
-    await secondary.receive(); await secondary.sync();
+    await secondary.connectInvitation((await owner.createInvitation()).link);
+    await vi.waitFor(async () => expect((await owner.status()).pairingRequests).toHaveLength(1),{timeout:15000});
+    await owner.approve(secondaryProfile().deviceId);
+    await vi.waitFor(async () => expect((await secondary.status()).phase).toBe('bound'),{timeout:15000});
+    await secondary.sync();
     bank.saveTransaction(input); await owner.sync(); await secondary.sync();
     owner.setForeground(false); secondary.setForeground(false);
     // PostgreSQL snapshot/restore in this isolated database; official pg_dump/lpctl is tested by clean-install.
@@ -259,7 +260,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
     expect(known.at(-1)).toMatchObject({ deviceId: secondaryProfile().deviceId, status: 'revoked' });
     expect(snapshotLocal()).toEqual(before);
     expect((await pool.query('SELECT pin FROM sync_vaults')).rows[0].pin.serverEpoch).toBe(epochA);
-    expect((await request('commits', {})).body.error).toBe('invalid_http_proof');
+    expect((await request('commits', {})).body.error).toBe('not_found');
     for (const table of [...tables, ...Object.keys(generationArchiveKeys).map(t => `archive_${t}`), 'sync_generations', 'sync_restores', 'sync_restore_vaults', 'sync_epoch_challenges', 'sync_epoch_authorizations']) {
       const persisted = (await pool.query(`SELECT coalesce(jsonb_agg(t),'[]')::text AS value FROM ${table} t`)).rows[0].value;
       for (const privateValue of [canary, code, 'DESKTOP_C2_AFTER_BACKUP', 'ANDROID_C3_OFFLINE'])
@@ -505,7 +506,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
             "desktop",
             endpoint,
             fetchSyncHttp(endpoint),
-          ).pull(session.accessToken),
+          ).pull(),
       });
       const options = makeOptions(
         new DeviceProvisioning(oldProfile, secrets, crypto),
@@ -865,6 +866,7 @@ describe.skipIf(process.env.LIONPOCKET_SYNC_INTEGRATION !== '1')('restore prepar
       ).toBe(epoch2);
       await owner.activateServerRecovery(true);
       expect((await owner.status()).recoveryPhase).toBe("recovered");
+      expect(parseRecoveryPackage((await owner.status()).recoveryPackage,crypto).pin).toEqual(ownerProfile().pin);
       const baseline3 = Number((await pool.query("SELECT log_position FROM sync_vaults")).rows[0].log_position);
       expect(baseline3).toBeGreaterThan(9);
       for (const [table, rows] of Object.entries(financialE2)) expect(bank.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(rows);

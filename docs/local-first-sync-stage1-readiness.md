@@ -23,7 +23,7 @@ O dispositivo fundador gera três segredos independentes por CSPRNG: seed Ed2551
 
 A cada aprovação/revogação, incrementar `registryVersion` decimal int64 e vincular SHA-256/base64url do **grant completo anterior, incluindo assinatura**. O registro conserva a cadeia inteira. O receptor valida assinatura, versão/predecessor, escopo e chaves/status, reconstruindo o mapa de aparelhos. Rollback de uma versão já pinada é recusado. A API futura serializa o append; assinatura correta sozinha não autoriza pular versões ou reusar um predecessor. Esses checks de estado serão implementados na Etapa 1.
 
-O pedido de pareamento deve conter origem/epoch/vault, ID e ambas as pubkeys do novo aparelho, nonce de 32 bytes e fingerprint SHA-256 dos bytes canônicos desses campos. Confirmar por QR/comparação em canal confiável antes de assinar o grant. O QR de aprovação também transmite a pubkey da autoridade pinada; não confiar em uma pubkey substituída pelo servidor. O decoder, prova de posse, formato visual e vetores do pedido são trabalho da Etapa 1, antes de habilitar pareamento.
+O pedido de pareamento deve conter origem/epoch/vault, ID e ambas as pubkeys do novo aparelho, nonce de 32 bytes e fingerprint SHA-256 dos bytes canônicos desses campos. O convite LPV2 transporta a autoridade assinada e capability; antes de assinar o grant, confira o SAS visual. O decoder e a prova de posse verificam o transcript completo.
 
 Para manter a autoridade simples no piloto, **somente o fundador possui a seed de autoridade**, também presente no recovery cifrado. O segundo aparelho recebe a DEK e escreve com sua chave de dispositivo; não assina grants usando essa chave. Novo pareamento/revogação exige o fundador ou reinstalação por recovery. Qualquer dispositivo ativo pode assinar uma entrega de DEK para um destinatário já aprovado, com o escopo/versões repetidos no bundle. Não replicar a seed administrativa implicitamente no bundle de entrega existente. Delegação administrativa e múltiplos proprietários precisam de novo contrato, fora do piloto. Essa restrição concretiza o registro assinado pelo proprietário recomendado pela proposta.
 
@@ -66,7 +66,7 @@ A [fundação local do piloto manual](local-first-sync-stage1-local-foundation.m
 
 ## Continuação: provisioning implementado
 
-O [fluxo de provisioning/trust/pareamento sintético](local-first-sync-stage1-provisioning.md) agora implementa API de controle com PostgreSQL/Keycloak, PKCE, grants encadeados, comparação de fingerprint, entrega de DEK cifrada, decoder limitado e prova HTTP com nonces duráveis. As afirmações acima sobre API/login/trust pendentes registram o estado de entrada ou o recorte anterior. Envio financeiro, cursores, inbox/outbox remota, projeção e conflitos permanecem pendentes; capabilities financeiras seguem vazias.
+O [fluxo de provisioning/trust/pareamento sintético](local-first-sync-stage1-provisioning.md) agora implementa API de controle com PostgreSQL/Keycloak, PKCE no fundador, grants encadeados, SAS visual e entrega automática de DEK cifrada, decoder limitado e prova HTTP com nonces duráveis. As afirmações acima sobre API/login/trust pendentes registram o estado de entrada ou o recorte anterior. Envio financeiro, cursores, inbox/outbox remota, projeção e conflitos permanecem pendentes; capabilities financeiras seguem vazias.
 
 ## Continuação: transporte manual
 

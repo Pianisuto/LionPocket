@@ -240,13 +240,10 @@ export class DeviceProvisioning {
   }
   async grant(
     request: PairingRequest,
-    confirmedFingerprint: string,
     status: "approved" | "revoked" = "approved",
   ): Promise<DeviceGrant> {
     verifyPairing(request, this.crypto);
     sameScope(request, this.profile.pin);
-    if (confirmedFingerprint !== request.fingerprint)
-      throw new Error("fingerprint_mismatch");
     if (this.profile.deviceId !== this.profile.pin.founderDeviceId) {
       const authority = await this.secrets.load(this.scope("authoritySeed"));
       if (!authority) throw new Error("founder_required");

@@ -17,8 +17,6 @@ def digest(history):
 
 def snapshot(sql, cfg, database='lion_sync'):
     present = sql(cfg, "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN (" + ','.join("'" + t + "'" for t in TABLES) + ');', database)
-    if present == '0':
-        return None  # Legacy v1 backup.
     if present != str(len(TABLES)):
         raise ValueError('Registro de restaurações incompleto.')
     fields = []

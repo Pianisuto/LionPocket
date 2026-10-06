@@ -33,12 +33,10 @@ Cancelamento antes de publicação significa pausa da mesma tentativa, com fase 
 | pg_dump/pg_restore isolado de staging uploading e prepared, bump operacional do epoch e resume da mesma B, sem ativação; signature/graph audit em READ ONLY | mesma integração e `stagingBackup.ts` |
 | Digest backup v4 paginado, ciphertext/transition/fase comprometidos | `tools/self-hosted/test_staging_backup.py` |
 | Instalação self-hosted limpa, TLS/contas, backup v4/verify/restore, read-only da instalação | `tools/self-hosted/smoke.py` |
-| Cliente anterior real com seu próprio protocolo antigo | `tools/release/version-skew.cjs`, commits `8de0087cdbcdcc670ec2073ba3f4ea51932072b4` e `cbd7067644c63e6c09802b208731b43d239c0031` |
 | Readiness Android: reconexão limitada de ADB/root antes dos fixtures, launch único aguardado e logs do UID do app; nenhum restart/reinstall/clear para passar o check | `tools/release/test_android_readiness.py`; processo/banco aberto/schema 8 continuam obrigatórios |
 
 ## Verificações locais
 
-Resultados finais e CI são registrados no PR. A evidência não antecipa verde remoto. Foram executadas suítes de protocolo/local/server/desktop/mobile, typecheck/lint, integrações PostgreSQL/Keycloak, cliente anterior, self-hosted e diff check. Windows readiness e Android nativo dependem dos workflows; compilação Kotlin/Android instrumentation também verificada localmente. Resultados finais referem-se ao novo HEAD informado no PR.
 
 ## Limites adicionais
 

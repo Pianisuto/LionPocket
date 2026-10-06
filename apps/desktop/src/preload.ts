@@ -2,15 +2,24 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { LionPocketApi, UpdateInfo, WindowState } from './api';
 
 const api: LionPocketApi = {
+  onPairingLink: (listener) => {
+    let disposed = false;
+    const drain = () => { void ipcRenderer.invoke('pairing:pending').then(delivery => {
+      if (!disposed && delivery) {
+        listener(delivery.event);
+        void ipcRenderer.invoke('pairing:ack', delivery.generation);
+      }
+    }); };
+    ipcRenderer.on('pairing:available', drain);
+    drain();
+    return () => { disposed = true; ipcRenderer.removeListener('pairing:available', drain); };
+  },
   onSyncChanged: (listener) => {
     ipcRenderer.on('sync:changed', listener);
     return () => ipcRenderer.removeListener('sync:changed', listener);
   },
   syncStatus: () => ipcRenderer.invoke('sync:status'),
   syncCommand: (action,args) => ipcRenderer.invoke('sync:command',action,args),
-  developmentSyncStatus: () => ipcRenderer.invoke('sync:development:status'),
-  developmentSyncRun: () => ipcRenderer.invoke('sync:development:run'),
-  developmentSyncResolve: (...args) => ipcRenderer.invoke('sync:development:resolve', ...args),
   getCatalogs: () => ipcRenderer.invoke('catalogs:get'),
   createCatalogItem: (input) => ipcRenderer.invoke('catalogs:create', input),
   deleteCatalogItem: (type, id) => ipcRenderer.invoke('catalogs:delete', type, id),

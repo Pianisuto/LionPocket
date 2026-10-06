@@ -19,8 +19,6 @@ KEYS = {
 def commitment(sql, cfg, database='lion_sync'):
     names = ','.join("'" + t + "'" for t in KEYS)
     present = int(sql(cfg, "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN (" + names + ');', database))
-    if present == 0:
-        return None  # Supported legacy v1/v2, before generation migration.
     if present != len(KEYS):
         raise ValueError('Estrutura de gerações incompleta.')
     checks = [

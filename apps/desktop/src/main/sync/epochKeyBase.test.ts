@@ -81,7 +81,7 @@ describe("key base belongs to a generation", () => {
           a.crypto,
         ),
         request = await b.request();
-      const grant = await a.grant(request, request.fingerprint);
+      const grant = await a.grant(request);
       a.acceptRegistry({
         pin: a.profile.pin,
         grants: [...a.profile.grants, grant],
@@ -128,7 +128,7 @@ describe("key base belongs to a generation", () => {
         a.crypto,
       ),
       request = await b.request();
-    const grant = await a.grant(request, request.fingerprint);
+    const grant = await a.grant(request);
     a.acceptRegistry({
       pin: a.profile.pin,
       grants: [...a.profile.grants, grant],
@@ -153,12 +153,12 @@ describe("key base belongs to a generation", () => {
       "key_mismatch",
     );
   });
-  it("reads strict legacy recovery v1 and rejects mixed or permissive v2 fields", async () => {
+  it("reads current recovery bundle formats and rejects mixed fields", async () => {
     const { client: a } = await founder(new ProvisioningCrypto(sodium));
     const r = await makeRecovery(a, sodium, "1");
     const bundle = openRecovery(a, sodium, r.recovery, r.code);
     if (bundle.formatVersion !== 1) throw new Error("fixture");
-    const legacy = bundle;
+    const baseOne = bundle;
     const modern = { ...bundle, formatVersion: 2, baseKeyVersion: 1 };
     const master = a.crypto.decode(r.code.slice(4)),
       key = sodium.crypto_kdf_derive_from_key(32, 1, "LPRECOV1", master);
@@ -191,13 +191,13 @@ describe("key base belongs to a generation", () => {
     };
     try {
       expect(
-        openRecovery(a, sodium, signed(legacy), r.code).formatVersion,
+        openRecovery(a, sodium, signed(baseOne), r.code).formatVersion,
       ).toBe(1);
       expect(() =>
         openRecovery(
           a,
           sodium,
-          signed({ ...legacy, baseKeyVersion: 1 }),
+          signed({ ...baseOne, baseKeyVersion: 1 }),
           r.code,
         ),
       ).toThrow();

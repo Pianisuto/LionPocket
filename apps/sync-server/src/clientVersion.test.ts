@@ -7,7 +7,7 @@ import { ProvisioningCrypto } from '@lionpocket/sync-local';
 import { controlServer } from './server';
 
 // Runs without PostgreSQL: incompatible requests must never reach it, consume
-// a proof, or mutate anything even when an old installation has cached a token.
+// a proof, or mutate anything.
 describe('control v2 client floor', () => {
   const pool = new pg.Pool();
   const query = vi.spyOn(pool, 'query').mockImplementation(() => {
@@ -56,20 +56,18 @@ describe('control v2 client floor', () => {
           'changes',
           'registry',
           'grants',
-          'pairings',
           'recover',
           'recovery-store',
           'key-checkpoints',
           'epoch-recovery-authorize',
           'epoch-staging-batch',
           'epoch-activation',
-        ].map((action) => ['POST', `/v1/vaults/${vault}/${action}`]),
-        ['GET', `/v1/vaults/${vault}/registry`],
+        ].map((action) => ['POST', `${action==='recover' || action.startsWith('epoch-') ? '/v1/vaults' : '/v2/devices/vaults'}/${vault}/${action}`]),
       ]) {
         const res = await fetch(endpoint + path, {
           method,
           headers: {
-            authorization: 'Bearer cached-old-session',
+            authorization: 'Bearer untrusted-session',
             'x-lionpocket-proof': 'previously-prepared-proof',
             ...(version === undefined
               ? {}

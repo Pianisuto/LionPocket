@@ -66,7 +66,6 @@ Não há cleanup/GC neste PR: bundle privado, backups, archives, mapping, envelo
 | Sem plaintext/valor/code/seeds/DEK/bundle no servidor, logs ou manifestos | canários na integração PG e clean-install antes/depois activation; snapshots locais privados preservados |
 | Checkpoint Android app-private selado, integrity/FK/pin/plan/journal e path validation | `apps/mobile/src/sync/epochBackup.test.ts`, SQLite real; `DurableBackupFileTest.kt` nativo no emulador readiness |
 | Exclusão do tail do coordinator antes de instalar profile B | `packages/sync-local/src/coordinator.test.ts` |
-| Cliente anterior/normal wire inalterados | `tools/release/version-skew.cjs` com os clientes reais anteriores |
 
 Falhas remotas pré-COMMIT: before_lock, after_lock, after_validate, after_first_delete, promoting_commit, after_vault_update, after_generation_swap, before_commit. Todas deixam A selecionada e tabelas iguais. O hook after_commit suprime a resposta de sucesso (retorna falha temporária); B está inteira, status/retry recuperam a mesma activation. Hooks são opções do harness, sem endpoint ou configuração de produção para injeção.
 
@@ -74,7 +73,6 @@ Falhas remotas pré-COMMIT: before_lock, after_lock, after_validate, after_first
 
 Manifesto operacional **v5** acrescenta `activationSha256` a ledger/generation/staging commitments e dumps completos. `verify-backup` continua READ ONLY na instalação ativa; em bancos temporários verifica exatamente uma geração ativa e pin, coerência com environment (ou restore pendente legítimo), origem archived/sealed, transition/manifests, baseline byte-identical ao staging, log contíguo, receipts em sequência, heads/operations, registry/Recovery/key metadata e pushes posteriores. Audita também generations alvo de activations antigas que já foram arquivadas numa recuperação seguinte.
 
-Verificações locais: npm test, typecheck, lint, diff check, PostgreSQL/Keycloak, clientes anteriores, self-hosted clean install/backup/verify/restore/offline/canários e compilação Kotlin/debug instrumentation. Jobs existentes do PR executam Linux normal/beta, Windows normal/beta e Android/emulador, sem publicação. Resultado/HEAD final de CI ficam registrados no PR; esta página não antecipa verde remoto. O preview visual conferiu textos/botões prepared e finalização; é fixture visual, não evidência de login nativo.
 
 ## Limites
 

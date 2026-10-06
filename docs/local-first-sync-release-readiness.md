@@ -94,15 +94,14 @@ node tools/release/validate.cjs v0.3.10
 node tools/release/checksums.cjs /caminho/candidatos .apk
 ```
 
-`.github/workflows/release.yml` verifica PR/main/tag ou dispatch: suíte, typecheck, lint, PostgreSQL/Keycloak, Linux/Windows em ambos os canais, Android debug e releases de teste, assinatura ausente/externa, APK replacement em emulador descartável. Tag ou tag solicitada divergente falha. Gera SHA256SUMS e manifest de fonte/versão/canal. Não tem permissão contents:write, etapa publish, upload-artifact nem criação de GitHub Release. Binários ficam no runner e são descartados. Publicação futura será uma decisão externa; este pipeline não transforma merge/tag em autorização.
+GitHub Actions está desativado e os workflows foram removidos. Os [checks locais rápidos](local-validation.md) executam testes offline, tipos e lint em hooks com deadline de 55 segundos. `npm run validate:full` executa sob demanda integração, self-hosted, Linux normal/beta e Android com preservação de SQLite. Windows instalado/DPAPI exige host Windows descartável. Checksums e versão continuam validados pelos scripts existentes. Não há publicação automática, upload, criação de tag ou release; hooks verificam o conteúdo exato antes de commit/push.
 
 O smoke do binário desktop seleciona **exclusivamente** diretório aleatório `lion-release-smoke-*` sob tmp; compara cada registro legado, verifica integridade/FKs, abre renderer e usa o cofre real (DPAPI Windows ou recusa basic_text Linux). Testes unitários do cofre são identificados como mocks, sem substituir o smoke real. O teste Windows da beta também exercita persistência do perfil, agora sem fsync de diretório incompatível.
 
 ## Compatibilidade e preservação
 
-Protocolo wire **1** e domainSchema **1** permanecem. Servidor anuncia campos adicionais `protocolVersion=1`, `domainSchema=1` no discovery; servidor anterior sem esses campos mantém o baseline controlVersion 1. Não muda envelope, E2EE, pais, conflicts, outbox/inbox, pareamento, recovery ou debounce.
+Protocolo wire **1** e domainSchema **1** permanecem. Servidor anuncia `protocolVersion=1`, `domainSchema=1` e exige `controlVersion=2`. Clientes/servidores incompatíveis são bloqueados. Não muda envelope, E2EE, pais, conflicts, outbox/inbox, pareamento, recovery ou debounce.
 
-Cliente atual valida versões/capabilities conhecidas antes de login/provas/POST/preparação de envelope. Versão diferente de 1 ou capability desconhecida exige atualização, conserva todas as tabelas/pendências e não envia conteúdo. Mudança de serverEpoch interrompe o transporte e exige revisão; não adapta finanças entre epochs. Schema futuro mobile já era recusado; desktop passa a recusar antes de habilitar WAL. Testes comparam manifests completos, inclusive filas e binding. Vetores e integração do protocolo anterior continuam aplicáveis; o runner `version-skew.cjs` recompila motor/controller completos do commit-base e executa pareamento e troca bidirecional contra PostgreSQL/Keycloak atuais, com protocolo/dependências compartilhados inalterados; os novos campos de discovery são aditivos para o cliente anterior.
 
 ## Pendências antes de beta pública
 
@@ -135,9 +134,3 @@ O AVD local exclusivo `LionPocket_ReleaseReadiness` não continha pacotes LionPo
 | Beta anterior v8 | beta nova v8 | 30 / 47 | ok / 0 |
 
 A comparação usa **cada registro e cada coluna existente**: IDs, centavos, zero/null, datas, tombstones, prioridades, preferências, metadados, sidecars, três itens de outbox (incluindo envelope preparado imutável), inbox e binding. Fixtures recorrentes v4/v5 têm `active=0` para não gerar materializações dependentes da data; fixtures históricas do repo não foram alteradas. APKs finais recompilados foram novamente substituídos sobre as instalações sintéticas v8 normal/beta e preservaram todas as 30 tabelas. Uma chave efêmera diferente causou `INSTALL_FAILED_UPDATE_INCOMPATIBLE`; o teste manteve o banco e não desinstalou. Injetar `user_version=99` e abrir o app real preservou a versão e todos os registros. O ensaio nativo foi x86_64; arm64 foi compilado, sem atualizar instalações pessoais. Hashes dos dois APKs físicos permaneceram iguais aos da auditoria.
-
-### Suíte e version skew
-
-Suíte completa com PostgreSQL/Keycloak: **376 testes aprovados**, um cenário do cliente anterior reservado ao runner específico. Esse runner executou **três testes aprovados**, incluindo o cenário adicional de pareamento/troca bidirecional com motor/controller da base e servidor atual. Os **110 testes desktop** passaram também no Node do Electron. Typecheck, lint (warnings existentes, sem erros), validação de versões/checksums e `git diff --check` passaram.
-
-Casos cobertos: discovery atual e legado sem campos aditivos; cliente anterior compatível; protocolo/domainSchema/controlVersion futuros; capability desconhecida; mudança de serverEpoch; schema futuro mobile e desktop. Incompatibilidade interrompe antes de enviar envelopes e conserva banco/outbox/binding. Desktop futuro também conserva journal DELETE, sem habilitar WAL. Nenhuma decisão do vault foi alterada; o recorte não implementa serviço público nem novas funcionalidades financeiras.

@@ -22,6 +22,7 @@ export function syncController(): Promise<SyncController> {
         secrets: new AndroidSecretStore(),
         sodium: await androidCrypto(),
         dialect: "android",
+        deviceName: NativeModules.LionPocketPairing?.deviceName ?? "Celular Android",
         defaultEndpoint: betaEndpoint,
         storage: {
           load: async () => {

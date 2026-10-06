@@ -31,13 +31,13 @@ export interface UpdateInfo {
   version: string | null;
 }
 
+export type PairingLinkEvent = { invitation: string; endpoint: string; id: string; error?: never } | { error: string; invitation?: never; endpoint?: never; id?: never };
+
 export interface LionPocketApi {
+  onPairingLink?(listener: (event: PairingLinkEvent) => void): () => void;
   onSyncChanged?(listener: () => void): () => void;
   syncStatus?(): Promise<import('@lionpocket/sync-local').SyncStatus|null>;
   syncCommand?(action:string,args:unknown[]):Promise<unknown>;
-  developmentSyncStatus?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus | null>;
-  developmentSyncRun?(): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus>;
-  developmentSyncResolve?(objectId: string, heads: string[], revisionId: string, recover: boolean): Promise<import('@lionpocket/sync-local').DevelopmentSyncStatus>;
   getCatalogs(): Promise<Catalogs>;
   createCatalogItem(input: CatalogInput): Promise<void>;
   deleteCatalogItem(type: 'category' | 'card', id: string): Promise<void>;

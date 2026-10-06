@@ -15,6 +15,7 @@ const config: ForgeConfig = {
     name: beta ? 'LionPocket-Beta' : 'LionPocket',
     executableName: beta ? 'lionpocket-beta' : 'lionpocket',
     icon: 'assets/icon',
+    protocols: [{ name: 'LionPocket pairing', schemes: ['lionpocket'] }],
     // O plugin-vite empacota só a saída do build, então assets/ não entra no
     // asar. O ícone da janela precisa vir junto por fora dele.
     ...(beta ? { appBundleId: 'com.lionpocket.beta', appCopyright: 'LionPocket Beta' } : {}),

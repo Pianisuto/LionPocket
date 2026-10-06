@@ -34,7 +34,7 @@ async function runProvisioningChecks(sodium, makeStore, vector) {
     b = await DeviceProvisioning.prepare(a.profile.pin, makeStore(), crypto);
   try {
     const root = await a.request(),
-      rootGrant = await a.grant(root, root.fingerprint);
+      rootGrant = await a.grant(root);
     a.acceptRegistry({
       pin: a.profile.pin,
       grants: [rootGrant],
@@ -46,12 +46,12 @@ async function runProvisioningChecks(sodium, makeStore, vector) {
     checks++;
     let denied = false;
     try {
-      await a.grant(request, crypto.nonce());
+      await a.grant({...request,fingerprint:crypto.nonce()});
     } catch {
       denied = true;
     }
     check(denied);
-    const grant = await a.grant(request, request.fingerprint);
+    const grant = await a.grant(request);
     const response = {
       pin: a.profile.pin,
       grants: [...a.profile.grants, grant],
@@ -75,21 +75,21 @@ async function runProvisioningChecks(sodium, makeStore, vector) {
     check((await reloaded.secrets.load(b.scope('authoritySeed'))) === null);
     check(a.profile.pin.authorityPublicKey !== a.profile.signingPublicKey);
     const http = await reloaded.proof(
-      'GET',
-      `/v1/vaults/${pin.vaultId}/registry`,
+      'POST',
+      `/v2/devices/vaults/${pin.vaultId}/registry`,
       'http://127.0.0.1:8787',
+      '{}',
       '',
-      'PUBLIC-SYNTHETIC-TOKEN',
     );
     p.verifyHttpProof(
       http,
       {
         scope: pin,
-        method: 'GET',
+        method: 'POST',
         target: http.target,
         origin: http.origin,
-        body: '',
-        token: 'PUBLIC-SYNTHETIC-TOKEN',
+        body: '{}',
+        token: '',
         now: http.issuedAt,
         publicKey: b.profile.signingPublicKey,
       },
@@ -108,7 +108,7 @@ async function runProvisioningChecks(sodium, makeStore, vector) {
       denied = true;
     }
     check(denied);
-    const revoked = await a.grant(request, request.fingerprint, 'revoked');
+    const revoked = await a.grant(request, 'revoked');
     const final = {
       pin: a.profile.pin,
       grants: [...response.grants, revoked],

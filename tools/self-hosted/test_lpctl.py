@@ -44,7 +44,7 @@ class OperationsTest(unittest.TestCase):
         (self.backup / 'sync.dump').write_bytes(b'SYNTHETIC_SYNC_DUMP')
         (self.backup / 'auth.dump').write_bytes(b'SYNTHETIC_AUTH_DUMP')
         self.identity = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']
-        self.manifest = {'formatVersion': 1, 'serverId': self.identity[0], 'serverEpoch': self.identity[1],
+        self.manifest = {'formatVersion': 5, 'restoreLedgerSha256': 'a'*64, 'generationArchiveSha256': 'b'*64, 'stagingSha256': 'c'*64, 'activationSha256': 'd'*64, 'serverId': self.identity[0], 'serverEpoch': self.identity[1],
                          'counts': {'vaults': 0, 'commits': 0, 'grants': 0},
                          'files': {name: lp.checksum(self.backup / name) for name in ['sync.dump', 'auth.dump', 'config.env', 'secrets.json']}}
         self.save_manifest()
@@ -89,7 +89,10 @@ class OperationsTest(unittest.TestCase):
                 epoch = query.split("'")[1]
                 return ''
             return epoch
-        with patch.object(lp, 'compose', side_effect=compose), patch.object(lp, 'sql', side_effect=sql):
+        with patch.object(lp, 'compose', side_effect=compose), patch.object(lp, 'sql', side_effect=sql), \
+             patch.object(lp.ledger, 'snapshot', return_value={}), patch.object(lp.ledger, 'digest', return_value='a'*64), \
+             patch.object(lp.generations, 'commitment', return_value='b'*64), patch.object(lp.staging, 'commitment', return_value='c'*64), \
+             patch.object(lp.activations, 'commitment', return_value='d'*64), patch.object(lp, 'verify_staging'):
             lp.rehearsal(lp.config(), self.backup)
         self.assertEqual(before, self.snapshot())
         self.assertEqual(original, databases)

@@ -36,7 +36,7 @@ export async function founder(
   };
   const client = await DeviceProvisioning.prepare(pin, secrets, crypto, true);
   const request = await client.request(),
-    grant = await client.grant(request, request.fingerprint);
+    grant = await client.grant(request);
   client.acceptRegistry({
     pin: client.profile.pin,
     grants: [grant],
@@ -74,4 +74,30 @@ export async function syntheticBrowserLogin(url: string, username = 'alice') {
   if (!redirect || !redirect.startsWith('http://127.0.0.1:1876'))
     throw new Error('Synthetic Keycloak login rejected.');
   await fetch(redirect);
+}
+/** Current capability onboarding for low-level transport fixtures; no account login on the new device. */
+export async function submitTestPairing(authority: DeviceProvisioning, device: DeviceProvisioning, endpoint: string) {
+  const {canonicalStringify,inviteSigningInput,pairingCapabilityInput} = await import('@lionpocket/sync-protocol');
+  const crypto = authority.crypto, capability = crypto.sodium.randombytes_buf(32);
+  const seed = await authority.secrets.load(authority.scope('authoritySeed'));
+  if (!seed) throw new Error('authority_secret_unavailable');
+  try {
+    const keys = crypto.sodium.crypto_sign_seed_keypair(capability);
+    crypto.erase(keys.privateKey);
+    const unsigned = {version:2 as const,purpose:'device-pairing' as const,id:crypto.uuid(),endpoint,pin:authority.profile.pin,
+      expiresAt:Date.now()+15*60000,capabilityHash:crypto.hash(crypto.encode(capability)),capabilityPublicKey:crypto.encode(keys.publicKey)};
+    const invite = {...unsigned,signature:crypto.sign(inviteSigningInput(unsigned),seed)};
+    const send = async (client: DeviceProvisioning,target: string,value: unknown) => {
+      const body = canonicalStringify(value), proof = await client.proof('POST',target,endpoint,body,'');
+      const response = await fetch(endpoint+target,{method:'POST',headers:{'content-type':'application/json','x-lionpocket-control-version':'2',
+        'x-lionpocket-proof':crypto.encode(new TextEncoder().encode(canonicalStringify(proof)))},body});
+      const result = await response.json();
+      if (!response.ok) throw new Error(String(result.error));
+      return result;
+    };
+    await send(authority,`/v2/devices/vaults/${invite.pin.vaultId}/invite-create`,invite);
+    const request = await device.request(), deviceName = 'Test device';
+    await send(device,`/v2/pair/${invite.id}/request`,{request,deviceName,capabilitySignature:crypto.sign(pairingCapabilityInput(invite,request,deviceName),capability)});
+    return request;
+  } finally {crypto.erase(seed);crypto.erase(capability);}
 }

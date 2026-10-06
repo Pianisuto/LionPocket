@@ -4,7 +4,7 @@
   "reference": "Node crypto/OpenSSL Ed25519 + SHA-256",
   "fingerprintCanonical": "{\"context\":\"LionPocket/pairing-fingerprint/v1\",\"request\":{\"boxPublicKey\":\"4kDxQrgh76EoyKGx7pjFwtDWGGQp7e7dPMzeife_dUo\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"formatVersion\":1,\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"signingPublicKey\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
   "pairingCanonical": "{\"context\":\"LionPocket/pairing-request/v1\",\"request\":{\"boxPublicKey\":\"4kDxQrgh76EoyKGx7pjFwtDWGGQp7e7dPMzeife_dUo\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"fingerprint\":\"7T8ulifstpbc2hRFjUdJteSeXIdLbNEswkpV48C6rlM\",\"formatVersion\":1,\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"signingPublicKey\":\"JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
-  "proofCanonical": "{\"context\":\"LionPocket/http-proof/v1\",\"proof\":{\"accessTokenSha256\":\"u7PTM-CrGxQ_w5pLAr1JlVRL32o8MHjNkPN1yQnCxAM\",\"bodySha256\":\"rTNUqYe_sDu2-A2apf2dYe0zKi-tmjxEIVepRqoJ2Ks\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"formatVersion\":1,\"issuedAt\":1790769600000,\"method\":\"POST\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"origin\":\"http://127.0.0.1:8787\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"target\":\"/v1/vaults/00000000-0000-4000-8000-000000000003/pairings\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
+  "proofCanonical": "{\"context\":\"LionPocket/http-proof/v1\",\"proof\":{\"accessTokenSha256\":\"u7PTM-CrGxQ_w5pLAr1JlVRL32o8MHjNkPN1yQnCxAM\",\"bodySha256\":\"rTNUqYe_sDu2-A2apf2dYe0zKi-tmjxEIVepRqoJ2Ks\",\"deviceId\":\"00000000-0000-4000-8000-000000000004\",\"formatVersion\":1,\"issuedAt\":1790769600000,\"method\":\"POST\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"origin\":\"http://127.0.0.1:8787\",\"serverEpoch\":\"00000000-0000-4000-8000-000000000002\",\"serverId\":\"00000000-0000-4000-8000-000000000001\",\"target\":\"/v2/devices/vaults/00000000-0000-4000-8000-000000000003/registry\",\"vaultId\":\"00000000-0000-4000-8000-000000000003\"}}",
   "request": {
     "formatVersion": 1,
     "serverId": "00000000-0000-4000-8000-000000000001",
@@ -24,12 +24,12 @@
     "vaultId": "00000000-0000-4000-8000-000000000003",
     "deviceId": "00000000-0000-4000-8000-000000000004",
     "method": "POST",
-    "target": "/v1/vaults/00000000-0000-4000-8000-000000000003/pairings",
+    "target": "/v2/devices/vaults/00000000-0000-4000-8000-000000000003/registry",
     "origin": "http://127.0.0.1:8787",
     "issuedAt": 1790769600000,
     "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
     "bodySha256": "rTNUqYe_sDu2-A2apf2dYe0zKi-tmjxEIVepRqoJ2Ks",
     "accessTokenSha256": "u7PTM-CrGxQ_w5pLAr1JlVRL32o8MHjNkPN1yQnCxAM",
-    "signature": "C7Ue6oyJzUyd0eG4ksVw2MYWKVZQCYd4u07Hf5ULvs4oTHiJDNVb39E7qqNJeI7DX0shU5g-9ESgXhAIiGKsCg"
+    "signature": "ZglzMjhvOZ_0l5sXxvbn7rq-SJSU6vmKquyNpcBsIzmGqmXErR25dgw5wMM49SF9KHk2iY98DYuRGSWuxSu0Ag"
   }
 }

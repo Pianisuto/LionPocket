@@ -1,8 +1,12 @@
+import { SyncPanel } from './src/ui/SyncPanel';
+import { syncController } from './src/sync/sync';
 import { startSyncForeground } from './src/sync/foreground';
 import { AppearanceProvider, useAppearance } from './src/ui/Appearance';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
+  Modal,
   Alert,
   AppState,
   FlatList,
@@ -90,6 +94,8 @@ function AppContent(): React.JSX.Element {
   const layout = createLayout(colors);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
+  const [pairingOpen, setPairingOpen] = useState(false);
+  const [pairingInvitation, setPairingInvitation] = useState<string>();
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [leoOpen, setLeoOpen] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -176,6 +182,17 @@ function AppContent(): React.JSX.Element {
   useEffect(() => startSyncForeground(() => {
     if (!mutation.current && !dataScreenOpen.current) void syncRefresh.current();
   }), []);
+  useEffect(() => {
+    const open = (url: string | null | undefined) => {
+      if (url && url.startsWith('lionpocket://pair/') && url.length <= 4096) {
+        setPairingInvitation(url); setPairingOpen(true);
+      }
+    };
+    const subscription = Linking.addEventListener('url', event => open(event.url));
+    void Linking.getInitialURL().then(open).catch(() => { /* Native URL is optional. */ });
+    void syncController().then(c => c.status()).then(s => { if (s.phase === 'pairing') setPairingOpen(true); }).catch(() => { /* Local use remains available. */ });
+    return () => subscription.remove();
+  }, []);
   const changeMonth = (next: string) => {
     if (!busy) {
       if (next === month) {
@@ -927,6 +944,12 @@ function AppContent(): React.JSX.Element {
           onClose={() => setMonthPickerOpen(false)}
         />
       )}
+      {pairingOpen && <Modal visible animationType="slide" onRequestClose={() => setPairingOpen(false)}>
+        <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.content}>
+          <SyncPanel key={pairingInvitation} initialInvitation={pairingInvitation} onChanged={async () => { await refresh(); }} />
+          <Button label="Fechar" onPress={() => setPairingOpen(false)} />
+        </ScrollView></SafeAreaView>
+      </Modal>}
       {preferencesOpen && (
         <PreferencesScreen onClose={() => setPreferencesOpen(false)} onChanged={async () => { await refresh(); }} />
       )}

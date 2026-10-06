@@ -74,7 +74,6 @@ O nome assinado continua no DAG e uma auditoria local da projeção evita public
 sufixo como se fosse uma edição do usuário. Não se fundem dois históricos
 independentes nem se descarta uma propriedade para obter uma equivalência por nome.
 
-Revisões já produzidas por clientes anteriores para séries, imports, exclusões e
 ordem de dependências são retomadas automaticamente a partir das linhas atuais.
 Identidades existentes, DAG, outbox e tombstones não são reinicializados. Uma
 sidecar órfã/corrompida, sem dados que permitam reconstrução, não é confundida com
@@ -102,29 +101,11 @@ Auditorias de projeção e recibos históricos não se tornam decisões de recup
 
 Não há mudança do envelope financeiro, domain schema ou tabelas SQL existentes.
 São utilizados slots, aliases, proveniência e `legacy_unknown` já permitidos.
-A camada de controle passa a **controlVersion 2**. O cliente novo exige um servidor
-v2 antes de login, vinculação, captura ou envio: um servidor v1 não consegue excluir
-pares antigos incompatíveis. O v0.3.11 já rejeita discovery com controlVersion 2.
-O servidor também exige `X-LionPocket-Control-Version: 2` em todas as rotas protegidas
-(controle, transporte e recuperação), retornando HTTP 426 `client_upgrade_required`
-antes de autenticação, consumo do proof ou mutação. Isso cobre sessões em cache,
-envelopes preparados e requisições atravessando a atualização do servidor. O header
-é compatibilidade, não autorização: OIDC, proofs e grants seguem obrigatórios.
+O controle usa **controlVersion 2** e o servidor exige essa versão antes de autenticação, consumo de proof ou mutação. Clientes/servidores incompatíveis são bloqueados. O transporte de dispositivos é assinado, sem OIDC; criação e recovery preservam autenticação de conta. O formato financeiro e as migrations de SQLite local permanecem atuais.
 
-A implantação atualiza o servidor primeiro, em todas as réplicas. Aparelhos antigos
-pausam sync conservando dados e pendências; cada aparelho retoma quando seu app é
-atualizado. Não é preciso atualizar desktop e celular simultaneamente. Cliente novo
-com servidor antigo também para com “Atualização necessária”. Nenhuma conversão de
-ciphertexts, schema SQL, chaves ou backup é necessária. O servidor exige nova versão
-da aplicação; isso substitui a recomendação informal anterior de atualizar ambos.
+A instalação self-hosted anterior precisa ser recriada. Preservar o banco local e usar o fluxo explícito de backup/desvinculação/rebaseline substitui qualquer atualização do servidor anterior. Veja [Servidor recriado](self-hosting.md#servidor-recriado-e-base-local-como-fonte-de-verdade).
 
-`tools/release/version-skew.cjs`, executado pelo CI de release, compila o código
-original do v0.3.11 (commit fixo) com seu próprio protocolo. A integração comprova
-recusa no discovery, preservação byte a byte das sidecars/outbox com envelope
-preparado, recusa do transporte antigo, proof não consumido e retomada pelo cliente
-atual. `clientVersion.test.ts` verifica a barreira em todas as famílias de endpoints
-sem permitir acesso ao banco ou autenticação; foreground verifica recusa de servidor
-v1 sem login/POST e sem alterar dados locais.
+`clientVersion.test.ts` verifica a barreira de versão nas famílias atuais de endpoints, antes de acesso ao banco ou autenticação. Foreground verifica recusa de discovery incompatível sem modificar dados locais.
 
 `legacyBaseline.test.ts` usa SQLite real nos adaptadores Desktop e Android:
 4.118 lançamentos, 11 séries, oito mensais com 240 ocorrências cada, semanais,
