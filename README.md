@@ -149,4 +149,4 @@ O ambiente com Keycloak/PostgreSQL e pareamento está no [guia de provisioning](
 
 ### Sincronização opcional em servidor próprio
 
-O LionPocket normal continua local-first e oferece sincronização E2EE por uma única URL HTTPS em Configurações → Sincronização. Veja o [guia de instalação e operação self-hosted](docs/self-hosting.md).
+O LionPocket normal continua local-first e oferece sincronização E2EE por uma única URL HTTPS em Configurações → Sincronização. Veja o [guia de instalação e operação self-hosted](docs/self-hosting.md) e o [pareamento por QR/LPV2 em quatro ações](docs/device-pairing-lpv2.md).

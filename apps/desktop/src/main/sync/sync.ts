@@ -3,6 +3,7 @@ import { savePublicProfile } from './publicProfile';
 import { desktopForeground } from './foreground';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { mkdir, readFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
@@ -28,6 +29,7 @@ export async function registerSyncController(bank: LionPocketDatabase) {
         secrets: new DesktopSecretStore(join(directory, 'secret-wrappers')),
         sodium: await desktopCrypto(),
         dialect: 'desktop',
+        deviceName: hostname().slice(0,80),
         defaultEndpoint: privateBeta && typeof LIONPOCKET_BETA_ENDPOINT !== 'undefined' ? LIONPOCKET_BETA_ENDPOINT : '',
         storage: {
           load: async () => {
@@ -122,6 +124,12 @@ export async function registerSyncController(bank: LionPocketDatabase) {
           return c.confirmRecovery(String(args[0]));
         case 'recover':
           return c.recover(String(args[0]), String(args[1]), String(args[2]));
+        case 'invite-create': return c.createInvitation();
+        case 'invite-revoke': return c.cancelInvitation();
+        case 'pairing-inspect': return c.inspectPairingInvitation(String(args[0]));
+        case 'pairing-connect': return c.connectInvitation(String(args[0]));
+        case 'pairing-deny': return c.deny(String(args[0]));
+        case 'setup': await c.configure(String(args[0])); return c.create();
         case 'configure':
           return c.configure(String(args[0]));
         case 'create':
@@ -137,7 +145,7 @@ export async function registerSyncController(bank: LionPocketDatabase) {
         case 'requests':
           return c.requests();
         case 'approve':
-          return c.approve(String(args[0]), String(args[1]));
+          return c.approve(String(args[0]), args[1] === undefined ? undefined : String(args[1]));
         case 'pause':
           return c.pause(args[0] === true);
         case 'resolve':

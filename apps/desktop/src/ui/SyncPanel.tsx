@@ -1,10 +1,12 @@
-import { syncActivityLabel, revisionSummary } from '@lionpocket/sync-local';
+import {
+  syncActivityLabel,
+  revisionSummary,
+  pairingQr,
+} from '@lionpocket/sync-local';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  ArrowLeft,
   ArrowRight,
-  Check,
   CheckCheck,
   ChevronDown,
   CircleAlert,
@@ -22,10 +24,8 @@ import {
   Smartphone,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type {
-  SyncStatus,
-} from '@lionpocket/sync-local';
-import type { PairingRequest } from '@lionpocket/sync-protocol';
+import type { SyncStatus } from '@lionpocket/sync-local';
+import { pairingErrorMessage } from '@lionpocket/sync-protocol';
 
 const recoveryFinalizing = [
   'activation_requested',
@@ -40,9 +40,13 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [endpoint, setEndpoint] = useState('');
   const [invitation, setInvitation] = useState('');
-  const [fingerprint, setFingerprint] = useState('');
   const [authority, setAuthority] = useState('');
-  const [requests, setRequests] = useState<PairingRequest[]>([]);
+  const [inviteInfo, setInviteInfo] = useState<{
+    id: string;
+    endpoint: string;
+  }>();
+  const [pairingLink, setPairingLink] = useState('');
+  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [reviewed, setReviewed] = useState(false);
@@ -50,18 +54,16 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const [confirmedCode, setConfirmedCode] = useState('');
   const [revokeId, setRevokeId] = useState('');
   const [setup, setSetup] = useState(false);
-  const [path, setPath] = useState<'create' | 'pair' | ''>('');
 
   const refresh = async () => {
     const s = await window.lionPocket.syncStatus?.();
     if (s) {
       setStatus(s);
       setEndpoint(s.endpoint);
-
     }
   };
   useEffect(() => {
-    void refresh().catch((e) => setError(String(e)));
+    void refresh().catch((e) => setError(pairingErrorMessage(e)));
     return window.lionPocket.onSyncChanged?.(() => {
       void refresh().catch(() => {
         /* Local use continues if status is unavailable. */
@@ -90,12 +92,22 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       }
       if (action === 'inspect')
         setAuthority((result as { fingerprint: string }).fingerprint);
-      if (action === 'requests')
-        setRequests((result as { requests: PairingRequest[] }).requests);
+      if (action === 'invite-create') {
+        setPairingLink((result as { link: string }).link);
+        setAdding(true);
+      }
+      if (
+        action === 'approve' ||
+        action === 'invite-revoke' ||
+        action === 'pairing-deny'
+      ) {
+        setAdding(false);
+        setPairingLink('');
+      }
       await refresh();
       await onChanged();
     } catch (e) {
-      setError(String(e));
+      setError(pairingErrorMessage(e));
       await refresh().catch(() => {
         /* Preserve the operation error. */
       });
@@ -103,11 +115,24 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       setBusy(false);
     }
   };
-  const choosePath = (next: 'create' | 'pair') => {
-    setPath(next);
-    setReviewed(false);
-  };
-  const configured = !!status?.discovered && endpoint === status.endpoint;
+  useEffect(() => {
+    let cancelled = false;
+    setInviteInfo(undefined);
+    if (invitation.trim())
+      void window.lionPocket.syncCommand!('pairing-inspect', [invitation])
+        .then((info) => {
+          if (!cancelled) {
+            setInviteInfo(info as { id: string; endpoint: string });
+            setError('');
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) setError(pairingErrorMessage(e));
+        });
+    return () => {
+      cancelled = true;
+    };
+  }, [invitation]);
   if (!status) return error ? <p role="alert">{error}</p> : null;
 
   const connected = status.phase === 'bound';
@@ -351,6 +376,9 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
         </SyncSection>
       )}
 
+      {status.phase === 'local' && status.pairingStep === 'preparing' && (
+        <p role="status">Preparando conexão…</p>
+      )}
       {status.phase === 'local' && !setup && (
         <div className="sync-onboarding">
           <div className="sync-onboarding__content">
@@ -394,277 +422,98 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
         </div>
       )}
 
-      {status.phase === 'local' && setup && (
-        <div className="sync-setup">
-          <ol className="sync-steps" aria-label="Etapas da configuração">
-            {['Servidor', 'Como conectar', 'Confirmar'].map((label, index) => {
-              const current = !configured ? 0 : !path ? 1 : 2;
-              return (
-                <li
-                  key={label}
-                  className={
-                    index === current
-                      ? 'is-current'
-                      : index < current
-                        ? 'is-done'
-                        : ''
-                  }
-                  aria-current={index === current ? 'step' : undefined}
-                >
-                  <span>
-                    {index < current ? (
-                      <Check size={13} aria-hidden="true" />
-                    ) : (
-                      index + 1
-                    )}
-                  </span>
-                  {label}
-                </li>
-              );
-            })}
-          </ol>
-          <SyncSection
-            icon={Server}
-            title="Escolha seu servidor"
-            description="Informe a URL HTTPS fornecida por quem administra o servidor."
-          >
-            <form
-              className="sync-server-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!busy && endpoint.trim()) void run('configure', [endpoint]);
-              }}
+      {status.phase === 'local' && (
+        <>
+          {setup && (
+            <SyncSection
+              icon={Server}
+              title="Configurar sincronização"
+              description="Conecte seu servidor e crie seu cofre."
             >
-              <label className="field">
-                <span>Servidor próprio</span>
-                <input
-                  aria-label="Servidor próprio"
-                  placeholder="https://sync.exemplo.com"
-                  autoComplete="url"
-                  value={endpoint}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setEndpoint(e.target.value);
-                    setPath('');
-                    setReviewed(false);
-                    setAuthority('');
-                  }}
-                />
-              </label>
-              <button
-                className={`button ${configured ? '' : 'button--primary'}`}
-                disabled={busy || !endpoint.trim()}
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!busy && endpoint.trim()) void run('setup', [endpoint]);
+                }}
               >
-                {configured ? (
-                  <Check size={16} aria-hidden="true" />
-                ) : (
-                  <ArrowRight size={16} aria-hidden="true" />
-                )}
-                {configured ? 'Verificar novamente' : 'Verificar servidor'}
-              </button>
-            </form>
-            {configured && (
-              <div className="sync-server-verified">
-                <ShieldCheck size={16} aria-hidden="true" />
-                <span>
-                  Servidor verificado. Você fará login em{' '}
-                  <strong>
-                    {new URL(status.discovered!.oidc.issuer).host}
-                  </strong>
-                  .
-                </span>
-              </div>
+                <label className="field">
+                  <span>Servidor próprio</span>
+                  <input
+                    aria-label="Servidor próprio"
+                    value={endpoint}
+                    onChange={(e) => setEndpoint(e.target.value)}
+                    placeholder="https://sync.exemplo.com"
+                  />
+                </label>
+                <button
+                  className="button button--primary"
+                  disabled={busy || !endpoint.trim()}
+                >
+                  Conectar
+                </button>
+              </form>
+            </SyncSection>
+          )}
+          <SyncSection
+            icon={Link2}
+            title="Conectar com convite"
+            description="Cole o link do aparelho conectado."
+          >
+            <label className="field">
+              <span>Convite do cofre</span>
+              <textarea
+                aria-label="Convite do cofre"
+                value={invitation}
+                onChange={(e) => setInvitation(e.target.value)}
+              />
+            </label>
+            {inviteInfo && (
+              <>
+                <p>Cofre pessoal · {new URL(inviteInfo.endpoint).host}</p>
+                <button
+                  className="button button--primary"
+                  disabled={busy}
+                  onClick={() => void run('pairing-connect', [invitation])}
+                >
+                  Conectar
+                </button>
+              </>
             )}
           </SyncSection>
-          {configured && (
-            <>
-              <div
-                className="sync-choice-grid"
-                aria-label="Como conectar este aparelho"
-              >
-                <button
-                  className={`sync-choice ${path === 'create' ? 'is-selected' : ''}`}
-                  aria-pressed={path === 'create'}
-                  disabled={busy}
-                  onClick={() => choosePath('create')}
-                >
-                  <span className="settings-icon">
-                    <Plus size={20} aria-hidden="true" />
-                  </span>
-                  <span>
-                    <strong>Criar minha sincronização</strong>
-                    <small>
-                      Comece por este aparelho e conecte os outros depois.
-                    </small>
-                  </span>
-                  <span className="sync-choice__indicator">
-                    {path === 'create' && (
-                      <Check size={13} aria-hidden="true" />
-                    )}
-                  </span>
-                </button>
-                <button
-                  className={`sync-choice ${path === 'pair' ? 'is-selected' : ''}`}
-                  aria-pressed={path === 'pair'}
-                  disabled={busy}
-                  onClick={() => choosePath('pair')}
-                >
-                  <span className="settings-icon">
-                    <Link2 size={20} aria-hidden="true" />
-                  </span>
-                  <span>
-                    <strong>Tenho um convite</strong>
-                    <small>
-                      Conecte este aparelho a uma sincronização existente.
-                    </small>
-                  </span>
-                  <span className="sync-choice__indicator">
-                    {path === 'pair' && <Check size={13} aria-hidden="true" />}
-                  </span>
-                </button>
-              </div>
-              {path && (
-                <SyncSection
-                  icon={path === 'pair' ? Link2 : ShieldCheck}
-                  title={
-                    path === 'pair'
-                      ? 'Conecte com seu convite'
-                      : 'Comece com os dados deste aparelho'
-                  }
-                  description="Uma cópia de segurança local será criada antes de vincular esta base."
-                >
-                  {path === 'pair' && (
-                    <>
-                      <label className="field">
-                        <span>Convite do outro aparelho</span>
-                        <textarea
-                          aria-label="Convite do cofre"
-                          placeholder="Cole aqui o convite gerado no outro aparelho"
-                          value={invitation}
-                          onChange={(e) => {
-                            setInvitation(e.target.value);
-                            setAuthority('');
-                            setFingerprint('');
-                          }}
-                        />
-                      </label>
-                      <div className="sync-actions">
-                        <button
-                          className="button"
-                          disabled={busy || !invitation}
-                          onClick={() => void run('inspect', [invitation])}
-                        >
-                          <ShieldCheck size={16} aria-hidden="true" />
-                          Conferir convite
-                        </button>
-                      </div>
-                      {authority && (
-                        <div className="sync-field-grid">
-                          <div className="sync-fingerprint">
-                            <span>Código de segurança do cofre</span>
-                            <code>{authority}</code>
-                            <small>
-                              Compare com o código exibido no aparelho que criou
-                              o cofre.
-                            </small>
-                          </div>
-                          <label className="field">
-                            <span>Código conferido no outro aparelho</span>
-                            <input
-                              aria-label="Código de segurança do cofre conferido"
-                              autoComplete="off"
-                              value={fingerprint}
-                              onChange={(e) => setFingerprint(e.target.value)}
-                            />
-                          </label>
-                        </div>
-                      )}
-                    </>
-                  )}
-                  <div className="sync-section__footer">
-                    <span>
-                      <LockKeyhole size={14} aria-hidden="true" />
-                      Seus dados são criptografados aqui antes do envio.
-                    </span>
-                    {path === 'create' ? (
-                      <button
-                        className="button button--primary"
-                        disabled={busy}
-                        onClick={() => void run('create')}
-                      >
-                        Entrar e criar cofre
-                        <ArrowRight size={16} aria-hidden="true" />
-                      </button>
-                    ) : (
-                      authority && (
-                        <button
-                          className="button button--primary"
-                          disabled={
-                            busy || fingerprint !== authority
-                          }
-                          onClick={() =>
-                            void run('pair', [invitation, fingerprint])
-                          }
-                        >
-                          Entrar e pedir aprovação
-                          <ArrowRight size={16} aria-hidden="true" />
-                        </button>
-                      )
-                    )}
-                  </div>
-                </SyncSection>
-              )}
-            </>
-          )}
-          {authority && (
-            <SyncDisclosure
-              icon={KeyRound}
-              title="Recuperar em uma nova instalação"
-              description="Use seu código de recuperação se você perdeu o acesso aos outros aparelhos."
+          <SyncDisclosure icon={KeyRound} title="Recuperar um cofre existente">
+            <p>
+              Use o convite de recuperação e o código guardados fora do
+              aplicativo.
+            </p>
+            <button
+              className="button"
+              disabled={busy || !invitation}
+              onClick={() => void run('inspect', [invitation])}
             >
-              <label className="field">
-                <span>Código de recuperação</span>
+              Verificar convite de recuperação
+            </button>
+            {authority && (
+              <>
                 <input
+                  aria-label="Código de recuperação"
                   type="password"
-                  autoComplete="off"
                   value={confirmedCode}
                   onChange={(e) => setConfirmedCode(e.target.value)}
                 />
-              </label>
-              <div className="sync-actions">
                 <button
                   className="button"
-                  disabled={busy || fingerprint !== authority || !confirmedCode}
+                  disabled={busy || !confirmedCode}
                   onClick={() =>
-                    void run('recover', [
-                      invitation,
-                      fingerprint,
-                      confirmedCode,
-                    ])
+                    void run('recover', [invitation, authority, confirmedCode])
                   }
                 >
                   Entrar e recuperar cofre
                 </button>
-              </div>
-            </SyncDisclosure>
-          )}
-          <div className="sync-actions">
-            <button
-              className="button button--ghost"
-              disabled={busy}
-              onClick={() => {
-                setSetup(false);
-                setPath('');
-                setReviewed(false);
-              }}
-            >
-              <ArrowLeft size={15} aria-hidden="true" />
-              Voltar
-            </button>
-          </div>
-        </div>
+              </>
+            )}
+          </SyncDisclosure>
+        </>
       )}
-
       {status.phase === 'recovery' && (
         <SyncSection
           icon={KeyRound}
@@ -733,27 +582,54 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       {status.phase === 'pairing' && (
         <SyncSection
           icon={Smartphone}
-          title="Aprove este aparelho para continuar"
-          description="Abra o LionPocket em um aparelho já conectado e confira o código abaixo antes de aprovar o pedido."
+          title={
+            status.pairingStep === 'preparing'
+              ? 'Preparando conexão…'
+              : status.pairingStep === 'connecting'
+                ? 'Conectando…'
+                : 'Aguardando aprovação no outro aparelho'
+          }
+          description="Confira o mesmo código no aparelho conectado antes de aprovar."
         >
           <div className="sync-fingerprint">
-            <span>Código deste aparelho</span>
-            <code>{status.pairingFingerprint}</code>
+            <span>Código de segurança</span>
+            <code>{status.pairingCode}</code>
           </div>
-          <div className="sync-section__footer">
-            <span>A chave será recebida depois da aprovação.</span>
-            <button
-              className="button button--primary"
-              disabled={busy}
-              onClick={() => void run('receive')}
-            >
-              Entrar e receber chave
-              <ArrowRight size={16} aria-hidden="true" />
-            </button>
-          </div>
+          {status.pairingError &&
+            /^(Convite|Pedido recusado|Este convite)/.test(
+              status.pairingError,
+            ) && (
+              <label className="field">
+                <span>Cole um novo convite do aparelho conectado</span>
+                <textarea
+                  aria-label="Novo convite do cofre"
+                  value={invitation}
+                  onChange={(e) => setInvitation(e.target.value)}
+                />
+              </label>
+            )}
+          {inviteInfo && inviteInfo.id !== status.pairingInviteId && (
+            <>
+              <p>Cofre pessoal · {new URL(inviteInfo.endpoint).host}</p>
+              <button
+                className="button button--primary"
+                disabled={busy}
+                onClick={() => void run('pairing-connect', [invitation])}
+              >
+                Conectar
+              </button>
+            </>
+          )}
+          {status.pairingError && <p role="alert">{status.pairingError}</p>}
         </SyncSection>
       )}
-
+      {status.phase === 'bound' && (
+        <p role="status">
+          {status.lastCompletedAt
+            ? 'Sincronização pronta'
+            : 'Sincronizando dados…'}
+        </p>
+      )}
       {canManage && (
         <>
           {status.restoreReview && (
@@ -784,76 +660,84 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
 
           <div className="sync-management">
             {status.owner && (
-              <SyncDisclosure
-                icon={Smartphone}
-                title="Adicionar dispositivo"
-                description="Conecte outro computador ou celular com um convite e sua aprovação."
-              >
-                <label className="field">
-                  <span>Convite público</span>
-                  <textarea
-                    aria-label="Convite para outro aparelho"
-                    readOnly
-                    value={status.invitation}
-                  />
-                </label>
-                <div className="sync-fingerprint">
-                  <span>Código de segurança do cofre</span>
-                  <code>{status.authorityFingerprint}</code>
-                  <small>
-                    Confira este código no outro aparelho antes de enviar o
-                    pedido.
-                  </small>
-                </div>
-                <div className="sync-actions">
-                  <button
-                    className="button button--soft"
-                    disabled={busy}
-                    onClick={() => void run('requests')}
-                  >
-                    <RefreshCw size={16} aria-hidden="true" />
-                    Entrar e buscar pedidos
-                  </button>
-                </div>
-                {requests.map((r) => (
-                  <div className="sync-request" key={r.deviceId}>
-                    <div>
-                      <strong>Pedido de conexão</strong>
-                      <p>
-                        Aparelho:{' '}
-                        <span className="sync-identifier">{r.deviceId}</span>
-                      </p>
+              <SyncSection icon={Smartphone} title="Aparelhos">
+                <button
+                  className="button button--primary"
+                  disabled={busy}
+                  onClick={() => void run('invite-create')}
+                >
+                  Adicionar aparelho
+                </button>
+                {adding && status.pairingRequests.length === 0 && (
+                  <>
+                    <p>
+                      Escaneie no outro aparelho. Convite válido por 15 minutos
+                      e para um aparelho.
+                    </p>
+                    {pairingLink && <PairingQR link={pairingLink} />}
+                    <div className="sync-actions">
+                      <button
+                        className="button"
+                        onClick={() =>
+                          void navigator.clipboard.writeText(pairingLink)
+                        }
+                      >
+                        Copiar link
+                      </button>
+                      <button
+                        className="button"
+                        onClick={() => {
+                          if (navigator.share)
+                            void navigator.share({ text: pairingLink });
+                          else void navigator.clipboard.writeText(pairingLink);
+                        }}
+                      >
+                        Compartilhar convite
+                      </button>
+                      <button
+                        className="button"
+                        disabled={busy}
+                        onClick={() => void run('invite-revoke')}
+                      >
+                        Cancelar convite
+                      </button>
                     </div>
-                    <div className="sync-field-grid">
-                      <div className="sync-fingerprint">
-                        <span>Código do pedido</span>
-                        <code>{r.fingerprint}</code>
-                      </div>
-                      <label className="field">
-                        <span>Código exibido no aparelho</span>
-                        <input
-                          aria-label={`Código do aparelho ${r.deviceId}`}
-                          autoComplete="off"
-                          value={fingerprint}
-                          onChange={(e) => setFingerprint(e.target.value)}
-                        />
-                      </label>
+                  </>
+                )}
+                {status.pairingRequests.map((r) => (
+                  <div className="sync-request" key={r.deviceId}>
+                    <strong>Novo aparelho · {r.deviceName}</strong>
+                    <p>Solicitando acesso agora</p>
+                    <div className="sync-fingerprint">
+                      <span>Código de segurança</span>
+                      <code>{r.securityCode}</code>
+                      <small>Confira o mesmo código no novo aparelho.</small>
                     </div>
                     <div className="sync-actions">
                       <button
-                        className="button button--primary"
-                        disabled={busy || fingerprint !== r.fingerprint}
-                        onClick={() =>
-                          void run('approve', [r.deviceId, fingerprint])
-                        }
+                        className="button"
+                        disabled={busy}
+                        onClick={() => void run('pairing-deny', [r.deviceId])}
                       >
-                        Aprovar e entregar chave
-                        <Check size={16} aria-hidden="true" />
+                        Recusar
+                      </button>
+                      <button
+                        className="button button--primary"
+                        disabled={busy}
+                        onClick={() => void run('approve', [r.deviceId])}
+                      >
+                        Aprovar aparelho
                       </button>
                     </div>
                   </div>
                 ))}
-              </SyncDisclosure>
+              </SyncSection>
+            )}
+            {status.owner && status.recoveryVersion === '0' && (
+              <p role="alert">
+                Proteja seu cofre: guarde um código de recuperação na seção
+                Recuperação e proteção.
+              </p>
             )}
 
             {status.owner && (
@@ -1059,7 +943,9 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                 title="Confira um registro ausente na cópia restaurada"
               >
                 <p>
-                  A cópia restaurada não contém este registro. Confirme a exclusão somente se você deseja removê-lo também dos outros aparelhos.
+                  A cópia restaurada não contém este registro. Confirme a
+                  exclusão somente se você deseja removê-lo também dos outros
+                  aparelhos.
                 </p>
                 <details className="sync-technical">
                   <summary>Identificador do registro</summary>
@@ -1070,10 +956,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
                     className="button"
                     disabled={busy}
                     onClick={() =>
-                      void run(
-                        'delete-review',
-                        [r.object_id, true],
-                      )
+                      void run('delete-review', [r.object_id, true])
                     }
                   >
                     Confirmar exclusão agora
@@ -1276,5 +1159,29 @@ function RecoveryCode({
         </button>
       </div>
     </div>
+  );
+}
+
+function PairingQR({ link }: { link: string }) {
+  const matrix = pairingQr(link);
+  return (
+    <svg
+      role="img"
+      aria-label="QR Code para conectar outro aparelho"
+      width="320"
+      height="320"
+      viewBox={`0 0 ${matrix.length} ${matrix.length}`}
+      style={{ maxWidth: '100%', background: '#fff' }}
+      shapeRendering="crispEdges"
+    >
+      <path
+        d={matrix
+          .flatMap((row, y) =>
+            row.map((dark, x) => (dark ? `M${x} ${y}h1v1h-1z` : '')),
+          )
+          .join('')}
+        fill="#000"
+      />
+    </svg>
   );
 }

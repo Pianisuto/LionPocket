@@ -367,6 +367,7 @@ describe.skipIf(!enabled)(
         'sync_epoch_challenges',
         'sync_grants',
         'sync_http_nonces',
+        'sync_pairing_invites',
         'sync_pairings',
         'sync_restore_vaults',
         'sync_restores',

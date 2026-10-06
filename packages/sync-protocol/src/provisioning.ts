@@ -426,7 +426,7 @@ export function assertHttpProof(value: unknown): asserts value is HttpProof {
     row.formatVersion !== 1 ||
     !["GET", "POST"].includes(String(row.method)) ||
     typeof row.target !== "string" ||
-    !/^\/v1\/[a-zA-Z0-9/-]+$/.test(row.target) ||
+    !/^\/(?:v1\/[a-zA-Z0-9/-]+|v2\/pair\/[0-9a-f-]{36}\/(?:request|status)|v2\/devices\/vaults\/[0-9a-f-]{36}\/(?:invite-create|invite-revoke|pairing-deny|pairing-list|grants|deliveries|key-checkpoints|recovery-store|registry|commits|changes))$/.test(row.target) ||
     typeof row.origin !== "string" ||
     !Number.isSafeInteger(row.issuedAt)
   )

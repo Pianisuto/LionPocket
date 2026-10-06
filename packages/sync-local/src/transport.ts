@@ -156,6 +156,7 @@ export class ManualSync {
     readonly endpoint: string,
     readonly http: SyncHttp = fetchSyncHttp(endpoint),
     readonly canTransport: () => boolean = () => true,
+    readonly routePrefix = '/v1/vaults',
   ) {}
   private async state() {
     const [state] = await this.db.read(
@@ -182,7 +183,7 @@ export class ManualSync {
   private async request(action: string, value: unknown, token: string) {
     if (!this.canTransport()) throw new Error('foreground_inactive');
     const body = canonicalStringify(value),
-      target = `/v1/vaults/${this.device.profile.pin.vaultId}/${action}`;
+      target = `${this.routePrefix}/${this.device.profile.pin.vaultId}/${action}`;
     const proof = await this.device.proof(
       'POST',
       target,

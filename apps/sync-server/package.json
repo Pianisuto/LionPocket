@@ -11,14 +11,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@lionpocket/sync-protocol": "0.1.0",
     "@lionpocket/sync-local": "0.1.0",
+    "@lionpocket/sync-protocol": "0.1.0",
     "jose": "6.2.3",
-    "pg": "8.20.0",
-    "libsodium-wrappers-sumo": "0.8.4"
+    "libsodium-wrappers-sumo": "0.8.4",
+    "pg": "8.20.0"
   },
   "devDependencies": {
     "@types/pg": "8.20.0",
+    "@types/react-test-renderer": "^19.3.0",
+    "react-test-renderer": "^19.2.8",
     "tsx": "^4.23.12",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"

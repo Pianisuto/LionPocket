@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Clean stack + TLS + official account/bootstrap/backup/restore operations, fixtures only."""
+import base64
 import importlib.machinery
 import importlib.util
 import json
@@ -100,6 +101,10 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
             lp.compose(cfg, 'stop', service, capture=True)
             fixture(service)
             lp.compose(cfg, 'up', '-d', '--wait', '--wait-timeout', '300', service)
+            if service == 'postgres':
+                # Granted LPV2 clients no longer log in and warm IdP connections.
+                # Isolate the next operator scenario from connections killed by this outage.
+                lp.compose(cfg, 'up', '-d', '--force-recreate', '--wait', '--wait-timeout', '300', 'keycloak', capture=True)
         fixture('restart')  # Resume and drain every durable financial outbox.
         ctl('user', 'disable', 'fixture-alice')
         fixture('revoked')
@@ -126,20 +131,24 @@ with tempfile.TemporaryDirectory(prefix='lion-selfhost-fixture-') as temporary:
         assert active_snapshot() == before_corrupt, 'Corrupt backup modified active installation'
         print('Corrupt backup rejected before any restore')
         # Canary scans the complete logical databases and every container log.
+        client = json.loads((directory / 'client-state.json').read_text())
+        capabilities = [base64.urlsafe_b64encode(bytes(value)).rstrip(b'=') for scope,value in client['secrets'] if 'pairingCapability' in scope]
+        assert capabilities, 'LPV2 owner capability fixture missing'
         for database in ['lion_sync', 'lion_auth']:
             dump = lp.compose(cfg, 'exec', '-T', 'postgres', 'pg_dump', '-U', 'postgres', database, capture=True).stdout
-            for canary in [b'LP_SELFHOST_CANARY_DESCRIPTION_72319', b'LP_SELFHOST_CANARY_NOTE_87931', b'9876543', b'98765.43']:
+            for canary in [b'LP_SELFHOST_CANARY_DESCRIPTION_72319', b'LP_SELFHOST_CANARY_NOTE_87931', b'9876543', b'98765.43', *capabilities]:
                 if canary in dump:
                     raise RuntimeError('Financial canary leaked into server database')
         logs = lp.compose(cfg, 'logs', '--no-color', capture=True).stdout
         if re.search(rb'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', logs):
             raise RuntimeError('JWT appeared in stack logs')
         client = json.loads((directory / 'client-state.json').read_text())
-        for device in ['desktop', 'android']:
+        assert not (directory / 'ephemeral-token-android.json').exists(), 'Pairing requested a new-device OIDC login'
+        for device in ['desktop']:
             token = json.loads((directory / ('ephemeral-token-' + device + '.json')).read_text())['accessToken']
             if token.encode() in logs:
                 raise RuntimeError('Access token leaked into logs')
-        for canary in [b'LP_SELFHOST_CANARY_DESCRIPTION_72319', b'LP_SELFHOST_CANARY_NOTE_87931', client['recovery'].encode()]:
+        for canary in [b'LP_SELFHOST_CANARY_DESCRIPTION_72319', b'LP_SELFHOST_CANARY_NOTE_87931', client['recovery'].encode(), *capabilities]:
             if canary in logs:
                 raise RuntimeError('Sensitive canary leaked into logs')
         print('Ciphertext/privacy canaries: both databases and stack logs passed')

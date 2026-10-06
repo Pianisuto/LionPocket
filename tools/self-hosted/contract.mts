@@ -94,7 +94,7 @@ async function login(e: SyncEnvironment, android: boolean, username = 'fixture-a
   return session;
 }
 const a = new SyncController({ epochBackup:{create:()=>createEpochAnchorBackup(desktop.db,'/fixtures/recovery-'+randomBytes(8).toString('hex')+'.sqlite'),inspect:inspectEpochAnchorBackup,inspectCheckpoint:inspectEpochActivationCheckpoint},db: desktop.syncDatabase(), secrets, sodium, dialect: 'desktop', storage: { load: async () => saved.desktop ? structuredClone(saved.desktop) : null, save: async value => { saved.desktop = structuredClone(value); } }, backup: async () => { const path = '/fixtures/pre-binding-' + randomBytes(8).toString('hex') + '.sqlite'; desktop.db.prepare('VACUUM INTO ?').run(path); return path; }, login: e => login(e, false) });
-const b = new SyncController({ db: mobileSyncDatabase(mobile.db), secrets, sodium, dialect: 'android', storage: { load: async () => saved.android ? structuredClone(saved.android) : null, save: async value => { saved.android = structuredClone(value); } }, backup: async () => { const path = '/fixtures/pre-binding-android-' + randomBytes(8).toString('hex') + '.sqlite'; await mobile.db.executeAsync('VACUUM INTO ?', [path]); return path; }, login: e => login(e, true) });
+const b = new SyncController({ db: mobileSyncDatabase(mobile.db), secrets, sodium, dialect: 'android', storage: { load: async () => saved.android ? structuredClone(saved.android) : null, save: async value => { saved.android = structuredClone(value); } }, backup: async () => { const path = '/fixtures/pre-binding-android-' + randomBytes(8).toString('hex') + '.sqlite'; await mobile.db.executeAsync('VACUUM INTO ?', [path]); return path; }, login: async () => { throw new Error('New device must not require OIDC'); } });
 a.setForeground(true); b.setForeground(true);
 const input = { kind: 'income' as const, description: 'LP_SELFHOST_ANDROID_74321', plannedAmount: 0, actualAmount: null, dueDate: '2026-10-03', status: 'planned' as const };
 try {
@@ -111,27 +111,34 @@ try {
       assert.equal(desktop.db.prepare('SELECT count(*) AS n FROM sync_outbox').get()?.n, 0);
     }
     globalThis.fetch = originalFetch;
-    await a.configure(endpoint); await b.configure(endpoint);
+    await a.configure(endpoint);
     const discovery = await a.environment();
     assert.equal(discovery.controlVersion, 2); assert.equal(discovery.protocolVersion, 1); assert.equal(discovery.domainSchema, 1);
     assert.equal(discovery.entityScopes.length, 9);
     const first = await a.create();
-    assert.equal(first.phase, 'recovery');
-    assert.equal(desktop.db.prepare('SELECT binding_id FROM sync_local_state').get()?.binding_id, null);
-    assert.equal(desktop.db.prepare('SELECT count(*) AS n FROM sync_outbox').get()?.n, 0);
-    await assert.rejects(a.sync());
+    assert.equal(first.phase, 'bound');
+    assert.ok(desktop.db.prepare('SELECT binding_id FROM sync_local_state').get()?.binding_id);
+    await a.sync(); // Recovery confirmation can follow a functioning, encrypted baseline.
     const recovery = await a.generateRecovery(); saved.recovery = recovery.code;
     await assert.rejects(a.confirmRecovery('LP1.' + 'A'.repeat(43)));
     await a.confirmRecovery(recovery.code);
     assert.equal((await a.status()).phase, 'bound');
     await a.sync();
-    const invitation = (await a.status()).invitation;
-    const inspected = await b.inspectInvitation(invitation);
-    await b.pair(invitation, inspected.fingerprint);
+    const {link} = await a.createInvitation();
+    await b.connectInvitation(link);
+    assert.equal((await b.status()).endpoint, endpoint);
     await assert.rejects(b.receive()); // Unapproved device receives no financial keys/log.
-    const request = (await a.requests()).requests[0];
-    await a.approve(request.deviceId, request.fingerprint);
-    await b.receive(); await b.sync();
+    const waitFor = async (ready: () => Promise<boolean>) => {
+      const deadline = Date.now() + 40000;
+      while (!(await ready())) {
+        if (Date.now() > deadline) throw new Error('Automatic pairing timed out');
+        await new Promise(resolve => setTimeout(resolve,100));
+      }
+    };
+    await waitFor(async () => (await a.status()).pairingRequests.length === 1);
+    const request = (await a.status()).pairingRequests[0];
+    await a.approve(request.deviceId);
+    await waitFor(async () => (await b.status()).phase === 'bound' && Boolean(b.coordinator.lastCompletedAt));
     assert.equal((await repo.list({ month: '2026-10' }))[0].plannedAmount, 98765.43);
     await repo.save(input); await b.sync(); await a.sync();
     const tx = desktop.listTransactions({ month: '2026-10' }).find(t => t.description === input.description);
@@ -192,7 +199,14 @@ try {
     await assert.rejects(a.sync(), /epoch_changed/);
     assert.deepEqual(desktop.db.prepare('SELECT * FROM sync_outbox').all(), before);
     assert.ok(desktop.listTransactions({ month: '2026-10' }).some(t => t.description === 'OFFLINE_EPOCH_PENDING'));
-  } else if (['offline', 'revoked', 'dns', 'expired', 'tls', 'api', 'postgres', 'keycloak'].includes(phase)) {
+  } else if (['expired','keycloak'].includes(phase)) {
+    // Once granted, neither an expired account session nor unavailable IdP blocks device sync.
+    desktop.saveTransaction({...input,description:'DEVICE_TRANSPORT_DESKTOP_'+phase});
+    await repo.save({...input,description:'DEVICE_TRANSPORT_ANDROID_'+phase});
+    await a.sync(); await b.sync(); await a.sync(); await b.sync();
+    assert.equal((await a.status()).sync?.pending,0);
+    assert.equal((await b.status()).sync?.pending,0);
+  } else if (['offline', 'revoked', 'dns', 'tls', 'api', 'postgres'].includes(phase)) {
     desktop.saveTransaction({ ...input, description: 'OFFLINE_DESKTOP_WRITE_' + phase });
     await repo.save({ ...input, description: 'OFFLINE_ANDROID_WRITE_' + phase });
     await assert.rejects(a.sync(), phase === 'revoked' ? /forbidden/ : /./); await assert.rejects(b.sync(), phase === 'revoked' ? /forbidden/ : /./);
@@ -204,6 +218,8 @@ try {
   } else throw new Error('Unknown fixture phase');
   console.log('Self-host normal desktop/Android SQLite contract: ' + phase + ' passed');
 } finally {
+  a.setForeground(false); b.setForeground(false);
+  await a.coordinator.cancelAndWait(); await b.coordinator.cancelAndWait();
   a.coordinator.dispose(); b.coordinator.dispose();
   saved.secrets = [...secrets.values].map(([scope, bytes]) => [scope, [...bytes]]);
   await writeFile(statePath, JSON.stringify(saved), { mode: 0o600 });

@@ -1,3 +1,4 @@
+import { pairingSchema } from './pairing';
 import { readFileSync } from 'node:fs';
 import { stagingSchema } from './stagingSchema';
 import { generationSchema } from './generations';
@@ -51,7 +52,7 @@ CREATE TABLE IF NOT EXISTS sync_http_nonces (
   server_epoch uuid NOT NULL, device_id uuid NOT NULL, nonce text NOT NULL,
   issued_at bigint NOT NULL, PRIMARY KEY(server_epoch, device_id, nonce)
 );
-` + restoreSchema;
+` + restoreSchema + pairingSchema;
 /** Ciphertext log and public operation graph only. No financial projection or DEK. */
 export const commitSchema = `
 ALTER TABLE sync_vaults ADD COLUMN IF NOT EXISTS log_position bigint NOT NULL DEFAULT 0 CHECK(log_position>=0);
