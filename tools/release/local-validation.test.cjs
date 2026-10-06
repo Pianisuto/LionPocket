@@ -33,11 +33,27 @@ test('push rejects another commit; an annotated tag resolving to tested HEAD is 
   assert.throws(()=>requirePushTargetsHead(`refs/heads/other ${other} refs/heads/other ${zero}`,head,sha=>sha),/diferente/);
   assert.doesNotThrow(()=>requirePushTargetsHead(`(delete) ${zero} refs/heads/old ${other}`,head,()=>{throw new Error('must not resolve deleted content');}));
 });
-test('only successful full validation of the same source/runtime within 24 hours can authorize hooks',()=>{
-  const now=100000000,receipt={formatVersion:1,profile:'linux-android',passed:true,fingerprint:'source',runtime:'runtime',completedAt:now-100};
+test('hooks accept only successful quick checks of the same source/runtime within 24 hours',()=>{
+  const now=100000000,receipt={formatVersion:1,profile:'quick',passed:true,fingerprint:'source',runtime:'runtime',completedAt:now-100};
   assert.equal(receiptMatches(receipt,'source','runtime',now),true);
-  for(const changed of [{passed:false},{profile:'checks-only'},{fingerprint:'changed'},{runtime:'changed'},{completedAt:now+1},{completedAt:now-86400000},{formatVersion:2}]) assert.equal(receiptMatches({...receipt,...changed},'source','runtime',now),false);
+  for(const changed of [{passed:false},{profile:'linux-android'},{fingerprint:'changed'},{runtime:'changed'},{completedAt:now+1},{completedAt:now-86400000},{formatVersion:2}]) assert.equal(receiptMatches({...receipt,...changed},'source','runtime',now),false);
   assert.equal(receiptMatches(undefined,'source','runtime',now),false);
+});
+test('quick-check deadline kills a stalled child instead of hanging the hook',async()=>{
+  const {spawn}=require('node:child_process');
+  const {createBudget}=require('../local-validation/budget.cjs');
+  const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:process.platform!=='win32',stdio:'ignore'});
+  const closed=new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',(code,signal)=>resolve({code,signal}));});
+  let timedOut=false;
+  const budget=createBudget(()=>[child],()=>{timedOut=true;},100);
+  try { const result=await closed; assert.equal(timedOut,true); assert.equal(budget.expired,true); assert.notEqual(result.code,0); }
+  finally {budget.cancel();child.kill('SIGKILL');}
+});
+test('finishing quick checks cancels the deadline without a later timeout',async()=>{
+  const {createBudget}=require('../local-validation/budget.cjs');
+  let timedOut=false;
+  const budget=createBudget(()=>[],()=>{timedOut=true;},20); budget.cancel();
+  await new Promise(resolve=>setTimeout(resolve,30)); assert.equal(timedOut,false);
 });
 test('no executable Actions workflow remains in this checkout',()=>{
   const {existsSync,readdirSync} = require('node:fs');

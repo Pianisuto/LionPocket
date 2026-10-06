@@ -6,18 +6,20 @@ const {homedir,tmpdir} = require('node:os');
 const {randomUUID} = require('node:crypto');
 const net = require('node:net');
 const {git,sourceFingerprint,requireIndexMatchesWorktree,requireHeadMatchesIndex,requirePushTargetsHead,receiptMatches} = require('./state.cjs');
+const {createBudget} = require('./budget.cjs');
 const root = resolve(__dirname,'../..');
 const args = process.argv.slice(2);
 const hook = args.find(arg=>arg.startsWith('--hook='))?.slice(7);
-const checksOnly = args.includes('--checks-only');
+const full = args.includes('--full');
 const androidOnly = args.includes('--android-only');
 const plan = args.includes('--plan');
 const steps = ['Versões e metadados','Testes gerais','Typecheck','Lint','Integração PostgreSQL/Keycloak','Self-hosted completo','Linux normal/beta: pacote, SQLite e protocolo instalado em containers','Android debug/normal/beta, assinatura, atualização SQLite, deep link e cofre nativo em emulador descartável'];
-if (args.some(arg=>!['--checks-only','--android-only','--plan','--hook=pre-commit','--hook=pre-push'].includes(arg)) || args.length>1) throw new Error('Argumentos de validação inválidos.');
-if(plan) { console.log(steps.join('\n')+'\nPendente neste host Linux: instalador/protocolo/DPAPI Windows (requer Windows descartável).\nNenhuma chamada ao GitHub Actions.'); process.exit(0); }
-let child, log, lock, interrupted=false;
+if (args.some(arg=>!['--full','--android-only','--plan','--hook=pre-commit','--hook=pre-push'].includes(arg)) || args.length>1) throw new Error('Argumentos de validação inválidos.');
+if(plan) { console.log('validate:local / hooks: checks rápidos (deadline 55s), sem Docker/emulador/empacotamento.\nvalidate:full (manual):\n'+steps.join('\n')+'\nPendente neste host Linux: instalador/protocolo/DPAPI Windows (requer Windows descartável).\nNenhuma chamada ao GitHub Actions.'); process.exit(0); }
+let log, lock, budget, interrupted=false;
+const children = new Set();
 const containers = new Set();
-const abort = () => { interrupted=true; if(child) { if(process.platform==='win32') child.kill('SIGINT'); else try{process.kill(-child.pid,'SIGINT');}catch{} } };
+const abort = () => { interrupted=true; for(const child of children) { if(process.platform==='win32') child.kill('SIGINT'); else try{process.kill(-child.pid,'SIGINT');}catch{} } };
 process.on('SIGINT',abort); process.on('SIGTERM',abort);
 function capture(file,params,options={}) {
   const result = spawnSync(file,params,{cwd:root,encoding:'utf8',...options});
@@ -28,12 +30,12 @@ function run(label,file,params,options={}) {
   if(interrupted&&!options.cleanup) return Promise.reject(new Error('Validação interrompida.'));
   console.log('\n[local] '+label);
   return new Promise((resolveRun,reject) => {
-    child = spawn(file,params,{cwd:root,env:process.env,detached:process.platform!=='win32',stdio:['pipe','pipe','pipe'],...options});
-    const current = child;
+    const current = spawn(file,params,{cwd:root,env:process.env,detached:process.platform!=='win32',stdio:['pipe','pipe','pipe'],...options});
+    children.add(current);
     for(const [stream,target] of [[current.stdout,process.stdout],[current.stderr,process.stderr]]) stream.on('data',data=>{target.write(data); if(log!==undefined) require('node:fs').writeSync(log,data);});
     current.stdin.end(options.input || '');
-    current.on('error',reject);
-    current.on('close',(code,signal)=>{ if(child===current) child=undefined; code===0&&(!interrupted||options.cleanup) ? resolveRun() : reject(new Error(label+' falhou ('+(signal||code)+'). Nenhum recibo foi emitido.')); });
+    current.on('error',error=>{children.delete(current);reject(error);});
+    current.on('close',(code,signal)=>{ children.delete(current); code===0&&(!interrupted||options.cleanup) ? resolveRun() : reject(new Error(label+' falhou ('+(signal||code)+'). Nenhum recibo foi emitido.')); });
   });
 }
 const npmCli = process.env.npm_execpath || [resolve(dirname(process.execPath),'../lib/node_modules/npm/bin/npm-cli.js'),resolve(dirname(process.execPath),'node_modules/npm/bin/npm-cli.js')].find(existsSync);
@@ -42,7 +44,7 @@ const node = (label,file,params=[],options={}) => run(label,process.execPath,[fi
 function configuration() {
   if(Number(process.versions.node.split('.')[0])<24) throw new Error('Node 24 ou superior é necessário.');
   if(!existsSync(join(root,'node_modules'))) throw new Error('Execute npm ci antes de validar.');
-  if(checksOnly) return {runtime:process.version+'/'+process.platform+'/'+process.arch,env:process.env};
+  if(!full&&!androidOnly) return {runtime:process.version+'/'+process.platform+'/'+process.arch,env:{...process.env,LIONPOCKET_SYNC_INTEGRATION:'0'}};
   if(process.platform!=='linux' || process.arch!=='x64') throw new Error('O pipeline completo requer Linux x64; confira docs/local-validation.md para Windows.');
   const cachedJdk=join(homedir(),'.cache/lionpocket-local-validation/jdk21');
   const javaHome = process.env.JAVA_HOME || (existsSync(join(cachedJdk,'bin/javac')) ? cachedJdk : /java.home = (.*)/.exec(capture('java',['-XshowSettings:properties','-version']))?.[1]?.trim());
@@ -147,6 +149,8 @@ async function android(config,id) {
   }
 }
 async function main() {
+  const startedAt=performance.now();
+  if(!full&&!androidOnly) budget=createBudget(()=>[...children],()=>{interrupted=true;});
   if(hook) {
     requireIndexMatchesWorktree(root);
     if(hook==='pre-push') {
@@ -156,9 +160,9 @@ async function main() {
   }
   const config=configuration(), initial=sourceFingerprint(root);
   const state=resolve(root,git(root,['rev-parse','--git-common-dir']),'local-validation'); mkdirSync(state,{recursive:true});
-  const receiptPath=join(state,'receipt.json');
+  const receiptPath=join(state,full||androidOnly?'receipt.json':'quick-receipt.json');
   let receipt; try{receipt=JSON.parse(readFileSync(receiptPath,'utf8'));}catch{}
-  if(hook && receiptMatches(receipt,initial,config.runtime)) { console.log('Validação local aprovada para este conteúdo exato; recibo reutilizado. Windows permanece um check externo em host descartável.'); return; }
+  if(hook && receiptMatches(receipt,initial,config.runtime) && !budget.expired) { console.log('Checks rápidos aprovados para este conteúdo; recibo reutilizado. Nenhum build ou emulador iniciado.'); return; }
   lock=join(state,'lock');
   try { mkdirSync(lock); } catch { lock=undefined; throw new Error('Outra validação usa este checkout. Aguarde ou verifique o lock local antes de continuar.'); }
   writeFileSync(join(lock,'owner.json'),JSON.stringify({pid:process.pid,startedAt:Date.now()}));
@@ -171,19 +175,29 @@ async function main() {
     console.log('\nChecks Android aprovados; este comando parcial não autoriza commit/push pelo hook.');
     return;
   }
-  await npm(steps[0],'release:validate',{env:config.env}); await npm(steps[1],'test',{env:config.env});
-  await npm(steps[2],'typecheck',{env:config.env}); await npm(steps[3],'lint',{env:config.env});
+  await npm(steps[0],'release:validate',{env:config.env});
+  if(full) {
+    await npm(steps[1],'test',{env:config.env}); await npm(steps[2],'typecheck',{env:config.env}); await npm(steps[3],'lint',{env:config.env});
+  } else {
+    await npm('Compilar bibliotecas uma única vez','build:core',{env:config.env});
+    const results=await Promise.allSettled([npm(steps[1],'test:offline',{env:config.env}),npm(steps[2],'typecheck:offline',{env:config.env}),npm(steps[3],'lint',{env:config.env})]);
+    const failed=results.find(result=>result.status==='rejected');
+    if(failed) throw failed.reason;
+  }
   await run('Whitespace','git',['diff','--check'],{env:config.env}); await run('Whitespace staged','git',['diff','--cached','--check'],{env:config.env});
-  if(!checksOnly) {
+  if(full) {
     await integration(config.env,id); await npm('Validar Compose','sync:self-hosted:validate',{env:config.env}); await npm('Self-hosted completo','sync:self-hosted:test',{env:config.env});
     await desktop(config.env,id); await android(config,id);
-    if(sourceFingerprint(root)!==initial) throw new Error('O código mudou durante a validação. Repita antes de commit/push.');
-    const value={formatVersion:1,profile:'linux-android',passed:true,fingerprint:initial,runtime:config.runtime,completedAt:Date.now(),logPath,coverage:steps,notRun:['Windows instalado/protocolo/DPAPI: requer Windows descartável']};
-    const temporary=receiptPath+'.'+id; writeFileSync(temporary,JSON.stringify(value,null,2)+'\n',{mode:0o600}); renameSync(temporary,receiptPath);
-    console.log('\nAPROVADO: pipeline local Linux/Android. Windows não foi executado neste host. Recibo válido somente para estes arquivos/runtime.');
-  } else console.log('\nChecks gerais aprovados; este comando parcial não autoriza commit/push pelo hook.');
+  }
+  if(sourceFingerprint(root)!==initial) throw new Error('O código mudou durante a validação. Repita antes de commit/push.');
+  if(budget?.expired) throw new Error('Deadline dos checks rápidos atingido.');
+  const elapsedMs=Math.round(performance.now()-startedAt);
+  const value={formatVersion:1,profile:full?'linux-android':'quick',passed:true,fingerprint:initial,runtime:config.runtime,completedAt:Date.now(),elapsedMs,logPath,coverage:full?steps:steps.slice(0,4),notRun:full?['Windows instalado/protocolo/DPAPI: requer Windows descartável']:['Infraestrutura, pacotes Linux/Windows e emulador Android: ensaios manuais separados']};
+  const temporary=receiptPath+'.'+id; writeFileSync(temporary,JSON.stringify(value,null,2)+'\n',{mode:0o600}); renameSync(temporary,receiptPath);
+  console.log('\nAPROVADO: '+(full?'pipeline completo Linux/Android (Windows não executado)':'checks rápidos, sem infraestrutura/builds nativos')+' em '+(elapsedMs/1000).toFixed(1)+'s.');
 }
-main().catch(error=>{console.error('\n'+error.message);process.exitCode=1;}).finally(()=>{
+main().catch(error=>{console.error('\n'+(budget?.expired?'Checks rápidos excederam 55s: execução interrompida, sem aprovação. Nenhuma etapa pesada foi iniciada.':error.message));process.exitCode=1;}).finally(()=>{
+  budget?.cancel();
   for(const name of containers) spawnSync('docker',['rm','--force',name],{stdio:'ignore',timeout:30000});
   if(log!==undefined) closeSync(log);
   if(lock) rmSync(lock,{recursive:true,force:true});

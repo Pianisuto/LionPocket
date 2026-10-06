@@ -94,7 +94,7 @@ node tools/release/validate.cjs v0.3.10
 node tools/release/checksums.cjs /caminho/candidatos .apk
 ```
 
-GitHub Actions está desativado e os workflows foram removidos. O [pipeline local](local-validation.md) executa suíte, typecheck, lint, integração, self-hosted, Linux normal/beta e Android com preservação de SQLite. Windows instalado/DPAPI exige host Windows descartável. Checksums e versão continuam validados pelos scripts existentes. Não há publicação automática, upload, criação de tag ou release; hooks verificam o conteúdo exato antes de commit/push.
+GitHub Actions está desativado e os workflows foram removidos. Os [checks locais rápidos](local-validation.md) executam testes offline, tipos e lint em hooks com deadline de 55 segundos. `npm run validate:full` executa sob demanda integração, self-hosted, Linux normal/beta e Android com preservação de SQLite. Windows instalado/DPAPI exige host Windows descartável. Checksums e versão continuam validados pelos scripts existentes. Não há publicação automática, upload, criação de tag ou release; hooks verificam o conteúdo exato antes de commit/push.
 
 O smoke do binário desktop seleciona **exclusivamente** diretório aleatório `lion-release-smoke-*` sob tmp; compara cada registro legado, verifica integridade/FKs, abre renderer e usa o cofre real (DPAPI Windows ou recusa basic_text Linux). Testes unitários do cofre são identificados como mocks, sem substituir o smoke real. O teste Windows da beta também exercita persistência do perfil, agora sem fsync de diretório incompatível.
 

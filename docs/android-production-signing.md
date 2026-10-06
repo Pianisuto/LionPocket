@@ -32,7 +32,7 @@ npm run mobile:build:android:release
 node tools/release/android-production-candidate.cjs
 ```
 
-O build recusa assinatura ausente, certificado debug e fingerprint divergente. O pipeline `validate:local` usa exclusivamente identidades de desenvolvimento/efêmeras de teste e não publica esse candidato.
+O build recusa assinatura ausente, certificado debug e fingerprint divergente. O ensaio manual `validate:full` usa exclusivamente identidades de desenvolvimento/efêmeras de teste e não publica esse candidato.
 
 ## 3. Primeira migração de instalações antigas
 
@@ -56,7 +56,7 @@ Depois dessa migração única, releases futuras assinadas pela mesma identidade
 
 A publicação é uma operação separada dos hooks de validação, feita somente após aprovação do proprietário. Não há workflow GitHub para disparar.
 
-1. Execute o [pipeline local](local-validation.md) e registre também os ensaios Windows em host descartável.
+1. Execute `npm run validate:full` conforme o [guia local](local-validation.md) e registre também os ensaios Windows em host descartável.
 2. Construa Linux/Windows normais e o Android com a identidade permanente; confira certificados, versões e checksums.
 3. Prepare manifest/checksums com `tools/release/publication-metadata.cjs`, usando o SHA exato de `main` e a versão aprovada.
 4. Somente depois da autorização explícita, crie a tag/release e envie os artefatos revisados pela operação manual. Não reutilize tag ou substitua release existente.

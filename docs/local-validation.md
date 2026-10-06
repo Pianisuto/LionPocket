@@ -2,24 +2,35 @@
 
 GitHub Actions está desativado nas configurações do repositório. Os workflows automáticos e de publicação foram removidos; pushes, PRs e tags não iniciam jobs pagos. Não reative ou execute Actions sem uma nova decisão explícita do proprietário.
 
-## Comandos e hooks
+## Comandos e hooks rápidos
 
 ```sh
-npm ci                    # instala também os hooks deste checkout
-npm run validate:plan       # mostra a cobertura sem executar testes
+npm ci                     # instala também os hooks deste checkout
+npm run validate:plan      # mostra a cobertura sem executar testes
 git add <arquivos>
-npm run validate:local      # pipeline completo deste host Linux x64
+npm run validate:local     # checks rápidos: deadline de 55 segundos
 git commit -m "..."
 git push
 ```
 
-`pre-commit` e `pre-push` chamam o mesmo pipeline. Os hooks recusam mudanças não staged e arquivos novos não staged, porque testar um conteúdo diferente do commit não valida o que será enviado. No push, o index precisa corresponder a HEAD e as referências enviadas precisam apontar para o commit testado; outra branch deve ser validada no seu próprio checkout.
+`pre-commit` e `pre-push` executam somente metadados de release, testes offline dos workspaces, tipos, lint e whitespace. Há deadline de **55 segundos**: um processo travado é encerrado e o hook falha sem aprovar. Não há fallback para testes pesados. Esse limite protege o tempo de espera; não transforma timeout em resultado verde. A duração normal depende da máquina e das dependências já instaladas.
 
-Uma execução aprovada gera recibo em `.git/local-validation/receipt.json`, com hash de todos os arquivos versionados/novos, runtime e cobertura. Commit e push reaproveitam o recibo por até 24 horas **somente se os bytes, permissões executáveis e runtime forem iguais**. Alteração, falha, mudança de runtime ou expiração exige nova execução completa. Um teste parcial não emite recibo. Essa reutilização evita repetir os mesmos builds entre um commit e seu push.
+Os hooks não iniciam Docker, Keycloak, emuladores, Gradle, instaladores ou empacotamento. Recusam mudanças/arquivos novos não staged; no push, index e referências enviadas precisam corresponder a HEAD, para testar o conteúdo que será enviado.
 
-`npm run hooks:install` reinstala os hooks. O instalador recusa substituir uma configuração personalizada de `core.hooksPath`. Logs ficam em `.git/local-validation/`; nenhum recibo/log é enviado ao repositório. Uma execução manual de `validate:local` sempre testa novamente e invalida o recibo anterior antes de começar. Não use `--no-verify` para contornar falhas.
+Uma aprovação rápida gera `.git/local-validation/quick-receipt.json`, com hash dos arquivos/permissões, runtime Node e cobertura efetivamente executada. Commit e push reaproveitam esse recibo por até 24 horas somente para conteúdo/runtime idênticos. Alteração, falha ou expiração exige apenas os checks rápidos novamente. O recibo rápido não afirma cobertura de integração ou instalação nativa; fica separado do recibo completo.
 
-## Cobertura
+`npm run hooks:install` reinstala os hooks e recusa substituir `core.hooksPath` personalizado. Logs/recibos ficam em `.git/local-validation/` e não são enviados ao repositório. Uma execução manual de `validate:local` sempre testa novamente. Não use `--no-verify` para contornar falhas.
+
+## Ensaios completos sob demanda
+
+```sh
+npm run validate:full       # pipeline Linux/Android completo, cerca de 15 minutos neste host com caches
+npm run validate:android    # somente Android, em AVD próprio descartável
+```
+
+Execute os ensaios completos quando relevantes para mudanças de infraestrutura, protocolo/instalação nativa, Android ou preparação de release. Não são exigidos a cada commit/push e nunca são iniciados automaticamente pelos hooks. `validate:checks` é um alias dos checks rápidos. A etapa Android isolada não emite recibo completo. Os builds TypeScript necessários aos testes offline permanecem no perfil rápido; APK, Electron e pacotes de distribuição ficam no ensaio completo.
+
+## Cobertura do ensaio completo
 
 | Etapa | Execução local |
 | --- | --- |
@@ -33,15 +44,19 @@ Uma execução aprovada gera recibo em `.git/local-validation/receipt.json`, com
 
 O teste de pacote Linux monta o checkout somente para leitura e instala o DEB dentro do container. O sandbox Chromium de root é desativado somente nesse ambiente de teste, protegido pelo isolamento externo do container; não muda configuração do produto. O Android cria seu próprio AVD, escolhe porta livre, confere nome/serial e `ro.kernel.qemu`, e remove somente esse recurso. Não usa telefone conectado nem AVD pessoal, não desinstala app pessoal e não limpa banco financeiro do usuário. O runner não publica binários, tags, releases ou mensagens externas.
 
-## Pré-requisitos Linux
+## Pré-requisitos
 
-- Linux x64, Node 24+, npm, Git, Python 3, Docker Engine/Compose acessível ao usuário e KVM (`/dev/kvm`).
+Os checks rápidos precisam apenas de Node 24+, npm, Git e dependências instaladas. Não exigem Java, SDK Android ou Docker.
+
+Para `validate:full`/`validate:android` neste host:
+
+- Linux x64, Python 3, Docker Engine/Compose acessível ao usuário e KVM (`/dev/kvm`).
 - JDK 21 completo, incluindo `javac` (`JAVA_HOME` tem prioridade). O runner aceita também um JDK já instalado em `~/.cache/lionpocket-local-validation/jdk21`; caso contrário, usa o home de `java`. JRE sozinho é recusado antes dos testes. O runner não baixa/instala JDK automaticamente.
 - Android SDK em `ANDROID_HOME`/`ANDROID_SDK_ROOT`, ou `~/Android/Sdk`, com platform-tools, emulator, cmdline-tools/latest, `platforms;android-37.0`, `build-tools;37.0.0`, `ndk;27.1.12297006` e `system-images;android-36;google_apis;x86_64`, e respectivas licenças aceitas.
 - Portas 55432/18080 livres para as fixtures de integração. O runner não encerra serviços existentes para liberar portas.
 - Dependências instaladas com `npm ci`; acesso a caches/registries de npm, Gradle e imagens Docker na primeira execução. As execuções seguintes usam os caches locais.
 
-Pré-requisito ausente ou erro de teste bloqueia o hook; não vira skip silencioso nem resultado verde. Para diagnóstico, `npm run validate:checks` executa apenas testes/tipos/lint e `npm run validate:android` executa somente a etapa Android completa. Nenhum desses comandos parciais autoriza commit/push ou emite recibo completo. O pipeline completo de hooks é suportado neste host Linux; Windows precisa do ensaio separado abaixo.
+Pré-requisito ausente, erro ou timeout não vira skip silencioso nem aprovação. O ensaio completo é suportado em Linux x64; Windows precisa do procedimento separado abaixo.
 
 ## Windows descartável
 

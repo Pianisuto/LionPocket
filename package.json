@@ -19,6 +19,8 @@
     "lint": "npm run lint --workspace @lionpocket/core && npm run lint --workspace apps/desktop && npm run lint --workspace @lionpocket/mobile && npm run lint --workspace @lionpocket/sync-protocol && npm run lint --workspace @lionpocket/sync-local && npm run lint --workspace @lionpocket/sync-server",
     "typecheck": "npm run build:core && npm run typecheck --workspace apps/desktop && npm run typecheck --workspace @lionpocket/mobile && npm run typecheck --workspace @lionpocket/sync-protocol && npm run typecheck --workspace @lionpocket/sync-local && npm run typecheck --workspace @lionpocket/sync-server && npm run release:typecheck && npm run sync:self-hosted:typecheck",
     "test": "npm run build:core && npm run test --workspace @lionpocket/core && npm run test --workspace apps/desktop && npm run test --workspace @lionpocket/mobile && npm run test --workspace @lionpocket/sync-protocol && npm run test --workspace @lionpocket/sync-local && npm run test --workspace @lionpocket/sync-server && npm run test:release",
+    "test:offline": "npm run test --workspaces --if-present && npm run test:release",
+    "typecheck:offline": "npm run typecheck --workspaces --if-present && npm run release:typecheck && npm run sync:self-hosted:typecheck",
     "mobile:build:android:release": "npm run build:core && npm run build:android:release --workspace @lionpocket/mobile",
     "build:contracts": "npm run build:core",
     "build:local-sync": "npm run build --workspace @lionpocket/sync-protocol && npm run build --workspace @lionpocket/sync-local",
@@ -37,7 +39,8 @@
     "prepare": "node tools/local-validation/install-hooks.cjs",
     "hooks:install": "node tools/local-validation/install-hooks.cjs",
     "validate:local": "node tools/local-validation/run.cjs",
-    "validate:checks": "node tools/local-validation/run.cjs --checks-only",
+    "validate:full": "node tools/local-validation/run.cjs --full",
+    "validate:checks": "node tools/local-validation/run.cjs",
     "validate:android": "node tools/local-validation/run.cjs --android-only",
     "validate:plan": "node tools/local-validation/run.cjs --plan"
   }

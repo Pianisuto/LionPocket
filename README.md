@@ -123,7 +123,7 @@ Os artefatos gerados localmente ficam em `apps/desktop/out/` e não fazem parte 
 
 ### Candidatos de release
 
-`npm run validate:local` executa testes, tipos, lint, integração PostgreSQL/Keycloak, self-hosted, Linux normal/beta em containers e Android em emulador descartável, com checksums e preservação de SQLite. `npm ci` instala hooks obrigatórios de commit/push; o mesmo conteúdo já aprovado pode reutilizar um recibo recente. Instalação Windows/DPAPI exige Windows descartável e não é marcada como validada em Linux. Veja [pré-requisitos, cobertura e comandos](docs/local-validation.md). **Não publica release, tag ou binários e não usa GitHub Actions.**
+`npm run validate:local` e os hooks de commit/push executam testes offline, tipos, lint e metadados, com deadline de 55 segundos. O mesmo conteúdo aprovado pode reutilizar um recibo recente. Integração PostgreSQL/Keycloak, self-hosted, pacotes Linux normal/beta e Android em emulador descartável ficam no comando manual `npm run validate:full`; não bloqueiam cada commit. Instalação Windows/DPAPI exige Windows descartável e não é marcada como validada em Linux. Veja [pré-requisitos, cobertura e comandos](docs/local-validation.md). **Não publica release, tag ou binários e não usa GitHub Actions.**
 
 A versão de distribuição e o versionCode Android estão em `tools/release/version.json`; a versão desktop e o lockfile devem coincidir. Antes de uma próxima versão, incrementar também o versionCode além de qualquer instalação suportada, rodar `npm run release:validate` e seguir o [guia de release readiness](docs/local-first-sync-release-readiness.md). A escolha da assinatura definitiva e a publicação exigem uma decisão posterior.
 

@@ -36,8 +36,8 @@ function requireHeadMatchesIndex(root) {
   try { execFileSync('git',['diff','--cached','--quiet','HEAD'],{cwd:root,stdio:'ignore'}); }
   catch { throw new Error('Há alterações staged ainda não commitadas. O push precisa validar exatamente HEAD.'); }
 }
-function receiptMatches(receipt,fingerprint,runtime,now=Date.now()) {
-  return Boolean(receipt && receipt.formatVersion===1 && receipt.profile==='linux-android' &&
+function receiptMatches(receipt,fingerprint,runtime,now=Date.now(),profile='quick') {
+  return Boolean(receipt && receipt.formatVersion===1 && receipt.profile===profile &&
     receipt.fingerprint===fingerprint && receipt.runtime===runtime &&
     Number.isFinite(receipt.completedAt) && receipt.completedAt<=now && now-receipt.completedAt<24*60*60*1000 &&
     receipt.passed===true);
