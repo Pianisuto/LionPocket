@@ -90,8 +90,7 @@ export const FreeNowDetails = ({ freeNow }: { freeNow: FreeNow }) => {
                 {row.kind === 'start' ? '' : `${row.cents >= 0 ? '+' : '−'} ${money(Math.abs(row.cents))}`}
               </span>
               <span className="free-now__balance">
-                <small>saldo</small>
-                <strong className={row.balanceCents < 0 ? 'money-negative' : undefined}>{money(row.balanceCents)}</strong>
+                {(row.kind === 'start' || row.lowest) && <><small>saldo</small><strong className={row.balanceCents < 0 ? 'money-negative' : undefined}>{money(row.balanceCents)}</strong></>}
               </span>
             </li>
           ))}

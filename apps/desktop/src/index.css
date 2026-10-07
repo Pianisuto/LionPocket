@@ -2134,11 +2134,6 @@ strong,
   --metric-wash: var(--alert-wash);
 }
 
-.metric-card--free small {
-  color: var(--primary-ink);
-  font-weight: 600;
-}
-
 /* Detalhe do Pode gastar hoje (dentro do modal), no vocabulário dos painéis. */
 .free-now {
   --free-tone: var(--positive);
@@ -2163,7 +2158,7 @@ strong,
 }
 
 .free-now__value {
-  color: var(--free-tone);
+  color: var(--text);
   font-family: var(--font-display);
   font-size: 32px;
   font-variant-numeric: tabular-nums;
@@ -2203,13 +2198,8 @@ strong,
 .free-now__row:hover { background: var(--surface-2); }
 
 .free-now__row.is-lowest {
-  background: var(--primary-wash);
-}
-
-.free-now__row.is-lowest .date-badge {
-  border-color: transparent;
-  background: var(--primary-wash-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 38%, transparent);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
 }
 
 .free-now__today {
@@ -2240,8 +2230,8 @@ strong,
   flex: none;
   padding: 3px 9px;
   border-radius: 999px;
-  background: var(--primary-wash-strong);
-  color: var(--primary-ink);
+  background: var(--surface-3);
+  color: var(--text-soft);
   font-size: 11px;
   font-weight: 620;
   white-space: nowrap;
@@ -2320,7 +2310,7 @@ strong,
 }
 
 .free-now__sum .free-now__result dd {
-  color: var(--free-tone);
+  color: var(--text);
   font-size: 16px;
 }
 

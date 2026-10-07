@@ -242,9 +242,10 @@ describe('Livre agora in the Dashboard', () => {
     expect(content).toMatch(/Pode gastar hoje R\$.*500,00/);
     expect(content).toContain('Sem ficar no vermelho este mês. O mais apertado é 14/10.');
     expect(content).toMatch(/Hoje Em mãos recebido − pago no mês saldo R\$.*2\.000,00/);
-    expect(content).toMatch(/12 out Luz Saída prevista − R\$.*200,00 saldo R\$.*1\.800,00/);
+    expect(content).toMatch(/12 out Luz Saída prevista − R\$.{1,3}200,00 14 out/);
     expect(content).toMatch(/14 out Internet Saída prevista mais apertado − R\$.*100,00 saldo R\$.*1\.700,00/);
-    expect(content).toMatch(/15 out Freela Entrada prevista \+ R\$.*500,00 saldo R\$.*2\.200,00/);
+    expect(content).toMatch(/15 out Freela Entrada prevista \+ R\$.{1,3}500,00 20 out/);
+    expect(content.match(/saldo R\$/g)).toHaveLength(2); // só em "Em mãos" e na linha mais apertada
     expect(content).toMatch(/Menor saldo do mês \(14\/10\) R\$.*1\.700,00/);
     expect(content).toMatch(/Margem de segurança − R\$.*500,00/);
     expect(content).toMatch(/Objetivos − R\$.*700,00/);
