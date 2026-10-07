@@ -45,39 +45,56 @@ const MetricCard = ({
   </article>
 );
 
-/** Compact "Pode gastar hoje": the headline stays visible, the day-by-day path opens on demand. */
+/** "Pode gastar hoje": headline always visible, the day-by-day path and the arithmetic open on demand. */
 export const FreeNowStrip = ({ freeNow }: { freeNow: FreeNow }) => {
   const headline = freeNowHeadline(freeNow);
+  const money = (cents: number) => currency.format(cents / 100);
   return (
-    <details className="free-now">
+    <details className={headline.negative ? 'free-now free-now--short' : 'free-now'}>
       <summary className="free-now__summary">
-        <span className="free-now__label">{headline.label}</span>
-        <strong className={`free-now__value ${headline.negative ? 'money-negative' : ''}`}>{currency.format(headline.cents / 100)}</strong>
-        <small className="free-now__horizon">{headline.note}</small>
-        <span className="free-now__toggle">Ver dia a dia <ChevronDown size={15} /></span>
+        <div className="free-now__headline">
+          <span className="eyebrow">{headline.label}</span>
+          <strong className="free-now__value">{money(headline.cents)}</strong>
+          <small className="free-now__note">{headline.note}</small>
+        </div>
+        <span className="text-button free-now__toggle">Ver dia a dia <ChevronDown size={16} /></span>
       </summary>
       <div className="free-now__body">
-        <ol className="free-now__timeline">
+        <ol className="free-now__timeline" aria-label="Saldo dia a dia">
           {freeNow.timeline.map((row) => (
-            <li key={row.key} className={row.lowest ? 'is-lowest' : undefined}>
-              <span className="free-now__date">{freeNowRowDate(row, freeNow.today)}</span>
-              <span className="free-now__what">{row.kind === 'start' ? 'Em mãos (recebido − pago no mês)' : row.label}{row.lowest && <em> · mais apertado</em>}</span>
-              <span className={row.kind === 'start' || row.cents >= 0 ? 'free-now__delta' : 'free-now__delta money-negative'}>
-                {row.kind === 'start' ? '' : `${row.cents >= 0 ? '+' : '−'} ${currency.format(Math.abs(row.cents) / 100)}`}
+            <li key={row.key} className={`free-now__row free-now__row--${row.kind}${row.lowest ? ' is-lowest' : ''}`}>
+              <span className="date-badge">
+                {row.kind === 'start'
+                  ? <strong className="free-now__today">Hoje</strong>
+                  : <><strong>{formatDate(row.date, 'dd')}</strong><small>{formatDate(row.date, 'MMM')}</small></>}
               </span>
-              <span className={row.balanceCents < 0 ? 'free-now__balance money-negative' : 'free-now__balance'}>{currency.format(row.balanceCents / 100)}</span>
+              <span className="free-now__copy">
+                <strong>{row.kind === 'start' ? 'Em mãos' : row.label}</strong>
+                <small>{row.kind === 'start' ? 'recebido − pago no mês' : row.kind === 'income' ? 'Entrada prevista' : 'Saída prevista'}</small>
+              </span>
+              {row.lowest && <span className="free-now__badge">mais apertado</span>}
+              <span className={`free-now__delta ${row.kind === 'income' ? 'money-positive' : 'money-negative'}`}>
+                {row.kind === 'start' ? '' : `${row.cents >= 0 ? '+' : '−'} ${money(Math.abs(row.cents))}`}
+              </span>
+              <span className="free-now__balance">
+                <small>saldo</small>
+                <strong className={row.balanceCents < 0 ? 'money-negative' : undefined}>{money(row.balanceCents)}</strong>
+              </span>
             </li>
           ))}
         </ol>
-        <dl className="free-now__lines">
-          {freeNowComposition(freeNow).map((line) => (
-            <div key={line.key}>
-              <dt>{line.label}</dt>
-              <dd className={line.cents < 0 ? 'money-negative' : undefined}>{currency.format(line.cents / 100)}</dd>
-            </div>
-          ))}
-          <div className="free-now__result"><dt>{headline.label}</dt><dd className={headline.negative ? 'money-negative' : undefined}>{currency.format(headline.cents / 100)}</dd></div>
-        </dl>
+        <aside className="free-now__sum">
+          <span className="eyebrow">A conta</span>
+          <dl>
+            {freeNowComposition(freeNow).map((line) => (
+              <div key={line.key}>
+                <dt>{line.label}</dt>
+                <dd className={line.cents < 0 ? 'is-minus' : undefined}>{line.cents < 0 ? '− ' : ''}{money(Math.abs(line.cents))}</dd>
+              </div>
+            ))}
+            <div className="free-now__result"><dt>{headline.label}</dt><dd>{money(headline.cents)}</dd></div>
+          </dl>
+        </aside>
       </div>
     </details>
   );
