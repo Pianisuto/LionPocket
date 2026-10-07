@@ -52,8 +52,8 @@ Livre agora só existe para o **mês atual** (`calculateFreeNow` devolve `null` 
 
 - **Saldo projetado** continua sendo o card principal. Sem proteções, a dica original (“Se tudo ocorrer como planejado”) fica igual. Com proteções, a dica mostra “R$ … após margem de segurança”, “… após reforços dos objetivos” ou “… após proteções”.
 - **Manchete**: “Pode gastar hoje: R$ X” com a nota “Sem ficar no vermelho este mês. O mais apertado é 26/10.”. Quando o resultado é negativo, vira “Faltam R$ X” com “Pelo que está planejado, o saldo não cobre tudo até 26/10.” (a frase acrescenta “e contando suas proteções” quando há margem ou reforços). Se o ponto mais apertado é hoje, a data é omitida.
-- **Ver dia a dia**: lista a linha do tempo (Hoje → cada conta/entrada com o saldo depois dela, com “mais apertado” na linha marcada) e, abaixo, a conta final: menor saldo do mês, − margem, − objetivos (omitidos quando zero) e o resultado.
-- **Desktop**: uma faixa fina abaixo dos quatro cards (não é um quinto card), expansível.
+- **Detalhe (modal no Desktop, “Ver dia a dia” no Android)**: lista a linha do tempo (Hoje → cada conta/entrada com o saldo depois dela, com “mais apertado” na linha marcada) e, abaixo, a conta final: menor saldo do mês, − margem, − objetivos (omitidos quando zero) e o resultado.
+- **Desktop**: quinto card da grade de métricas (“Pode gastar hoje” + valor; “Faltam” em tom de atenção quando negativo). É um botão: ao clicar abre uma modal com a manchete, “Seu saldo, dia a dia” (selo de data, nome, valor com sinal e saldo, “mais apertado” destacado) e o painel “A conta”. Em janelas de 1241–1500 px a grade usa três colunas (o card ocupa dois espaços) e, abaixo disso, duas.
 - **Android**: o mesmo bloco, com “Ver dia a dia”, dentro do card de saldo existente e na Visão geral.
 - Valor em falta aparece com a cor de atenção de cada plataforma.
 

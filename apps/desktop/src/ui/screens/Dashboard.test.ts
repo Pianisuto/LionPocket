@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { Overview, Transaction } from '@lionpocket/core/types';
+import type { FreeNow, Overview, Transaction } from '@lionpocket/core/types';
 import { monthlyProtectionOverview } from '@lionpocket/core/free-now';
-import { Dashboard, groupUpcoming } from './Dashboard';
+import { Dashboard, FreeNowDetails, groupUpcoming } from './Dashboard';
 
 const transaction = (overrides: Partial<Transaction>): Transaction => ({
   id: 'transaction',
@@ -221,17 +221,26 @@ describe('Livre agora in the Dashboard', () => {
   const text = (data: Overview) => renderToStaticMarkup(createElement(Dashboard, { overview: data, loading: false, onNavigate: () => undefined, onEditTransaction: () => undefined, onSettleTransactions: async () => true })).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   const html = (data: Overview) => renderToStaticMarkup(createElement(Dashboard, { overview: data, loading: false, onNavigate: () => undefined, onEditTransaction: () => undefined, onSettleTransactions: async () => true }));
 
-  it('keeps the four metric cards and adds a single compact strip, with Saldo projetado as the main card', () => {
+  const details = (data: Overview) => renderToStaticMarkup(createElement(FreeNowDetails, { freeNow: data.freeNow as FreeNow }));
+  const detailsText = (data: Overview) => details(data).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+
+  it('adds Pode gastar hoje as a fifth card (a button), with Saldo projetado still the main card', () => {
     const markup = html(overviewFor(50000, 70000));
     expect(markup.match(/<article class="metric-card /g)).toHaveLength(4);
-    expect(markup.match(/class="free-now"/g)).toHaveLength(1);
+    expect(markup.match(/<button type="button" class="metric-card metric-card--free"/g)).toHaveLength(1);
+    expect(markup).toContain('aria-haspopup="dialog"');
     expect(text(overviewFor(50000, 70000))).toMatch(/Saldo projetado R\$.*1\.800,00 R\$.*600,00 após proteções/);
+    expect(text(overviewFor(50000, 70000))).toMatch(/Pode gastar hoje R\$.*500,00 Ver o dia a dia do mês/);
   });
-  it('shows the headline, the day-by-day timeline and the composition', () => {
-    const content = text(overviewFor(50000, 70000));
+  it('keeps the detail out of the page until the card is opened', () => {
+    const markup = html(overviewFor(50000, 70000));
+    expect(markup).not.toContain('role="dialog"');
+    expect(markup).not.toContain('free-now__timeline');
+  });
+  it('shows the headline, the day-by-day timeline and the composition in the modal', () => {
+    const content = detailsText(overviewFor(50000, 70000));
     expect(content).toMatch(/Pode gastar hoje R\$.*500,00/);
     expect(content).toContain('Sem ficar no vermelho este mês. O mais apertado é 14/10.');
-    expect(content).toContain('Ver dia a dia');
     expect(content).toMatch(/Hoje Em mãos recebido − pago no mês saldo R\$.*2\.000,00/);
     expect(content).toMatch(/12 out Luz Saída prevista − R\$.*200,00 saldo R\$.*1\.800,00/);
     expect(content).toMatch(/14 out Internet Saída prevista mais apertado − R\$.*100,00 saldo R\$.*1\.700,00/);
@@ -241,29 +250,32 @@ describe('Livre agora in the Dashboard', () => {
     expect(content).toMatch(/Objetivos − R\$.*700,00/);
   });
   it('marks exactly one row as the tightest', () => {
-    expect(html(overviewFor(50000, 70000)).match(/ is-lowest"/g)).toHaveLength(1);
+    expect(details(overviewFor(50000, 70000)).match(/ is-lowest"/g)).toHaveLength(1);
   });
   it('works without protections: only the lowest balance line, original projected hint', () => {
-    const content = text(overviewFor(0, 0));
+    const content = detailsText(overviewFor(0, 0));
     expect(content).toMatch(/Pode gastar hoje R\$.*1\.700,00/);
-    expect(content).toContain('Se tudo ocorrer como planejado');
+    expect(text(overviewFor(0, 0))).toContain('Se tudo ocorrer como planejado');
     expect(content).not.toContain('Margem de segurança');
     expect(content).not.toContain('Objetivos −');
   });
-  it('shows a negative value with the attention colour instead of zero', () => {
-    const markup = html(overviewFor(150000, 70000));
-    expect(markup).toMatch(/class="free-now free-now--short"/);
-    expect(markup).toMatch(/free-now__value">R\$.*500,00/);
-    expect(text(overviewFor(150000, 70000))).toMatch(/Faltam R\$.*500,00/);
+  it('shows what is missing, with the attention tone, instead of a negative or zero value', () => {
+    const data = overviewFor(150000, 70000);
+    expect(html(data)).toMatch(/class="metric-card metric-card--free metric-card--short"/);
+    expect(text(data)).toMatch(/Faltam R\$.*500,00/);
+    expect(details(data)).toMatch(/class="free-now free-now--short"/);
+    expect(detailsText(data)).toMatch(/Faltam R\$.*500,00/);
+    expect(detailsText(data)).toContain('contando suas proteções');
   });
-  it('does not render the strip for other months or old overviews', () => {
-    expect(html({ ...overviewFor(0, 0), freeNow: null })).not.toContain('free-now');
-    const { freeNow: _unused, ...legacy } = overviewFor(0, 0);
-    expect(html(legacy)).not.toContain('free-now');
+  it('does not render the card for other months or old overviews', () => {
+    expect(html({ ...overviewFor(0, 0), freeNow: null })).not.toContain('metric-card--free');
+    const legacy: Partial<Overview> = overviewFor(0, 0);
+    delete legacy.freeNow;
+    expect(html(legacy as Overview)).not.toContain('metric-card--free');
   });
   it('says so when the tightest day is today', () => {
     const calm = monthlyProtectionOverview([items[0], items[4]], [], [], null, '2026-10', '2026-10-10', 0);
-    expect(text({ ...overviewFor(0, 0), ...calm })).toContain('Sem ficar no vermelho este mês.');
-    expect(text({ ...overviewFor(0, 0), ...calm })).not.toContain('O mais apertado é');
+    expect(detailsText({ ...overviewFor(0, 0), ...calm })).toContain('Sem ficar no vermelho este mês.');
+    expect(detailsText({ ...overviewFor(0, 0), ...calm })).not.toContain('O mais apertado é');
   });
 });
