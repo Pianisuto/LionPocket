@@ -500,28 +500,34 @@ strong,
   width: 16px;
   height: 16px;
   place-items: center;
-  color: var(--positive);
+  color: var(--text-muted);
   transition: color 600ms ease-in-out;
 }
 
-.local-badge__indicator--syncing {
+.local-badge__indicator--positive {
+  color: var(--positive);
+}
+
+.local-badge__indicator--pending {
   color: var(--gold);
+}
+
+.local-badge__indicator--attention {
+  color: var(--negative);
+}
+
+.local-badge__indicator--alert {
+  color: var(--alert);
+}
+
+.local-badge__indicator--configuring {
+  color: var(--violet);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .local-badge__indicator {
     transition: none;
   }
-}
-
-.local-badge__dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 4px var(--positive-wash);
-  animation: pulse-soft 2.6s ease-in-out infinite;
 }
 
 .local-badge strong {

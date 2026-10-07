@@ -19,11 +19,12 @@ import type {
   Transaction,
 } from '@lionpocket/core/types';
 import type { PairingLinkEvent, UpdateInfo } from './api';
-import type { SyncStatus } from '@lionpocket/sync-local';
+import type { SyncActivity } from '@lionpocket/sync-local';
 import { PairingOnboarding } from './ui/PairingOnboarding';
 import { Modal, MonthPicker } from './ui/components';
 import { Leo } from './ui/Leo';
 import { TitleBar } from './ui/TitleBar';
+import { SyncStatusBadge } from './ui/SyncStatusBadge';
 import { useTheme } from './ui/theme';
 import { GoalForm, InstallmentForm, RecurringForm, TransactionForm } from './ui/forms';
 import { currentMonthIso, monthLabel, todayIso } from './ui/format';
@@ -100,8 +101,7 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [showPriorities, setShowPriorities] = useState(readPriorityVisibility);
-  const [syncPhase, setSyncPhase] = useState<SyncStatus['phase'] | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncActivity, setSyncActivity] = useState<SyncActivity | null>(null);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -163,8 +163,7 @@ export default function App() {
       const revision = ++request;
       const status = await window.lionPocket.syncStatus?.();
       if (!active || revision !== request || !status) return;
-      setSyncPhase(status.phase);
-      setIsSyncing(status.phase === 'bound' && status.activity === 'syncing');
+      setSyncActivity(status.activity);
       if (refreshViews && status.lastCompletedAt && status.lastCompletedAt !== lastCompleted && status.activity !== 'syncing') {
         lastCompleted = status.lastCompletedAt;
         changed();
@@ -238,30 +237,7 @@ export default function App() {
             <SettingsIcon size={20} />
             <span>Configurações</span>
           </button>
-          <div className="local-badge" role="status">
-            <span
-              className={`local-badge__indicator${isSyncing ? ' local-badge__indicator--syncing' : ''}`}
-              aria-hidden="true"
-            >
-              {isSyncing
-                ? <RefreshCw size={16} className="sync-spinning" />
-                : <span className="local-badge__dot" />}
-            </span>
-            <div>
-              <strong>Seus dados</strong>
-              <small>
-                {isSyncing
-                  ? 'Sincronizando…'
-                  : syncPhase === 'bound'
-                    ? 'Sincronização criptografada'
-                    : syncPhase === 'local'
-                      ? 'Somente neste computador'
-                      : syncPhase
-                        ? 'Configurando sincronização'
-                        : 'Salvos neste computador'}
-              </small>
-            </div>
-          </div>
+          <SyncStatusBadge activity={syncActivity} />
         </div>
       </aside>
 
