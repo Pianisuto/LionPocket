@@ -501,6 +501,17 @@ strong,
   height: 16px;
   place-items: center;
   color: var(--positive);
+  transition: color 600ms ease-in-out;
+}
+
+.local-badge__indicator--syncing {
+  color: var(--gold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .local-badge__indicator {
+    transition: none;
+  }
 }
 
 .local-badge__dot {
@@ -508,7 +519,7 @@ strong,
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--positive);
+  background: currentColor;
   box-shadow: 0 0 0 4px var(--positive-wash);
   animation: pulse-soft 2.6s ease-in-out infinite;
 }

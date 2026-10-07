@@ -239,7 +239,10 @@ export default function App() {
             <span>Configurações</span>
           </button>
           <div className="local-badge" role="status">
-            <span className="local-badge__indicator" aria-hidden="true">
+            <span
+              className={`local-badge__indicator${isSyncing ? ' local-badge__indicator--syncing' : ''}`}
+              aria-hidden="true"
+            >
               {isSyncing
                 ? <RefreshCw size={16} className="sync-spinning" />
                 : <span className="local-badge__dot" />}
