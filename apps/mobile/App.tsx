@@ -355,10 +355,7 @@ function AppContent(): React.JSX.Element {
               <Icon name="home" color={colors.primaryInk} size={20} />
             </View>
             <Text
-              style={[
-                layout.balance,
-                summary.realizedBalance < 0 && { color: colors.negative },
-              ]}
+              style={layout.metricValue}
               adjustsFontSizeToFit
               numberOfLines={1}
             >
@@ -367,10 +364,9 @@ function AppContent(): React.JSX.Element {
             <View style={layout.projected}>
               <Text style={styles.muted}>Projetado</Text>
               <Text
-                style={[
-                  layout.projectedValue,
-                  summary.projectedBalance < 0 && styles.danger,
-                ]}
+                style={layout.metricValue}
+                adjustsFontSizeToFit
+                numberOfLines={1}
               >
                 {money(summary.projectedBalance)}
               </Text>
@@ -383,7 +379,7 @@ function AppContent(): React.JSX.Element {
                 <Text style={styles.label}>Entradas</Text>
               </View>
               <Text
-                style={[layout.metricValue, styles.positive]}
+                style={layout.metricValue}
                 adjustsFontSizeToFit
                 numberOfLines={1}
               >
@@ -399,7 +395,7 @@ function AppContent(): React.JSX.Element {
                 <Text style={styles.label}>Saídas</Text>
               </View>
               <Text
-                style={[layout.metricValue, styles.danger]}
+                style={layout.metricValue}
                 adjustsFontSizeToFit
                 numberOfLines={1}
               >
@@ -1109,13 +1105,6 @@ const createLayout = (colors: Palette) =>
       gap: 12,
       overflow: 'hidden',
     },
-    balance: {
-      fontFamily: fonts.display,
-      fontSize: 36,
-      letterSpacing: -1,
-      color: colors.text,
-      fontVariant: ['tabular-nums'],
-    },
     projected: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -1125,11 +1114,6 @@ const createLayout = (colors: Palette) =>
       borderTopWidth: 1,
       borderTopColor: colors.lineStrong,
       flexWrap: 'wrap',
-    },
-    projectedValue: {
-      color: colors.primaryInk,
-      fontFamily: fonts.bold,
-      fontSize: 14,
     },
     metrics: { flexDirection: 'row', gap: 10 },
     metric: {
@@ -1143,9 +1127,12 @@ const createLayout = (colors: Palette) =>
       backgroundColor: colors.surface,
     },
     metricValue: {
-      fontFamily: fonts.bold,
-      fontSize: 19,
+      fontFamily: fonts.display,
+      fontSize: 25,
+      letterSpacing: -0.75,
+      color: colors.text,
       fontVariant: ['tabular-nums'],
+      maxWidth: '100%',
     },
     segments: {
       backgroundColor: colors.surface,
