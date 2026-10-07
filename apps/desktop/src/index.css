@@ -5326,3 +5326,12 @@ label.settings-row__text {
   .sync-reset-footer > .button { width: 100%; }
   .sync-choice { padding: 14px; }
 }
+
+.monthly-planning { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 24px; flex-wrap: wrap; }
+.monthly-planning__copy { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 240px; }
+.monthly-planning__copy > svg { color: var(--text-muted); flex-shrink: 0; }
+.monthly-planning__copy small, .monthly-planning__copy p { color: var(--text-muted); }
+.monthly-planning__copy h2 { font-size: 16px; margin: 5px 0; }
+.monthly-planning__copy p { font-size: 13px; margin: 0; }
+.monthly-planning__action { display: flex; align-items: center; gap: 18px; }
+.monthly-planning__action strong { font-size: 20px; white-space: nowrap; }

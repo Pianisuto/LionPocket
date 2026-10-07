@@ -1,3 +1,4 @@
+import { MonthlyPlanningSection } from '../MonthlyPlanningSection';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, CalendarSync, Pencil, Plus, Power, Trash2 } from 'lucide-react';
 import type { RecurringExpense } from '@lionpocket/core/types';
@@ -33,7 +34,8 @@ const amountSuffix = (item: RecurringExpense) => {
   return '';
 };
 
-export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
+export const Recurring = ({ month, refreshKey, onAdd, onEdit, onChanged, notify }: {
+  month: string;
   refreshKey: number;
   onAdd: () => void;
   onEdit: (item: RecurringExpense) => void;
@@ -94,6 +96,7 @@ export const Recurring = ({ refreshKey, onAdd, onEdit, onChanged, notify }: {
         <div><span>Previsibilidade</span><h3 className="recurring-summary"><b><data className="money-positive" value={totals.income}>{currency.format(totals.income)}</data> em entradas</b><b><data className="money-negative" value={totals.expense}>{currency.format(totals.expense)}</data> em saídas</b></h3><p>Organize frequências fixas, flexíveis ou manuais e ajuste cada ocorrência quando precisar.</p></div>
         <button className="button button--primary" onClick={onAdd}><Plus size={18} /> Nova recorrência</button>
       </div>
+      <MonthlyPlanningSection key={month} month={month} refreshKey={refreshKey} onChanged={onChanged} notify={notify} />
       {!loading && items.length > 0 && <div className="recurring-groups">
         {groups.map((group) => group.items.length > 0 && (
           <section className="recurring-group" key={group.kind}>

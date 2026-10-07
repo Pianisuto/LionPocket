@@ -153,6 +153,7 @@ describe.skipIf(!enabled)(
       let db: LocalSyncDatabase;
       let write: () => Promise<void>, rows: () => Promise<unknown[]>;
       let backupTo: (path: string) => Promise<void>;
+      let savePlanning: (month: string, safetyMarginCents: number) => Promise<void>;
       if (dialect === 'desktop') {
         const bank = new LionPocketDatabase(':memory:');
         backupTo = async path => {bank.db.prepare('VACUUM INTO ?').run(path);};
@@ -171,6 +172,7 @@ describe.skipIf(!enabled)(
           });
         };
         rows = async () => bank.listTransactions({ month: '2026-10' });
+        savePlanning = async (month, safetyMarginCents) => { bank.saveMonthlyPlanning({ month, safetyMarginCents }); };
       } else {
         const bank = sqliteTestConnection();
         backupTo = async path => {bank.sqlite.prepare('VACUUM INTO ?').run(path);};
@@ -190,6 +192,7 @@ describe.skipIf(!enabled)(
             status: 'planned',
           });
         rows = () => repo.list({ month: '2026-10' });
+        savePlanning = (month, safetyMarginCents) => repo.saveMonthlyPlanning({ month, safetyMarginCents });
       }
       let saved: SyncSaved | null = null;
       const secrets = new TestSecrets(),
@@ -242,6 +245,7 @@ describe.skipIf(!enabled)(
         profile: () => saved!,
         restart,
         backupTo,
+        savePlanning,
       };
     }
     async function send(
@@ -381,6 +385,32 @@ describe.skipIf(!enabled)(
         b.sync.setForeground(false);
       }, 30000);
     }
+    it.each([['desktop', 'android'], ['android', 'desktop']] as const)('%s → %s syncs monthly planning via encrypted server transport, including clear and redefine', async (from, to) => {
+      const a = await owner(from), b = await client(to);
+      await a.savePlanning('2026-10', 50000);
+      await a.savePlanning('2026-11', 30000);
+      await a.sync.sync();
+      await b.sync.connectInvitation((await a.sync.createInvitation()).link);
+      await expect.poll(async () => (await a.sync.status()).pairingRequests.length, { timeout: 15000 }).toBe(1);
+      await a.sync.approve(b.profile().profile!.deviceId);
+      await expect.poll(async () => (await b.sync.status()).phase, { timeout: 15000 }).toBe('bound');
+      await b.sync.sync();
+      const planning = (c: typeof a) => c.options.db.read('SELECT month,safety_margin_cents FROM monthly_planning ORDER BY month');
+      expect(await planning(b)).toEqual([{ month: '2026-10', safety_margin_cents: 50000 }, { month: '2026-11', safety_margin_cents: 30000 }]);
+      await b.savePlanning('2026-10', 60000); await b.sync.sync(); await a.sync.sync();
+      expect(await planning(a)).toEqual([{ month: '2026-10', safety_margin_cents: 60000 }, { month: '2026-11', safety_margin_cents: 30000 }]);
+      await a.savePlanning('2026-10', 0); await a.sync.sync(); await b.sync.sync();
+      expect((await planning(b))[0].safety_margin_cents).toBe(0);
+      await b.savePlanning('2026-10', 12345); await b.sync.sync(); await a.sync.sync();
+      expect(await planning(a)).toEqual(await planning(b));
+      const identities = "SELECT local_id,object_id FROM sync_identity WHERE entity_type='monthlyPlanning' ORDER BY local_id";
+      expect(await a.options.db.read(identities)).toEqual(await b.options.db.read(identities));
+      const stored = canonicalStringify((await pool.query('SELECT * FROM sync_commits WHERE vault_id=$1', [a.profile().profile!.pin.vaultId])).rows);
+      expect(stored).not.toContain('safetyMarginCents');
+      expect(stored).not.toContain('monthlyPlanning');
+      a.sync.setForeground(false); b.sync.setForeground(false);
+    }, 30000);
+
     it('E2E UX drives the actual Desktop and Mobile panels: exactly four human actions and no technical intermediate button', async () => {
       const a = await owner(),
         b = await client('android');

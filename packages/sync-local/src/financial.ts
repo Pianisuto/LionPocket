@@ -423,6 +423,8 @@ export function* snapshotFor(
     }
   }
   switch (type) {
+    case 'monthlyPlanning':
+      return { month: String(row.month), safetyMarginCents: Number(row.safety_margin_cents) };
     case 'category':
       return {
         name: String(row.name),
@@ -728,7 +730,7 @@ export function* recordFinancialRevision(
     type,
     localId,
     uuid,
-    type.endsWith('PriorityList') ? String(state.vault_id) : undefined,
+    type.endsWith('PriorityList') || type === 'monthlyPlanning' ? String(state.vault_id) : undefined,
   );
   const heads = (yield sql(
     'SELECT revision_id FROM sync_heads WHERE object_id=? ORDER BY revision_id',
@@ -1103,6 +1105,17 @@ export function* startFinancialBaseline(
         ]);
     if (type.endsWith('PriorityList')) continue;
     for (const row of rows) {
+      if (type === 'monthlyPlanning') {
+        // A fresh baseline after detach uses the new vault namespace for the
+        // same logical month. Old transport history has already been archived.
+        const expected = derivedId(p.vaultId, `${type}:${row.id}`);
+        const [known] = yield sql('SELECT object_id FROM sync_identity WHERE entity_type=? AND local_id=?', [type, row.id]);
+        if (known && known.object_id !== expected) {
+          if ((yield sql('SELECT revision_id FROM sync_revisions WHERE object_id=? LIMIT 1', [known.object_id])).length)
+            throw new Error('baseline_unavailable');
+          yield sql('UPDATE sync_identity SET object_id=? WHERE entity_type=? AND local_id=?', [expected, type, row.id]);
+        }
+      }
       if (['category', 'paymentMethod', 'card'].includes(type)) {
         const value = yield* snapshotFor(type, row, uuid);
         yield* identityFor(type, String(row.id), () =>

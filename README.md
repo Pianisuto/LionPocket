@@ -84,6 +84,8 @@ O APK release inclui o JavaScript e fica em `apps/mobile/android/app/build/outpu
 
 As migrations são aditivas e transacionais: a versão 2 acrescenta cadastros e vínculos opcionais; a versão 3 acrescenta planejamento e identidade de ocorrências sem recriar a tabela de lançamentos. Os registros da base anterior permanecem disponíveis. Exclusões são lógicas; consultas e totais ignoram registros excluídos. Os testes mobile usam o SQLite nativo do Node (`node:sqlite`), inclusive para atualizar um banco da versão 1 e verificar rollback. Use Node 22.13+ ou 24 para essas verificações.
 
+A [margem de segurança mensal](docs/monthly-planning.md) pode ser configurada em Recorrências nas duas plataformas. É planejamento para imprevistos: não cria despesas nem altera o saldo real. O Dashboard mostra o valor após margem apenas como informação auxiliar do saldo projetado.
+
 Consulte [o roteiro de uso diário](docs/mobile-daily-finance.md) e [as regras e a validação do planejamento](docs/mobile-planning.md). O botão **Hoje** retorna ao mês atual; deslizar a lista para baixo atualiza os dados locais. Datas são preenchidas no formato `AAAA-MM-DD` e valores aceitam vírgula ou ponto decimal (ex.: `125,50`).
 
 A [proposta de sincronização local-first](docs/local-first-sync-proposal.md) registra o desenho para desktop/mobile, self-hosted e Lion Pocket Cloud. A [Etapa 0](docs/local-first-sync-stage0.md), a fundação local e o provisioning evoluíram para o [fluxo manual desktop ↔ Android da Etapa 1](docs/local-first-sync-stage1-transport.md), restrito a bancos sintéticos e opt-in de desenvolvimento. A sincronização continua desativada por padrão.

@@ -261,7 +261,7 @@ export function* applyCommit(
           : 'manualTransaction',
         op.revision.entityType === 'recurringPriorityList'
           ? 'recurring-priorities'
-          : op.revision.entityType === 'monthlyPriorityList' &&
+          : ['monthlyPriorityList', 'monthlyPlanning'].includes(op.revision.entityType) &&
               op.revision.action === 'put'
             ? String((op.revision.snapshot as { month: string }).month)
             : slots[0]

@@ -54,3 +54,7 @@ export const getMonthlyOverview = async (month: string) =>
   (await repository()).monthlyOverview(month);
 export const completeStandardCategories = async () =>
   (await repository()).completeStandardCategories();
+
+export const getMonthlyPlanning = async (month: string) => (await repository()).getMonthlyPlanning(month);
+export const saveMonthlyPlanning = async (input: import('@lionpocket/core').MonthlyPlanning) =>
+  (await repository()).saveMonthlyPlanning(input);

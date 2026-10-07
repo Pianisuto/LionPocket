@@ -1,4 +1,4 @@
-import { syncMigration, transportMigration, captureFinancial, financialMigration, financialTriggers, financialTableTypes, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type LocalSyncDatabase, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
+import { monthlyPlanningMigration, syncMigration, transportMigration, captureFinancial, financialMigration, financialTriggers, financialTableTypes, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type LocalSyncDatabase, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { initializeLocalSchema, hasCurrentFinancialSchema, assertSupportedDesktopSchema } from './migrationProtection';
@@ -36,6 +36,7 @@ import {
   todayIso,
 } from '@lionpocket/core/finance';
 import { fixedRecurringDates, planInstallmentUpdate, recurringEffectiveDate, recurringOccurrence, rollingRecurringDates, type RecurringSchedule } from '@lionpocket/core/planning';
+import { monthlyPlanningBalance, validateMonthlyPlanning, type MonthlyPlanning } from '@lionpocket/core';
 import { expenseCountsInMonth } from '@lionpocket/core/transactions';
 
 type Row = Record<string, string | number | null>;
@@ -522,6 +523,16 @@ export class LionPocketDatabase {
       this.db.exec(
         "INSERT INTO migrations(version, applied_at) VALUES (14, datetime('now'))",
       );
+    }
+    if (!this.db.prepare('SELECT 1 FROM migrations WHERE version = 15').get()) {
+      for (const sql of monthlyPlanningMigration) this.db.exec(sql);
+      const columns = Object.fromEntries(Object.keys(financialTableTypes).map(t =>
+        [t, this.db.prepare(`PRAGMA table_info(${t})`).all().map(r => String(r.name))]));
+      for (const table of Object.keys(financialTableTypes))
+        for (const action of ['insert', 'update', 'delete'])
+          this.db.exec(`DROP TRIGGER IF EXISTS sync_capture_${table}_${action}`);
+      for (const sql of financialTriggers('desktop', columns)) this.db.exec(sql);
+      this.db.exec("INSERT INTO migrations VALUES (15, datetime('now'))");
     }
   }
 
@@ -2085,6 +2096,20 @@ export class LionPocketDatabase {
     );
   }
 
+  getMonthlyPlanning(month: string): MonthlyPlanning | null {
+    validateMonthlyPlanning({ month, safetyMarginCents: 0 });
+    const row = this.db.prepare('SELECT safety_margin_cents FROM monthly_planning WHERE month=? AND deleted_at IS NULL').get(month);
+    return row ? { month, safetyMarginCents: Number(row.safety_margin_cents) } : null;
+  }
+
+  saveMonthlyPlanning(input: MonthlyPlanning): void {
+    validateMonthlyPlanning(input);
+    const timestamp = now();
+    this.db.prepare(`INSERT INTO monthly_planning VALUES(?,?,?,?,?,NULL)
+      ON CONFLICT(id) DO UPDATE SET safety_margin_cents=excluded.safety_margin_cents,updated_at=excluded.updated_at,deleted_at=NULL`)
+      .run(input.month, input.month, input.safetyMarginCents, timestamp, timestamp);
+  }
+
   private monthSummary(month: string): MonthSummary {
     const transactions = this.listTransactions({ month });
     let plannedIncome = 0;
@@ -2160,8 +2185,10 @@ export class LionPocketDatabase {
       .sort((left, right) => (right.settledDate ?? right.dueDate).localeCompare(left.settledDate ?? left.dueDate))
       .slice(0, 6);
 
+    const summary = this.monthSummary(month);
     return {
-      summary: this.monthSummary(month),
+      summary,
+      planning: monthlyPlanningBalance(summary.projectedBalance, this.getMonthlyPlanning(month)),
       annual,
       categoryBreakdown,
       upcoming,
@@ -2190,6 +2217,7 @@ export class LionPocketDatabase {
       'recurring_transaction_priorities',
       'transaction_priority_order',
       'goals',
+      'monthly_planning',
       ...(includeSync ? syncTables : []),
     ];
     return Object.fromEntries(

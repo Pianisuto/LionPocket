@@ -94,6 +94,9 @@ export function* projectFinancial(
       row[column] = s[field] as string | number | null;
   };
   switch (type) {
+    case 'monthlyPlanning':
+      map({ month: 'month', safetyMarginCents: 'safety_margin_cents' });
+      break;
     case 'category':
       map({ name: 'name', kind: 'kind', color: 'color' });
       break;

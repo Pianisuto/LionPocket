@@ -13,6 +13,7 @@ export function revisionSummary(revision: RevisionPlaintext): { title: string; l
     case 'installmentPurchase': return { title: revision.snapshot.description, lines: [money(revision.snapshot.installmentAmountCents) + ' por parcela', revision.snapshot.totalInstallments + ' parcelas', 'Primeiro vencimento: ' + revision.snapshot.firstDueDate, labels[revision.snapshot.status], revision.snapshot.notes].filter(Boolean) };
     case 'goal': return { title: revision.snapshot.name, lines: ['Meta: ' + money(revision.snapshot.targetAmountCents), 'Guardado: ' + money(revision.snapshot.savedAmountCents), revision.snapshot.dueDate ? 'Prazo: ' + revision.snapshot.dueDate : 'Sem prazo', revision.snapshot.notes].filter(Boolean) };
     case 'recurringPriorityList': return { title: 'Ordem das prioridades recorrentes', lines: [revision.snapshot.entries.length + ' prioridades'] };
+    case 'monthlyPlanning': return { title: 'Planejamento de ' + revision.snapshot.month, lines: ['Margem de segurança: ' + money(revision.snapshot.safetyMarginCents)] };
     case 'monthlyPriorityList': return { title: 'Ordem das prioridades de ' + revision.snapshot.month, lines: [revision.snapshot.transactionIds.length + ' prioridades'] };
   }
 }

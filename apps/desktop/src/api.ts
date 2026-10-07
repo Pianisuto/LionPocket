@@ -42,6 +42,8 @@ export interface LionPocketApi {
   createCatalogItem(input: CatalogInput): Promise<void>;
   deleteCatalogItem(type: 'category' | 'card', id: string): Promise<void>;
   getOverview(month: string): Promise<Overview>;
+  getMonthlyPlanning(month: string): Promise<import('@lionpocket/core').MonthlyPlanning | null>;
+  saveMonthlyPlanning(input: import('@lionpocket/core').MonthlyPlanning): Promise<void>;
   listTransactions(filters: TransactionFilters): Promise<Transaction[]>;
   setTransactionPriority(input: TransactionPriorityInput): Promise<void>;
   saveTransaction(input: TransactionInput): Promise<Transaction>;

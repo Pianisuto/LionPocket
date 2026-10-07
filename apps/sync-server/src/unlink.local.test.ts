@@ -49,8 +49,12 @@ describe.each(['desktop', 'android'] as const)('%s local server unlink', dialect
       await repo!.saveGoal(goal); await repo!.saveRecurring(recurring); await repo!.saveInstallment(installment);
       await repo!.list({ month: '2026-10' });
     }
+    if (desktop) desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
+    else await repo!.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
     await db.run(startFinancialBaseline(client.profile, 'https://old.invalid', '/fixture/before.sqlite', randomUUID));
     await save({ description: 'Ainda não sincronizada', plannedAmount: 98.76 });
+    if (desktop) desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50123 });
+    else await repo!.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50123 });
     let saved: SyncSaved = { endpoint: 'https://old.invalid', profile: client.profile, phase: 'bound', owner: true, identity: { issuer: 'https://identity.invalid', subject: 'alice' } };
     const options: SyncOptions = {
       db, secrets, sodium, dialect,

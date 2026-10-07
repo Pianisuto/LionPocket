@@ -8,7 +8,7 @@ describe('discovery version skew', () => {
       controlVersion: 2,
       protocolVersion: 1,
       domainSchema: 1,
-      entityScopes: ['transaction', 'goal'],
+      entityScopes: ['transaction', 'goal', 'monthlyPlanning'],
     },
   ])('accepts control v2 discovery %#', (value) =>
     expect(() => assertCompatibleEnvironment(value)).not.toThrow(),

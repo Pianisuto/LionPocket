@@ -13,6 +13,7 @@ import {
   externalGoalUrl,
   isValidDate,
   nextCardDueDate,
+  safetyMarginToCents,
 } from '@lionpocket/core';
 import type {
   Catalogs,
@@ -33,6 +34,7 @@ import {
   Field,
   ScreenHeader,
   useStyles,
+  money,
 } from './components';
 
 function Editor({
@@ -40,24 +42,26 @@ function Editor({
   onClose,
   onSave,
   children,
+  onRemove,
 }: {
   title: string;
   onClose: () => void;
   onSave: () => Promise<void>;
   children: React.ReactNode;
+  onRemove?: () => Promise<void>;
 }) {
   const styles = useStyles();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const pending = useRef(false);
-  const save = async () => {
+  const save = async (action = onSave) => {
     if (pending.current) return;
     pending.current = true;
     setBusy(true);
     Keyboard.dismiss();
     setError('');
     try {
-      await onSave();
+      await action();
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : 'Não foi possível salvar.',
@@ -90,6 +94,7 @@ function Editor({
             ) : null}
           </ScrollView>
           <View style={styles.formFooter}>
+            {onRemove && <Button label="Remover margem" tone="danger" disabled={busy} onPress={() => void save(onRemove)} />}
             <Button
               label={busy ? 'Salvando…' : 'Salvar'}
               tone="primary"
@@ -583,4 +588,20 @@ export function GoalEditor({
       <Field label="Observações" value={notes} multiline onChange={setNotes} />
     </Editor>
   );
+}
+
+export function SafetyMarginEditor({ month, cents, onClose, onSave }: {
+  month: string; cents: number; onClose: () => void; onSave: (cents: number) => Promise<void>;
+}) {
+  const styles = useStyles();
+  const [value, setValue] = useState(cents ? String(cents / 100).replace('.', ',') : '');
+  const label = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(`${month}-15T12:00:00`));
+  return <Editor title="Margem de segurança" onClose={onClose}
+    onSave={() => onSave(safetyMarginToCents(parseMoney(value, true)))}
+    onRemove={cents > 0 ? () => onSave(0) : undefined}>
+    <Text style={styles.heading}>{label}</Text>
+    <Text style={styles.muted}>Reserve uma parte do saldo para imprevistos. Esse valor não cria nenhuma despesa e vale somente para este mês.</Text>
+    {cents > 0 && <Text style={styles.muted}>Margem atual: {money(cents / 100)}</Text>}
+    <Field label="Margem de segurança (R$)" value={value} onChange={setValue} numeric />
+  </Editor>;
 }
