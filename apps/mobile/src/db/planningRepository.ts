@@ -17,6 +17,10 @@ import {
   validateInstallment,
   validateMonth,
   validateMonthlyPlanning,
+  validateGoalReinforcement,
+  assertGoalReinforcementAllowed,
+  type GoalMonthlyReinforcement,
+  type GoalStatus,
   type MonthlyPlanning,
 } from '@lionpocket/core';
 import type {
@@ -593,11 +597,55 @@ export class PlanningRepository {
         );
     });
   }
+  /** Deleting a goal retires its monthly planning in the same transaction: no orphan or phantom amount. */
   async removeGoal(id: string): Promise<void> {
-    const result = await this.db.executeAsync(
-      "UPDATE goals SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL",
-      [id],
+    await this.db.transaction(async (tx) => {
+      const result = await tx.executeAsync(
+        "UPDATE goals SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL",
+        [id],
+      );
+      if (!result.rowsAffected) throw new Error('Objetivo não encontrado.');
+      const timestamp = new Date().toISOString();
+      await tx.executeAsync(
+        'UPDATE goal_monthly_reinforcements SET deleted_at = ?, updated_at = ? WHERE goal_id = ? AND deleted_at IS NULL',
+        [timestamp, timestamp, id],
+      );
+    });
+  }
+
+  /** Reinforcements with a value for the month, only for goals that still exist. Zero means none. */
+  async listGoalReinforcements(month: string): Promise<GoalMonthlyReinforcement[]> {
+    validateMonth(month);
+    const result = await this.db.executeAsync<{ goal_id: string; month: string; amount_cents: number }>(
+      `SELECT r.goal_id, r.month, r.amount_cents FROM goal_monthly_reinforcements r
+       JOIN goals g ON g.id = r.goal_id AND g.deleted_at IS NULL
+       WHERE r.month = ? AND r.deleted_at IS NULL AND r.amount_cents > 0 ORDER BY r.goal_id`,
+      [month],
     );
-    if (!result.rowsAffected) throw new Error('Objetivo não encontrado.');
+    return result.rows._array.map((row) => ({ goalId: row.goal_id, month: row.month, amountCents: row.amount_cents }));
+  }
+
+  /** Planning only: never touches saved_amount_cents, progress or transactions. Zero removes the reinforcement. */
+  async saveGoalReinforcement(input: GoalMonthlyReinforcement): Promise<void> {
+    validateGoalReinforcement(input);
+    await this.db.transaction(async (tx) => {
+      const goal = (await tx.executeAsync<{ status: GoalStatus }>(
+        'SELECT status FROM goals WHERE id = ? AND deleted_at IS NULL', [input.goalId])).rows._array[0];
+      if (!goal) throw new Error('Objetivo não encontrado.');
+      assertGoalReinforcementAllowed(goal.status, input.amountCents);
+      const existing = (await tx.executeAsync<{ amount_cents: number; deleted_at: string | null }>(
+        'SELECT amount_cents, deleted_at FROM goal_monthly_reinforcements WHERE goal_id = ? AND month = ?',
+        [input.goalId, input.month])).rows._array[0];
+      if (!existing && input.amountCents === 0) return;
+      if (existing && existing.deleted_at === null && existing.amount_cents === input.amountCents) return;
+      const timestamp = new Date().toISOString();
+      await tx.executeAsync(`INSERT INTO goal_monthly_reinforcements VALUES(?,?,?,?,?,?,NULL)
+        ON CONFLICT(goal_id, month) DO UPDATE SET amount_cents=excluded.amount_cents,updated_at=excluded.updated_at,deleted_at=NULL`,
+        [`${input.goalId}:${input.month}`, input.goalId, input.month, input.amountCents, timestamp, timestamp]);
+    });
+  }
+
+  async removeGoalReinforcement(goalId: string, month: string): Promise<void> {
+    await this.saveGoalReinforcement({ goalId, month, amountCents: 0 });
   }
 }

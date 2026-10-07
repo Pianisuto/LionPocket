@@ -58,6 +58,19 @@ export function* identityFor(
   );
   if (identity) return String(identity.object_id);
   const [state] = yield sql('SELECT vault_id FROM sync_local_state WHERE id=1');
+  if (type === 'goalMonthlyReinforcement') {
+    // Stable across devices and vaults: the same goal object and month always name the same object.
+    const [row] = yield sql(
+      'SELECT goal_id,month FROM goal_monthly_reinforcements WHERE id=?',
+      [localId],
+    );
+    if (row) {
+      const goalObject = yield* identityFor('goal', String(row.goal_id), uuid);
+      const derived = derivedId(goalObject, `${type}:${row.month}`);
+      yield sql('INSERT INTO sync_identity VALUES(?,?,?)', [type, localId, derived]);
+      return derived;
+    }
+  }
   const imported =
     type === 'transaction'
       ? yield sql(
@@ -425,6 +438,12 @@ export function* snapshotFor(
   switch (type) {
     case 'monthlyPlanning':
       return { month: String(row.month), safetyMarginCents: Number(row.safety_margin_cents) };
+    case 'goalMonthlyReinforcement':
+      return {
+        goalId: yield* identityFor('goal', String(row.goal_id), uuid),
+        month: String(row.month),
+        amountCents: Number(row.amount_cents),
+      };
     case 'category':
       return {
         name: String(row.name),
@@ -936,7 +955,7 @@ export function* captureFinancial(
         const refIds = Object.entries(snapshot)
           .filter(
             ([k, v]) =>
-              ['categoryId', 'paymentMethodId', 'cardId'].includes(k) && v,
+              ['categoryId', 'paymentMethodId', 'cardId', 'goalId'].includes(k) && v,
           )
           .map(([, v]) => String(v));
         if (type === 'transaction') {

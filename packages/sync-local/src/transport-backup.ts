@@ -129,7 +129,7 @@ export function validateTransportBackup(data: Record<string, SqlRow[]>): void {
   for (const r of data.sync_identity) {
     assertUuid(r.object_id);
     if (
-      !['manualTransaction','transaction','category','paymentMethod','card','recurring','installmentPurchase','goal','recurringPriorityList','monthlyPriorityList','monthlyPlanning'].includes(String(r.entity_type)) ||
+      !['manualTransaction','transaction','category','paymentMethod','card','recurring','installmentPurchase','goal','recurringPriorityList','monthlyPriorityList','monthlyPlanning','goalMonthlyReinforcement'].includes(String(r.entity_type)) ||
       typeof r.local_id !== 'string' ||
       !r.local_id ||
       identities.has(String(r.object_id)) ||

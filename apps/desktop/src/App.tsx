@@ -310,6 +310,7 @@ export default function App() {
           )}
           {view === 'goals' && (
             <Goals
+              month={month}
               refreshKey={refreshKey}
               onAdd={() => setModal({ type: 'goal' })}
               onEdit={(item) => setModal({ type: 'goal', item })}

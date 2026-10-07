@@ -94,6 +94,7 @@ describe('manualTransaction synthetic Android adapter', () => {
       const current = desktop.exportData(true);
       const source = { ...current };
       delete source.monthly_planning; // Historical desktop v12 format.
+      delete source.goal_monthly_reinforcements;
       for (const table of Object.keys(source).filter(t => t.startsWith('sync_'))) {
         if (!foundationTables.includes(table)) delete source[table];
         else source[table] = source[table].map((row: Record<string,string|number|null>) => Object.fromEntries(foundationColumns[table].map(key => [key, row[key]])));

@@ -175,7 +175,7 @@ export function controlServer(options: {
         respond(200, {
           ...environment,
           financialSyncEnabled: options.financialEnabled === true,
-          entityScopes: options.financialEnabled ? (options.financialScope !== 'manual' ? ['category','paymentMethod','card','recurring','installmentPurchase','transaction','goal','recurringPriorityList','monthlyPriorityList','monthlyPlanning'] : ['manualTransaction']) : [],
+          entityScopes: options.financialEnabled ? (options.financialScope !== 'manual' ? ['category','paymentMethod','card','recurring','installmentPurchase','transaction','goal','recurringPriorityList','monthlyPriorityList','monthlyPlanning','goalMonthlyReinforcement'] : ['manualTransaction']) : [],
           ...(options.oidc ? {oidc:options.oidc} : {}),
           audience: 'lionpocket-sync-api',
           cryptoSuites: ['lp-sodium-v1'],

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { financialScopes } from '@lionpocket/sync-protocol';
 import { assertCompatibleEnvironment } from './compatibility';
 
 describe('discovery version skew', () => {
@@ -8,11 +9,15 @@ describe('discovery version skew', () => {
       controlVersion: 2,
       protocolVersion: 1,
       domainSchema: 1,
-      entityScopes: ['transaction', 'goal', 'monthlyPlanning'],
+      entityScopes: ['transaction', 'goal', 'monthlyPlanning', 'goalMonthlyReinforcement'],
     },
   ])('accepts control v2 discovery %#', (value) =>
     expect(() => assertCompatibleEnvironment(value)).not.toThrow(),
   );
+  it('knows every financial scope the protocol can decode, including goal reinforcements', () => {
+    expect(financialScopes).toContain('goalMonthlyReinforcement');
+    expect(() => assertCompatibleEnvironment({ controlVersion: 2, entityScopes: financialScopes })).not.toThrow();
+  });
   it.each([
     { controlVersion: 1, entityScopes: ['transaction'] },
     { entityScopes: ['transaction'] },

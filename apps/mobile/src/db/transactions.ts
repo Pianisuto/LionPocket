@@ -55,6 +55,11 @@ export const getMonthlyOverview = async (month: string) =>
 export const completeStandardCategories = async () =>
   (await repository()).completeStandardCategories();
 
+export const listGoalReinforcements = async (month: string) => (await repository()).listGoalReinforcements(month);
+export const saveGoalReinforcement = async (input: import('@lionpocket/core').GoalMonthlyReinforcement) =>
+  (await repository()).saveGoalReinforcement(input);
+export const removeGoalReinforcement = async (goalId: string, month: string) =>
+  (await repository()).removeGoalReinforcement(goalId, month);
 export const getMonthlyPlanning = async (month: string) => (await repository()).getMonthlyPlanning(month);
 export const saveMonthlyPlanning = async (input: import('@lionpocket/core').MonthlyPlanning) =>
   (await repository()).saveMonthlyPlanning(input);

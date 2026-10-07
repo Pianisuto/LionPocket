@@ -6,6 +6,7 @@ import {
 } from '@lionpocket/sync-protocol';
 const groups: Partial<Record<EntityType, string[][]>> = {
   monthlyPlanning: [['month', 'safetyMarginCents']],
+  goalMonthlyReinforcement: [['goalId', 'month', 'amountCents']],
   transaction: [
     ['kind', 'status', 'actualAmountCents', 'settledDate'],
     ['cardId', 'paymentMethodId', 'purchaseDate', 'dueDate'],

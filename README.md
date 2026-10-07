@@ -86,6 +86,8 @@ As migrations são aditivas e transacionais: a versão 2 acrescenta cadastros e 
 
 A [margem de segurança mensal](docs/monthly-planning.md) pode ser configurada em Recorrências nas duas plataformas. É planejamento para imprevistos: não cria despesas nem altera o saldo real. O Dashboard mostra o valor após margem apenas como informação auxiliar do saldo projetado.
 
+Na tela Objetivos, o [reforço mensal](docs/goal-monthly-reinforcement.md) permite planejar quanto reservar para cada objetivo em cada mês. É só planejamento: não cria lançamentos nem altera o valor guardado, e funciona offline, em backup e após desvincular o servidor.
+
 Consulte [o roteiro de uso diário](docs/mobile-daily-finance.md) e [as regras e a validação do planejamento](docs/mobile-planning.md). O botão **Hoje** retorna ao mês atual; deslizar a lista para baixo atualiza os dados locais. Datas são preenchidas no formato `AAAA-MM-DD` e valores aceitam vírgula ou ponto decimal (ex.: `125,50`).
 
 A [proposta de sincronização local-first](docs/local-first-sync-proposal.md) registra o desenho para desktop/mobile, self-hosted e Lion Pocket Cloud. A [Etapa 0](docs/local-first-sync-stage0.md), a fundação local e o provisioning evoluíram para o [fluxo manual desktop ↔ Android da Etapa 1](docs/local-first-sync-stage1-transport.md), restrito a bancos sintéticos e opt-in de desenvolvimento. A sincronização continua desativada por padrão.

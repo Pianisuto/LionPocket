@@ -1,4 +1,4 @@
-import { monthlyPlanningColumns, syncTables, syncColumns, foundationColumns, foundationTables, transportMigration, transportColumns, transportTables, financialTriggers, financialTableTypes, validateSyncBackup, disableRestoredSync } from '@lionpocket/sync-local';
+import { goalReinforcementColumns, monthlyPlanningColumns, syncTables, syncColumns, foundationColumns, foundationTables, transportMigration, transportColumns, transportTables, financialTriggers, financialTableTypes, validateSyncBackup, disableRestoredSync } from '@lionpocket/sync-local';
 import {
   isValidDate,
   validateMonth,
@@ -24,11 +24,13 @@ export const backupTables = [
   'local_import_records',
   'local_preferences',
   'monthly_planning',
+  'goal_monthly_reinforcements',
   ...syncTables,
 ] as const;
 const columns: Record<string, string[]> = {
   ...syncColumns,
   monthly_planning: monthlyPlanningColumns,
+  goal_monthly_reinforcements: goalReinforcementColumns,
   categories: ['id', 'name', 'kind', 'color'],
   payment_methods: ['id', 'name'],
   cards: ['id', 'name', 'due_day', 'closing_day'],
@@ -139,6 +141,7 @@ export function tablesForVersion(version: number): string[] {
     (t) =>
       (!syncTables.includes(t) || (foundationTables.includes(t) ? version >= 6 : transportTables.includes(t) ? version >= 7 : version >= 8)) &&
       (t !== 'monthly_planning' || version >= 10) &&
+      (t !== 'goal_monthly_reinforcements' || version >= 11) &&
       (t !== 'local_preferences' || version >= 5) &&
       (version === 1
         ? t === 'transactions'

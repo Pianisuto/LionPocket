@@ -139,6 +139,8 @@ Antes de atualizar, faça e verifique backup. Leia as notas da versão aprovada,
 
 A versão com [margem de segurança mensal](monthly-planning.md) exige atualização conjunta do servidor e de todos os clientes vinculados. Ao anunciar `monthlyPlanning`, o servidor passa a ser incompatível com clientes anteriores: eles bloqueiam o sync no discovery com `unsupported_capability`, antes de receber/quarentenar revisões. Não há negociação para rolling upgrade. O uso local e as alterações pendentes continuam preservados enquanto os clientes aguardam atualização.
 
+O mesmo vale para o [reforço mensal dos objetivos](goal-monthly-reinforcement.md): o servidor anuncia também `goalMonthlyReinforcement`, e clientes anteriores bloqueiam o sync com `unsupported_capability`. Atualize servidor e todos os clientes vinculados em conjunto.
+
 Endpoint é preferência por aparelho e não sincroniza. Uma base vinculada não troca operador editando URL, nem envia outbox a servidor B automaticamente. Para abandonar um remoto e publicar os dados locais em uma instalação limpa, use exclusivamente o fluxo explícito de servidor recriado abaixo. Ele não recupera o remoto anterior nem move automaticamente ciphertext entre servidores.
 
 - `status` não passa: confira DNS, portas, cadeia TLS, permissões/UID dos arquivos e saúde dos serviços. Use `lpctl logs`; não publique dumps, tokens, proofs ou recuperação em chamados.

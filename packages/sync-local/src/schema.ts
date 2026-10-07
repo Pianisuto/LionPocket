@@ -165,7 +165,7 @@ export const financialSidecars = [
   'CREATE TABLE sync_aliases(alias_id TEXT PRIMARY KEY,object_id TEXT NOT NULL)',
 ];
 export const financialTableTypes = {
-  categories: 'category', payment_methods: 'paymentMethod', cards: 'card', recurring_expenses: 'recurring', installment_purchases: 'installmentPurchase', transactions: 'transaction', goals: 'goal', recurring_transaction_priorities: 'recurringPriorityList', transaction_priority_order: 'monthlyPriorityList', monthly_planning: 'monthlyPlanning',
+  categories: 'category', payment_methods: 'paymentMethod', cards: 'card', recurring_expenses: 'recurring', installment_purchases: 'installmentPurchase', transactions: 'transaction', goals: 'goal', recurring_transaction_priorities: 'recurringPriorityList', transaction_priority_order: 'monthlyPriorityList', monthly_planning: 'monthlyPlanning', goal_monthly_reinforcements: 'goalMonthlyReinforcement',
 } as const;
 export function financialTriggers(dialect: 'desktop' | 'android', columns: Record<string, string[]>): string[] {
   return Object.keys(financialTableTypes).filter(table => columns[table]?.length).flatMap(table => ['INSERT', 'UPDATE', 'DELETE'].map(action => {
@@ -201,5 +201,24 @@ export const monthlyPlanningMigration = [
     id TEXT PRIMARY KEY NOT NULL, month TEXT NOT NULL UNIQUE CHECK(id=month AND month GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' AND substr(month,6,2) BETWEEN '01' AND '12'),
     safety_margin_cents INTEGER NOT NULL DEFAULT 0 CHECK(typeof(safety_margin_cents)='integer' AND safety_margin_cents BETWEEN 0 AND 9007199254740991),
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
+  )`,
+];
+
+/**
+ * One row per goal and month. Clearing a reinforcement is a put of zero, so the
+ * deterministic identity (derived from the goal and month) can be redefined later.
+ * Only deleting the goal retires its rows.
+ */
+export const goalReinforcementColumns = ['id', 'goal_id', 'month', 'amount_cents', 'created_at', 'updated_at', 'deleted_at'];
+export const goalReinforcementMigration = [
+  // Same transactional sidecar rebuild used by monthlyPlanningMigration, widening the CHECK once more.
+  ...financialMigration.slice(0, -financialSidecars.length).map(statement =>
+    statement.replace("'monthlyPriorityList'))", "'monthlyPriorityList','monthlyPlanning','goalMonthlyReinforcement'))")),
+  `CREATE TABLE goal_monthly_reinforcements (
+    id TEXT PRIMARY KEY NOT NULL, goal_id TEXT NOT NULL REFERENCES goals(id),
+    month TEXT NOT NULL CHECK(month GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' AND substr(month,6,2) BETWEEN '01' AND '12'),
+    amount_cents INTEGER NOT NULL DEFAULT 0 CHECK(typeof(amount_cents)='integer' AND amount_cents BETWEEN 0 AND 9007199254740991),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+    UNIQUE(goal_id, month)
   )`,
 ];

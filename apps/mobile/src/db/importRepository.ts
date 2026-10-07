@@ -246,7 +246,9 @@ const identity = (table: string, row: BackupRow) =>
       ? row.recurring_id
       : table === 'local_import_records'
         ? row.source_key
-        : row.id;
+        : table === 'goal_monthly_reinforcements'
+          ? `${row.goal_id}:${row.month}`
+          : row.id;
 /** JSON desktop imports add records and never overwrite an existing identity. */
 export function mergeBackupData(
   current: BackupData,

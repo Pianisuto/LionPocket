@@ -61,6 +61,11 @@ export function* projectFinancial(
         revision.provenance.legacyUpdatedAt ?? revision.authoredAt,
         localId,
       ]);
+      if (type === 'goal')
+        yield sql(
+          'UPDATE goal_monthly_reinforcements SET deleted_at=?,updated_at=? WHERE goal_id=? AND deleted_at IS NULL',
+          [revision.authoredAt, revision.authoredAt, localId],
+        );
       if (
         revision.reason !== 'legacy_unknown' &&
         (type === 'recurring' || type === 'installmentPurchase')
@@ -299,6 +304,44 @@ export function* projectFinancial(
             ],
           );
       }
+      return;
+    }
+    case 'goalMonthlyReinforcement': {
+      // A deleted goal has no planning: never materialize an orphan or a phantom amount.
+      const goalLocal = yield* localReference(s.goalId as string);
+      if (goalLocal === null) return;
+      if (!(yield sql('SELECT id FROM goals WHERE id=?', [goalLocal])).length)
+        throw new Error('missing_dependencies');
+      const [existing] = yield sql(
+        'SELECT id FROM goal_monthly_reinforcements WHERE goal_id=? AND month=?',
+        [goalLocal, String(s.month)],
+      );
+      // The same goal and month are one logical record. Keep the row that already exists
+      // locally and point the identity at it instead of creating a second one.
+      if (
+        existing &&
+        existing.id !== localId &&
+        !(yield sql(
+          'SELECT 1 FROM sync_identity WHERE entity_type=? AND local_id=?',
+          [type, existing.id],
+        )).length
+      )
+        yield sql(
+          'UPDATE sync_identity SET local_id=? WHERE entity_type=? AND local_id=?',
+          [existing.id, type, localId],
+        );
+      yield sql(
+        `INSERT INTO goal_monthly_reinforcements(id,goal_id,month,amount_cents,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,NULL)
+        ON CONFLICT(goal_id,month) DO UPDATE SET amount_cents=excluded.amount_cents,updated_at=excluded.updated_at,deleted_at=NULL`,
+        [
+          localId,
+          goalLocal,
+          String(s.month),
+          Number(s.amountCents),
+          revision.provenance.legacyCreatedAt ?? revision.authoredAt,
+          revision.provenance.legacyUpdatedAt ?? revision.authoredAt,
+        ],
+      );
       return;
     }
     case 'monthlyPriorityList': {

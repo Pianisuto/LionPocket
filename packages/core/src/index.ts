@@ -11,3 +11,4 @@ export * from './spreadsheet-import';
 export * from './desktop-parity';
 export * from './catalog-defaults';
 export * from './monthly-planning';
+export * from './goal-reinforcement';

@@ -2,7 +2,7 @@
 
 Em **Configurações → Sincronização → Desvincular servidor**, o usuário confirma que os dados financeiros locais serão mantidos. Desktop e Android usam `SyncController.unlinkServer(true)` no pacote compartilhado `sync-local`.
 
-O planejamento mensal (`monthly_planning`), incluindo margens de segurança de cada mês e mudanças ainda pendentes, também é preservado. Após desvincular, continua editável offline e participa da nova baseline ao reconectar. Veja [o modelo e a cobertura](monthly-planning.md).
+O planejamento mensal (`monthly_planning`), incluindo margens de segurança de cada mês e mudanças ainda pendentes, também é preservado. Após desvincular, continua editável offline e participa da nova baseline ao reconectar. Veja [o modelo e a cobertura](monthly-planning.md). O mesmo vale para os reforços mensais dos objetivos (`goal_monthly_reinforcements`), que seguem editáveis offline e entram na nova baseline: veja [reforço mensal dos objetivos](goal-monthly-reinforcement.md).
 
 A operação é exclusivamente local: não consulta o servidor, não exige login e não revoga aparelhos nem apaga conta, cofre remoto ou servidor. Os outros aparelhos continuam vinculados. O registro remoto deste aparelho pode continuar na lista de dispositivos; removê-lo remotamente é outra ação.
 
