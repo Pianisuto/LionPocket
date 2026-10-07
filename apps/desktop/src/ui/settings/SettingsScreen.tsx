@@ -13,6 +13,7 @@ export function SettingsScreen({
   return (
     <div className="settings-layout">
       <nav className="settings-nav" aria-label="Áreas das configurações">
+        <p className="settings-nav__label">Áreas</p>
         {settingsSections.map((item) => {
           const Icon = item.icon;
           const current = item.id === active.id;
@@ -33,7 +34,7 @@ export function SettingsScreen({
           );
         })}
       </nav>
-      <section className="settings-page" aria-labelledby="settings-page-title">
+      <section className="settings-page" aria-labelledby="settings-page-title" key={active.id}>
         <header className="settings-page__header">
           <div>
             <h2 id="settings-page-title">{active.label}</h2>
@@ -41,7 +42,7 @@ export function SettingsScreen({
           </div>
           {'badge' in active && active.badge}
         </header>
-        <div className="settings-page__body" key={active.id}>
+        <div className="settings-page__body">
           {active.render(context)}
         </div>
       </section>

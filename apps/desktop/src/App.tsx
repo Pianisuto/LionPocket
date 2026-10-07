@@ -262,7 +262,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="page-content">
+        <div className={`page-content${view === 'settings' ? ' page-content--settings' : ''}`}>
           {view === 'dashboard' && (
             <Dashboard
               overview={overview}

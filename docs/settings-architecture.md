@@ -10,6 +10,12 @@ persistência e comandos de sincronização continuam nos serviços existentes.
   lateral a partir de `sections.tsx`. Para adicionar uma área, crie a página e
   registre título, descrição, ícone e renderização nesse arquivo. O App guarda
   a área selecionada, enquanto preferências e catálogos usam os callbacks existentes.
+  A navegação ocupa uma faixa lateral integrada e o conteúdo tem rolagem própria;
+  trocar de área começa no topo. Em janelas compactas, as áreas ficam numa faixa
+  horizontal. A largura do conteúdo é fluida. Container queries usam o espaço
+  disponível na página para organizar Geral, Dados e Cadastros em colunas.
+  Cadastros mantém categorias à esquerda e pagamentos/cartões à direita quando
+  há espaço; listas e formulários de cartões se adaptam à própria coluna.
 - Mobile: `apps/mobile/src/ui/settings/SettingsScreen.tsx` abre uma lista de áreas
   e navega para páginas dentro da mesma tela modal. Voltar retorna à lista; fechar
   encerra Configurações. Cadastros usam um editor próprio por registro. O fluxo

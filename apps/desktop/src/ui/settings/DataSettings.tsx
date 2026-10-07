@@ -28,7 +28,7 @@ export function DataSettings({ month, notify }: SettingsContext) {
     }
   };
   return (
-    <>
+    <div className="settings-data">
       <SettingsGroup title="Importar" description="Traga lançamentos de uma planilha para este computador.">
         <div className="settings-actions-list">
           <SettingsActionRow
@@ -77,6 +77,6 @@ export function DataSettings({ month, notify }: SettingsContext) {
           <p>O banco e as cópias locais ficam em claro. Ative a criptografia de disco do Linux ou Windows para protegê-los contra acesso físico.</p>
         </SettingsNote>
       </div>
-    </>
+    </div>
   );
 }

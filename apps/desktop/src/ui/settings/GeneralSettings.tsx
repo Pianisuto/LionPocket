@@ -15,7 +15,7 @@ export function GeneralSettings({
   onShowPrioritiesChange,
 }: SettingsContext) {
   return (
-    <>
+    <div className="settings-general">
       <SettingsGroup title="Aparência" description="Como o LionPocket aparece neste computador.">
         <SettingsRow
           title="Tema"
@@ -56,6 +56,6 @@ export function GeneralSettings({
           }
         />
       </SettingsGroup>
-    </>
+    </div>
   );
 }

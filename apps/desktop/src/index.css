@@ -211,6 +211,8 @@ strong,
 }
 
 .page-content:hover::-webkit-scrollbar-thumb,
+.settings-page:hover::-webkit-scrollbar-thumb,
+.settings-nav:hover::-webkit-scrollbar-thumb,
 .category-legend:hover::-webkit-scrollbar-thumb,
 .upcoming-list:hover::-webkit-scrollbar-thumb,
 .mini-list:hover::-webkit-scrollbar-thumb,
@@ -3860,25 +3862,37 @@ button.goal-mini {
    Navegação lateral própria: uma área por vez, cada uma com sua página.
    -------------------------------------------------------------------------- */
 
+.page-content--settings {
+  container: settings-shell / inline-size;
+  padding: 0;
+  overflow: hidden;
+}
+
 .settings-layout {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
-  gap: 28px;
-  align-items: start;
-  max-width: 1180px;
+  grid-template-columns: 264px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
 }
 
 .settings-nav {
-  position: sticky;
-  top: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 8px;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-lg);
+  gap: 6px;
+  min-height: 0;
+  padding: 26px 18px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line-1);
   background: var(--surface);
-  box-shadow: var(--sheen);
+}
+
+.settings-nav__label {
+  padding: 0 12px 10px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
 }
 
 .settings-nav button {
@@ -3887,7 +3901,9 @@ button.goal-mini {
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 9px 10px;
+  flex: 0 0 auto;
+  min-height: 66px;
+  padding: 12px;
   color: var(--text-soft);
   text-align: left;
   border: 0;
@@ -3916,7 +3932,7 @@ button.goal-mini {
 .settings-nav button.is-active::before {
   position: absolute;
   top: 50%;
-  left: -8px;
+  left: -18px;
   width: 3px;
   height: 20px;
   border-radius: 0 3px 3px 0;
@@ -3954,23 +3970,26 @@ button.goal-mini {
 
 .settings-nav__text small {
   display: block;
-  margin-top: 2px;
-  overflow: hidden;
+  margin-top: 3px;
   color: var(--text-muted);
-  font-size: 11px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .settings-page {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
   min-width: 0;
+  min-height: 0;
+  padding: 26px 32px 100px;
+  overflow-y: auto;
 }
 
 .settings-page__header {
   display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
@@ -3988,11 +4007,51 @@ button.goal-mini {
 }
 
 .settings-page__body {
+  container: settings-content / inline-size;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-width: 0;
   animation: settings-enter 220ms cubic-bezier(0.2, 0.75, 0.3, 1) both;
+}
+
+.settings-general,
+.settings-data,
+.settings-catalogs,
+.settings-catalogs__secondary {
+  display: grid;
+  align-items: start;
+  gap: 20px;
+  min-width: 0;
+}
+
+.settings-general {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+}
+
+.settings-data {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container settings-content (min-width: 860px) {
+  .settings-data { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.settings-data > .settings-notes {
+  grid-column: 1 / -1;
+}
+
+/* Reflow by the space inside the page, including the app and settings rails. */
+@container settings-content (min-width: 1050px) {
+  .settings-catalogs {
+    grid-template-columns: minmax(520px, 1.25fr) minmax(440px, 1fr);
+  }
+
+  .sync-management {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
 }
 
 @keyframes settings-enter {
@@ -4284,7 +4343,8 @@ label.settings-row__text {
 
 .catalog-columns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  align-items: start;
   gap: 14px;
 }
 
@@ -4341,7 +4401,7 @@ label.settings-row__text {
 
 .catalog-list--grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
   gap: 6px;
 }
 
@@ -4431,13 +4491,24 @@ label.settings-row__text {
   cursor: wait;
 }
 
+.catalog-cards {
+  container: catalog-cards / inline-size;
+}
+
 .catalog-row--card {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 180px 110px auto;
-  gap: 14px;
-  min-height: 50px;
-  padding-left: 12px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-areas: "icon name actions" ". closing due";
+  column-gap: 12px;
+  row-gap: 5px;
+  padding: 10px 8px;
 }
+
+.catalog-row--card > .catalog-row__icon { grid-area: icon; }
+.catalog-row--card > .catalog-row__name { grid-area: name; }
+.catalog-row__closing { grid-area: closing; white-space: normal; }
+.catalog-row__due { grid-area: due; justify-self: end; }
+.catalog-row--card > .catalog-row__actions { grid-area: actions; justify-self: end; }
 
 .catalog-row--editing {
   display: block;
@@ -4465,12 +4536,14 @@ label.settings-row__text {
 
 .catalog-inline-form {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px;
 }
 
 .catalog-inline-form .field {
-  flex: 1;
+  flex: 1 1 160px;
+  min-width: 0;
 }
 
 .catalog-inline-form .field input {
@@ -4483,12 +4556,14 @@ label.settings-row__text {
 .catalog-inline-form__actions {
   display: flex;
   flex: 0 0 auto;
+  justify-content: flex-end;
   gap: 6px;
+  margin-left: auto;
 }
 
 .catalog-card-form {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) 150px 150px auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   align-items: end;
   padding: 14px;
@@ -4498,8 +4573,30 @@ label.settings-row__text {
   background: var(--surface);
 }
 
+.catalog-card-form__name,
+.catalog-card-form .catalog-inline-form__actions {
+  grid-column: 1 / -1;
+}
+
 .catalog-card-form .catalog-inline-form__actions {
   padding-bottom: 2px;
+}
+
+@container catalog-cards (min-width: 760px) {
+  .catalog-row--card {
+    grid-template-columns: 18px minmax(0, 1fr) 180px 110px auto;
+    grid-template-areas: "icon name closing due actions";
+    min-height: 50px;
+  }
+
+  .catalog-card-form {
+    grid-template-columns: minmax(170px, 1fr) 150px 150px auto;
+  }
+
+  .catalog-card-form__name,
+  .catalog-card-form .catalog-inline-form__actions {
+    grid-column: auto;
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -4947,53 +5044,49 @@ label.settings-row__text {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .catalog-columns,
-  .settings-notes {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .catalog-row--card {
-    grid-template-columns: 18px minmax(0, 1fr) auto auto auto;
-  }
-
-  .catalog-card-form {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .catalog-card-form__name {
-    grid-column: 1 / -1;
-  }
 }
 
-/* Em janelas estreitas, as áreas das configurações viram uma faixa no topo. */
-@media (max-width: 980px) {
+/* Compact windows keep every category reachable in a horizontal strip. */
+@container settings-shell (max-width: 930px) {
   .settings-layout {
     grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .settings-nav {
-    position: static;
     flex-direction: row;
+    padding: 12px 24px;
     overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-1);
   }
 
   .settings-nav button {
     flex: 1 0 auto;
     width: auto;
+    min-height: 48px;
+    padding: 8px 12px;
   }
 
+  .settings-nav__label,
   .settings-nav button.is-active::before,
   .settings-nav__text small {
     display: none;
   }
 
-  .settings-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+  .settings-page {
+    padding: 24px 24px 100px;
   }
+}
+
+@container settings-shell (max-width: 510px) {
+  .settings-nav { padding: 10px 18px; }
+  .settings-page { padding: 20px 18px 100px; }
+}
+
+@container settings-content (max-width: 860px) {
+  .settings-row { flex-wrap: wrap; gap: 12px; }
+  .settings-notes { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Sync uses the same surfaces, fields and buttons as the other settings. */

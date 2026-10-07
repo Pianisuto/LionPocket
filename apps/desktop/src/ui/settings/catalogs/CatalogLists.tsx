@@ -121,6 +121,7 @@ export function CardCatalog({ catalogs, actions }: { catalogs: Catalogs; actions
   return (
     <SettingsGroup
       title="Cartões de crédito"
+      className="catalog-cards"
       count={catalogs.cards.length}
       description="O fechamento define em qual fatura cada compra entra; o vencimento, quando ela é paga."
       action={<AddButton label="Adicionar cartão" disabled={adding} onClick={() => { setAdding(true); setEditingId(''); }} />}
@@ -135,10 +136,10 @@ export function CardCatalog({ catalogs, actions }: { catalogs: Catalogs; actions
           <li className="catalog-row catalog-row--card" key={item.id}>
             <CardIcon size={17} aria-hidden="true" className="catalog-row__icon" />
             <span className="catalog-row__name">{item.name}</span>
-            <span className={`catalog-row__meta ${item.closingDay === null ? 'is-missing' : ''}`}>
+            <span className={`catalog-row__meta catalog-row__closing ${item.closingDay === null ? 'is-missing' : ''}`}>
               {item.closingDay === null ? 'Fechamento não configurado' : <>Fecha dia <strong>{item.closingDay}</strong></>}
             </span>
-            <span className="catalog-row__meta">Vence dia <strong>{item.dueDay}</strong></span>
+            <span className="catalog-row__meta catalog-row__due">Vence dia <strong>{item.dueDay}</strong></span>
             <div className="catalog-row__actions">
               <button
                 type="button"

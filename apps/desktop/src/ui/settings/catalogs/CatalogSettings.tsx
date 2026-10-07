@@ -61,9 +61,13 @@ export function CatalogSettings({ catalogs, refreshCatalogs, notify }: SettingsC
   const copy = pendingDelete && deleteCopy[pendingDelete.type];
   return (
     <>
-      <CategoryCatalog catalogs={catalogs} actions={actions} />
-      <PaymentMethodCatalog catalogs={catalogs} actions={actions} />
-      <CardCatalog catalogs={catalogs} actions={actions} />
+      <div className="settings-catalogs">
+        <CategoryCatalog catalogs={catalogs} actions={actions} />
+        <div className="settings-catalogs__secondary">
+          <PaymentMethodCatalog catalogs={catalogs} actions={actions} />
+          <CardCatalog catalogs={catalogs} actions={actions} />
+        </div>
+      </div>
       {pendingDelete && copy && (
         <ConfirmDialog
           title={`Excluir ${copy.noun}?`}
