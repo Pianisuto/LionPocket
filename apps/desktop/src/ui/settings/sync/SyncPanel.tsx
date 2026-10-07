@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { LockKeyhole } from 'lucide-react';
 import { DevicesSection } from './Devices';
 import { InvitationSection, PairingProgress } from './Pairing';
-import { SyncGroupLabel, SyncNotice } from './primitives';
+import { SyncNotice } from './primitives';
 import { ProtectionSection } from './Protection';
 import { ServerRecovery } from './ServerRecovery';
 import { ServerResetContinuation, ServerResetForm } from './ServerReset';
@@ -77,12 +77,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
         </div>
       )}
 
-      {view.connected && (
-        <>
-          <SyncGroupLabel>Ações avançadas</SyncGroupLabel>
-          <ServerResetForm {...session} />
-        </>
-      )}
+      {view.connected && <ServerResetForm {...session} />}
 
       <footer className="sync-panel__footnote">
         <LockKeyhole size={14} aria-hidden="true" />

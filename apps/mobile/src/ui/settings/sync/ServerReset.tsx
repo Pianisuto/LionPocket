@@ -3,25 +3,42 @@ import type { ServerResetIntent } from '@lionpocket/sync-local';
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { Button } from '../../components';
-import { SyncCard, SyncCheck, SyncChoice, SyncField, useSyncStyles } from './kit';
+import {
+  SyncCard,
+  SyncCheck,
+  SyncChoice,
+  SyncDisclosure,
+  SyncField,
+  useSyncStyles,
+} from './kit';
 import { useEndpointDraft, type SyncSession } from './useSyncSession';
 
 /**
- * Leaves a vault whose server was recreated. Both continuations stay visible,
- * and consent is cleared whenever the choice changes.
+ * The recreated-server disclosure preserves the draft when collapsed.
+ * Consent is cleared whenever the continuation choice changes.
  */
 export function ServerResetForm({ status, busy, act }: SyncSession) {
   const styles = useSyncStyles();
+  const [open, setOpen] = useState(false);
   const [intent, setIntent] = useState<ServerResetIntent>();
   const [confirmed, setConfirmed] = useState(false);
   const [endpoint, setEndpoint] = useEndpointDraft(status.endpoint);
   return (
-    <SyncCard
+    <SyncDisclosure
       icon="server"
-      tone="danger"
       title={serverResetCopy.title}
-      description={serverResetCopy.description}
+      description="Reconecte a um servidor recriado preservando seus dados locais."
+      open={open}
+      onToggle={() => setOpen((value) => !value)}
     >
+      <Text style={styles.muted}>{serverResetCopy.description}</Text>
+      <SyncField
+        label="Novo servidor"
+        value={endpoint}
+        onChangeText={setEndpoint}
+        keyboardType="url"
+        editable={!busy}
+      />
       <View style={styles.actions}>
         <Text style={styles.label}>{serverResetCopy.question}</Text>
         {serverResetCopy.choices.map((choice) => (
@@ -38,12 +55,6 @@ export function ServerResetForm({ status, busy, act }: SyncSession) {
           />
         ))}
       </View>
-      <SyncField
-        label="Novo servidor"
-        value={endpoint}
-        onChangeText={setEndpoint}
-        keyboardType="url"
-      />
       <SyncCheck
         label={serverResetCopy.consent}
         checked={confirmed}
@@ -58,7 +69,7 @@ export function ServerResetForm({ status, busy, act }: SyncSession) {
           act((c) => c.resetForRecreatedServer(endpoint, intent!, confirmed))
         }
       />
-    </SyncCard>
+    </SyncDisclosure>
   );
 }
 

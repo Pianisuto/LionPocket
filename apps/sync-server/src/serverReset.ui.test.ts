@@ -168,6 +168,16 @@ describe.each(['desktop', 'android'] as const)(
         command,
         button,
         press,
+        openReset: async () => {
+          if (platform === 'android')
+            await press('Servidor de sincronização recriado');
+          else
+            expect(
+              renderer!.root.findAllByType('details').filter((node) =>
+                text(node).includes('Servidor de sincronização recriado'),
+              ),
+            ).toHaveLength(1);
+        },
         change: async (s: SyncStatus) => {
           current = s;
           await act(async () => {
@@ -176,6 +186,66 @@ describe.each(['desktop', 'android'] as const)(
         },
       };
     }
+    it('starts collapsed in a neutral disclosure without submitting', async () => {
+      const ui = await mount(status('bound'));
+      expect(text(renderer!.root)).not.toContain('Ações avançadas');
+      if (platform === 'desktop') {
+        const disclosure = renderer!.root
+          .findAllByType('details')
+          .find((node) =>
+            text(node).includes('Servidor de sincronização recriado'),
+          )!;
+        expect(disclosure.props.open).not.toBe(true);
+        expect(disclosure.findByType('summary')).toBeTruthy();
+        expect(disclosure.props.className).toBe('sync-disclosure');
+      } else {
+        expect(
+          ui.button('Servidor de sincronização recriado').props
+            .accessibilityState.expanded,
+        ).toBe(false);
+        expect(
+          ui.button('Preservar backup e remover vínculo antigo'),
+        ).toBeUndefined();
+      }
+      await ui.openReset();
+      expect(
+        ui.button('Preservar backup e remover vínculo antigo').props.disabled,
+      ).toBe(true);
+      expect(ui.controller.resetForRecreatedServer).not.toHaveBeenCalled();
+    });
+    if (platform === 'android')
+      it('collapsing preserves the endpoint, explicit choice and consent without submitting', async () => {
+        const ui = await mount(status('bound'));
+        await ui.openReset();
+        const endpointInput = () =>
+          renderer!.root.findAll(
+            (node) =>
+              node.type === ('mobile-input' as unknown) &&
+              node.props.accessibilityLabel === 'Novo servidor',
+          )[0];
+        await act(async () => {
+          endpointInput().props.onChangeText('https://new-sync.example.com');
+        });
+        await ui.press('Usar este aparelho como fonte de verdade');
+        await ui.press('Entendo que o remoto anterior será abandonado e que o backup será preservado antes de remover o vínculo.');
+        await ui.press('Servidor de sincronização recriado');
+        expect(
+          ui.button('Preservar backup e remover vínculo antigo'),
+        ).toBeUndefined();
+        await ui.openReset();
+        expect(
+          ui.button('Servidor de sincronização recriado').props
+            .accessibilityState.expanded,
+        ).toBe(true);
+        expect(endpointInput().props.value).toBe('https://new-sync.example.com');
+        expect(ui.controller.resetForRecreatedServer).not.toHaveBeenCalled();
+        await ui.press('Preservar backup e remover vínculo antigo');
+        expect(ui.controller.resetForRecreatedServer).toHaveBeenCalledWith(
+          'https://new-sync.example.com',
+          'source-of-truth',
+          true,
+        );
+      });
     it.each(['source-of-truth', 'join-existing'] as const)(
       'requires choosing %s before backup/unlink and shows its correct continuation',
       async (intent) => {
@@ -184,18 +254,12 @@ describe.each(['desktop', 'android'] as const)(
           'Usar este aparelho como fonte de verdade',
           'Conectar este aparelho a um cofre já recriado',
         ];
-        // Both choices are visible without opening Advanced or a disclosure.
+        await ui.openReset();
+        // Opening the disclosure exposes both continuations, with no default choice.
         expect(text(renderer!.root)).toContain(
           'Servidor de sincronização recriado',
         );
         if (platform === 'desktop') {
-          expect(
-            renderer!.root
-              .findAllByType('details')
-              .filter((n) =>
-                text(n).includes('Servidor de sincronização recriado'),
-              ),
-          ).toHaveLength(0);
           const choices = renderer!.root
             .findAllByType('input')
             .filter((n) => n.props.type === 'radio');
@@ -314,6 +378,7 @@ describe.each(['desktop', 'android'] as const)(
     });
     it('changing the choice invalidates consent before unlink', async () => {
       const ui = await mount(status('bound'));
+      await ui.openReset();
       if (platform === 'desktop') {
         const choose = async (intent: ServerResetIntent) =>
           act(async () =>

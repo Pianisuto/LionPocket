@@ -2,7 +2,7 @@ import { serverResetCopy, syncPanelState } from '@lionpocket/sync-local';
 import type { ServerResetIntent } from '@lionpocket/sync-local';
 import { useState } from 'react';
 import { HardDrive, Server } from 'lucide-react';
-import { SyncSection } from './primitives';
+import { SyncDisclosure, SyncSection } from './primitives';
 import { useEndpointDraft, type SyncSession } from './useSyncSession';
 
 /**
@@ -14,12 +14,12 @@ export function ServerResetForm({ status, busy, run }: SyncSession) {
   const [confirmed, setConfirmed] = useState(false);
   const [endpoint, setEndpoint] = useEndpointDraft(status.endpoint);
   return (
-    <SyncSection
+    <SyncDisclosure
       icon={Server}
-      tone="danger"
       title={serverResetCopy.title}
-      description={serverResetCopy.description}
+      description="Reconecte a um servidor recriado preservando seus dados locais."
     >
+      <p>{serverResetCopy.description}</p>
       <fieldset className="sync-reset-choices" disabled={busy}>
         <legend>{serverResetCopy.question}</legend>
         <div className="sync-reset-choices__grid">
@@ -47,23 +47,26 @@ export function ServerResetForm({ status, busy, run }: SyncSession) {
           ))}
         </div>
       </fieldset>
-      <label className="field sync-reset-endpoint">
-        <span>Novo servidor</span>
-        <input
-          aria-label="Novo servidor"
-          value={endpoint}
-          onChange={(e) => setEndpoint(e.target.value)}
-        />
-      </label>
-      <label className="sync-consent">
-        <input
-          type="checkbox"
-          checked={confirmed}
-          disabled={busy || !intent}
-          onChange={(e) => setConfirmed(e.target.checked)}
-        />
-        <span>{serverResetCopy.consent}</span>
-      </label>
+      <div className="sync-reset-confirmation">
+        <label className="field">
+          <span>Novo servidor</span>
+          <input
+            aria-label="Novo servidor"
+            value={endpoint}
+            disabled={busy}
+            onChange={(e) => setEndpoint(e.target.value)}
+          />
+        </label>
+        <label className="sync-consent sync-reset-consent">
+          <input
+            type="checkbox"
+            checked={confirmed}
+            disabled={busy || !intent}
+            onChange={(e) => setConfirmed(e.target.checked)}
+          />
+          <span>{serverResetCopy.consent}</span>
+        </label>
+      </div>
       <div className="sync-actions sync-actions--end sync-reset-footer">
         <button
           className="button button--primary"
@@ -73,7 +76,7 @@ export function ServerResetForm({ status, busy, run }: SyncSession) {
           {serverResetCopy.action}
         </button>
       </div>
-    </SyncSection>
+    </SyncDisclosure>
   );
 }
 

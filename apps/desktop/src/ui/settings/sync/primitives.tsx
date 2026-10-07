@@ -87,11 +87,6 @@ export function SyncNotice({
   );
 }
 
-/** A small heading that separates groups of sync sections. */
-export function SyncGroupLabel({ children }: { children: ReactNode }) {
-  return <h4 className="sync-group-label">{children}</h4>;
-}
-
 export function RecoveryCode({
   code,
   confirmed,

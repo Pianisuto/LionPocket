@@ -62,14 +62,6 @@ const createSyncStyles = (colors: Palette) =>
     },
     strong: { color: colors.text, fontSize: 14, fontFamily: fonts.bold },
     label: { color: colors.soft, fontSize: 13, fontFamily: fonts.medium },
-    groupLabel: {
-      marginTop: 10,
-      color: colors.muted,
-      fontSize: 11,
-      fontFamily: fonts.bold,
-      letterSpacing: 1.1,
-      textTransform: 'uppercase',
-    },
     field: { gap: 8 },
     input: {
       color: colors.text,
@@ -391,11 +383,6 @@ export function SyncNotice({
       </View>
     </View>
   );
-}
-
-export function SyncGroupLabel({ children }: { children: string }) {
-  const styles = useSyncStyles();
-  return <Text style={styles.groupLabel}>{children}</Text>;
 }
 
 export function PairingQR({ link }: { link: string }) {

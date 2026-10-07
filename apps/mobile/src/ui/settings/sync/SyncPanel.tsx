@@ -2,7 +2,7 @@ import { syncPanelState } from '@lionpocket/sync-local';
 import React, { useRef, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { DevicesSection } from './Devices';
-import { SyncCard, SyncGroupLabel, SyncNotice, useSyncStyles } from './kit';
+import { SyncCard, SyncNotice, useSyncStyles } from './kit';
 import { InvitationSection, PairingProgress } from './Pairing';
 import { ProtectionSection } from './Protection';
 import { ServerRecovery } from './ServerRecovery';
@@ -113,12 +113,7 @@ export function SyncPanel({
         </>
       )}
 
-      {view.connected && (
-        <>
-          <SyncGroupLabel>Ações avançadas</SyncGroupLabel>
-          <ServerResetForm {...session} />
-        </>
-      )}
+      {view.connected && <ServerResetForm {...session} />}
 
       {!fromLink && (
         <Text style={styles.muted}>

@@ -29,8 +29,10 @@ pela sessão, sem manter cópias independentes de status, erro ou busy.
 plataforma. Bloqueia operações simultâneas, descarta respostas antigas e remove a
 assinatura ao sair. `packages/sync-local/src/sync-presentation.ts` compartilha apenas
 derivações de estado e textos; nenhum layout ou regra de negócio foi movido para ele.
-O fluxo de servidor recriado mantém escolha explícita, aceite invalidado ao mudar
-de opção e continuação baseada na intenção persistida.
+O fluxo de servidor recriado fica em um expander recolhido por padrão, no mesmo
+estilo de Recuperação e proteção. Mantém escolha explícita, aceite invalidado
+ao mudar de opção e continuação baseada na intenção persistida. Recolher o
+expander preserva os campos sem executar nenhuma operação.
 
 ## Regressões
 
