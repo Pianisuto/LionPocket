@@ -16,6 +16,9 @@ persistência e comandos de sincronização continuam nos serviços existentes.
   disponível na página para organizar Geral, Dados e Cadastros em colunas.
   Cadastros mantém categorias à esquerda e pagamentos/cartões à direita quando
   há espaço; listas e formulários de cartões se adaptam à própria coluna.
+  Dados mantém cada aviso junto às suas ações. Em Sync, aparelhos ficam de um
+  lado e os expanders de proteção/servidor recriado do outro. Cada coluna empilha
+  seu conteúdo sem aguardar a altura da coluna vizinha.
 - Mobile: `apps/mobile/src/ui/settings/SettingsScreen.tsx` abre uma lista de áreas
   e navega para páginas dentro da mesma tela modal. Voltar retorna à lista; fechar
   encerra Configurações. Cadastros usam um editor próprio por registro. O fluxo

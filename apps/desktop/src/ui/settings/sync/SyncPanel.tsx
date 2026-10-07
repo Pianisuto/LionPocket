@@ -14,7 +14,7 @@ import { useSyncSession, type SyncSession } from './useSyncSession';
 
 /**
  * Sync settings, composed by phase: overview and pending decisions first,
- * then setup or devices, and the rare recreated-server flow at the end.
+ * then setup or devices, with recovery tools in an independent column.
  */
 export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const { status, busy, error, run, setError } = useSyncSession(onChanged);
@@ -69,15 +69,16 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       {status.phase === 'creating' && <ResumeVaultCreation {...session} />}
       {status.phase === 'pairing' && <PairingProgress {...session} />}
 
-      {view.canManage && (
-        <div className="sync-management">
-          <DevicesSection {...session} />
-          {status.owner && <ProtectionSection {...session} />}
-          <SyncDiagnostics {...session} />
+      {view.connected && (
+        <div className={view.canManage ? 'sync-management' : undefined}>
+          {view.canManage && <DevicesSection {...session} />}
+          <div className="sync-management__tools">
+            {view.canManage && status.owner && <ProtectionSection {...session} />}
+            {view.canManage && <SyncDiagnostics {...session} />}
+            <ServerResetForm {...session} />
+          </div>
         </div>
       )}
-
-      {view.connected && <ServerResetForm {...session} />}
 
       <footer className="sync-panel__footnote">
         <LockKeyhole size={14} aria-hidden="true" />

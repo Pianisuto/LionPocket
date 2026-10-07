@@ -211,6 +211,8 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
     await ui.press(platform === 'desktop' ? 'Preparar recuperação' : 'Preparar recuperação neste aparelho');
     expect(ui.controller.prepareServerRecovery).toHaveBeenCalledWith(true);
     expect(ui.button('Sincronizar agora')).toBeUndefined();
+    expect(ui.button('Adicionar aparelho')).toBeUndefined();
+    expect(text(renderer!.root)).toContain('Servidor de sincronização recriado');
     await ui.input(platform === 'desktop' ? 'Digite o código que você guardou' : 'Confirme o código de recuperação do servidor', 'LP1.server');
     await ui.press('Guardei e conferi o código');
     expect(ui.controller.confirmServerRecovery).toHaveBeenCalledWith('LP1.server');
