@@ -276,7 +276,7 @@ export const Dashboard = ({
       <section className="metric-grid">
         <MetricCard label="Entradas planejadas" value={summary.plannedIncome} hint={`${currency.format(summary.receivedIncome)} já recebidos`} tone="income" icon={<ArrowUpRight size={20} />} />
         <MetricCard label="Saídas planejadas" value={summary.plannedExpenses} hint={summary.overdueExpenses > 0 ? `${currency.format(summary.paidExpenses)} já pagos · ${currency.format(summary.overdueExpenses)} em atraso` : `${currency.format(summary.paidExpenses)} já pagos`} tone="expense" icon={<ReceiptText size={20} />} />
-        <MetricCard label="Saldo projetado" value={summary.projectedBalance} hint="Se tudo ocorrer como planejado" tone="balance" icon={<TrendingUp size={20} />} />
+        <MetricCard label="Saldo projetado" value={summary.projectedBalance} hint={overview.planning && overview.planning.safetyMargin > 0 ? `${currency.format(overview.planning.balanceAfterSafetyMargin)} após margem de segurança` : 'Se tudo ocorrer como planejado'} tone="balance" icon={<TrendingUp size={20} />} />
         <MetricCard label="Renda comprometida" value={summary.committedPercent} displayValue={`${Math.round(summary.committedPercent * 100)}%`} hint="do que deve entrar" tone="neutral" icon={<WalletCards size={20} />} />
       </section>
 

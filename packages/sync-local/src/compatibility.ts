@@ -24,6 +24,7 @@ export function assertCompatibleEnvironment(value: {
     'goal',
     'recurringPriorityList',
     'monthlyPriorityList',
+    'monthlyPlanning',
   ];
   if (
     !Array.isArray(value.entityScopes) ||

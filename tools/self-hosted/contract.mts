@@ -13,7 +13,7 @@ import { mobileSyncDatabase } from '../../apps/mobile/src/sync/database';
 import { loginOidc } from '../../apps/desktop/src/main/sync/oidc';
 import { TestSecrets } from '../../apps/sync-server/src/testSupport';
 import {createEpochAnchorBackup,inspectEpochAnchorBackup,inspectEpochActivationCheckpoint} from '../../apps/desktop/src/main/sync/epochBackup';
-import { canonicalStringify } from '@lionpocket/sync-protocol';
+import { canonicalStringify, financialScopes } from '@lionpocket/sync-protocol';
 
 const endpoint = 'https://sync.fixture.test';
 await sodium.ready;
@@ -38,6 +38,8 @@ if (phase === 'initial') {
   // Start without binding; local-only writes never produce an endless outbox.
   desktop.db.exec('DELETE FROM categories; DELETE FROM payment_methods; DELETE FROM cards;');
   mobile.sqlite.exec('DELETE FROM categories; DELETE FROM payment_methods; DELETE FROM cards;');
+  desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50001 });
+  desktop.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 30000 });
   desktop.saveTransaction({ kind: 'expense', description: 'LP_SELFHOST_CANARY_DESCRIPTION_72319', notes: 'LP_SELFHOST_CANARY_NOTE_87931', plannedAmount: 98765.43, dueDate: '2026-10-02', status: 'planned' });
   assert.equal(desktop.db.prepare('SELECT count(*) AS n FROM sync_outbox').get()?.n, 0);
 }
@@ -114,7 +116,8 @@ try {
     await a.configure(endpoint);
     const discovery = await a.environment();
     assert.equal(discovery.controlVersion, 2); assert.equal(discovery.protocolVersion, 1); assert.equal(discovery.domainSchema, 1);
-    assert.equal(discovery.entityScopes.length, 9);
+    assert.deepEqual([...discovery.entityScopes].sort(), [...financialScopes].sort());
+    assert.ok(discovery.entityScopes.includes('monthlyPlanning'));
     const first = await a.create();
     assert.equal(first.phase, 'bound');
     assert.ok(desktop.db.prepare('SELECT binding_id FROM sync_local_state').get()?.binding_id);
@@ -145,6 +148,8 @@ try {
     const tx = desktop.listTransactions({ month: '2026-10' }).find(t => t.description === input.description);
     assert.ok(tx); assert.equal(tx.actualAmount, null);
     desktop.saveTransaction({ ...input, id: tx.id, plannedAmount: 12.34 }); await a.sync(); await b.sync();
+    assert.deepEqual(await repo.getMonthlyPlanning('2026-10'), { month: '2026-10', safetyMarginCents: 50001 });
+    assert.deepEqual(await repo.getMonthlyPlanning('2026-11'), { month: '2026-11', safetyMarginCents: 30000 });
     assert.equal((await repo.list({ month: '2026-10' })).find(t => t.description === input.description)?.plannedAmount, 12.34);
     await assert.rejects(a.configure('https://operator-different.fixture.test'));
     // Account B cannot access account A's vault, even with the right proof.

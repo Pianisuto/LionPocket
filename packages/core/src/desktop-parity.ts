@@ -1,3 +1,5 @@
+import { monthlyPlanningBalance } from './monthly-planning';
+import type { MonthlyPlanning } from './types';
 import { categoryBreakdown } from './local-experience';
 import { summarizeMonth, isValidDate } from './daily-finance';
 import { todayIso } from './finance';
@@ -24,7 +26,9 @@ export function monthlyOverview(
   goals: Goal[],
   month: string,
   today = todayIso(),
+  planning?: MonthlyPlanning | null,
 ) {
+  const summary = summarizeMonth(items, month, today);
   const countedExpenses = items.filter(
     (t) =>
       t.kind === 'expense' &&
@@ -32,7 +36,8 @@ export function monthlyOverview(
       expenseCountsInMonth(t, month, today.slice(0, 7)),
   );
   return {
-    summary: summarizeMonth(items, month, today),
+    summary,
+    planning: monthlyPlanningBalance(summary.projectedBalance, planning),
     categoryBreakdown: categoryBreakdown(items, month, today),
     upcoming: countedExpenses
       .filter((t) => t.status === 'planned' && t.plannedAmount > 0)

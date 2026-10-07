@@ -411,7 +411,8 @@ describe('importações aditivas e compatibilidade desktop', () => {
     desktop.saveTransaction(
       input('Desktop', { status: 'paid', settledDate: '2026-09-29', actualAmount: 0 }),
     );
-    const converted = desktopBackupData(desktop.exportData());
+    // Historical pre-v15 JSON has no monthly planning table.
+    const converted = desktopBackupData(Object.fromEntries(Object.entries(desktop.exportData()).filter(([table]) => table !== 'monthly_planning')));
     const stage = sqliteTestConnection();
     cleanups.push(() => stage.sqlite.close());
     const validated = await loadBackupData(stage.db, converted, 4);

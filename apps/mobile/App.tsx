@@ -25,6 +25,7 @@ import {
   groupCreditCardInvoices,
   summarizeMonth,
   monthlyOverview,
+  type MonthlyPlanning,
   todayIso,
   filterTransactions,
   orderedTransactions,
@@ -42,6 +43,7 @@ import type {
 import {
   createCatalog,
   listGoals,
+  getMonthlyPlanning,
   completeStandardCategories,
   deleteCatalog,
   settleTransactions,
@@ -75,6 +77,8 @@ import { fonts, type Palette } from './src/ui/theme';
 import { Icon } from './src/ui/Icon';
 import lionImage from './src/ui/assets/lion.png';
 import { TransactionCard } from './src/ui/TransactionCard';
+import { safetyMarginHint } from './src/ui/planningPresentation';
+
 const monthLabel = (month: string) =>
   new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(
     new Date(`${month}-15T12:00:00`),
@@ -97,6 +101,7 @@ function AppContent(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leoOpen, setLeoOpen] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [monthlyPlanning, setMonthlyPlanning] = useState<MonthlyPlanning | null>(null);
   const [month, setMonth] = useState(currentMonthIso());
   const [items, setItems] = useState<Transaction[]>([]);
   const [catalogs, setCatalogs] = useState<Catalogs>({
@@ -141,16 +146,18 @@ function AppContent(): React.JSX.Element {
     setError('');
     setReady(false);
     try {
-      const [transactions, nextCatalogs, nextGoals] = await Promise.all([
+      const [transactions, nextCatalogs, nextGoals, nextPlanning] = await Promise.all([
         listTransactions({ month }),
         getCatalogs(),
         listGoals(),
+        getMonthlyPlanning(month),
       ]);
       if (revision === request.current) {
         setItems(transactions);
         setSelected([]);
         setCatalogs(nextCatalogs);
         setGoals(nextGoals);
+        setMonthlyPlanning(nextPlanning);
         setReady(true);
       }
     } catch (cause) {
@@ -231,7 +238,7 @@ function AppContent(): React.JSX.Element {
     );
   };
   const summary = summarizeMonth(items, month);
-  const overview = ready ? monthlyOverview(items, goals, month) : null;
+  const overview = ready ? monthlyOverview(items, goals, month, todayIso(), monthlyPlanning) : null;
   const filtered = orderedTransactions(
     filterTransactions(items, {
       kind,
@@ -369,6 +376,7 @@ function AppContent(): React.JSX.Element {
                 {money(summary.projectedBalance)}
               </Text>
             </View>
+            {safetyMarginHint(overview?.planning) && <Text style={overview!.planning.balanceAfterSafetyMargin < 0 ? styles.danger : styles.muted}>{safetyMarginHint(overview?.planning)}</Text>}
           </View>
           <View style={layout.metrics}>
             <View style={layout.metric}>

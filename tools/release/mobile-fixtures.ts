@@ -41,6 +41,10 @@ async function main() {
         const { client } = await founder(new ProvisioningCrypto(sodium));
         await adapter.run(bindSynthetic(client.profile, 'https://fixture.invalid', randomUUID()));
         await repo.save({ kind: 'expense', description: 'Fixture zero/null 🍋', plannedAmount: 0, actualAmount: null, dueDate: '2026-08-12', status: 'planned' });
+        if (version >= 10) {
+          await repo.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50001 });
+          await repo.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 30000 });
+        }
         if (version >= 9) {
           await repo.saveRecurring({ kind: 'expense', active: false, description: 'Fixture nullable schedule', plannedAmount: 0, startMonth: '2026-02', dueDay: 31 });
           sqlite.exec('UPDATE recurring_expenses SET start_date=NULL');

@@ -4037,6 +4037,7 @@ button.goal-mini {
 
 @container settings-content (min-width: 860px) {
   .settings-data { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sync-management__tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* Reflow by the space inside the page, including the app and settings rails. */
@@ -4045,10 +4046,6 @@ button.goal-mini {
     grid-template-columns: minmax(520px, 1.25fr) minmax(440px, 1fr);
   }
 
-  .sync-management {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-  }
 }
 
 @keyframes settings-enter {
@@ -5221,7 +5218,9 @@ label.settings-row__text {
 .sync-panel code { display: block; padding: 12px 14px; color: var(--primary-ink); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.7; border: 1px solid var(--primary-wash-strong); border-radius: var(--radius-md); background: var(--primary-wash); overflow-wrap: anywhere; }
 .sync-identifier { overflow-wrap: anywhere; }
 .sync-management { display: grid; gap: 16px; }
-.sync-management__tools { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.sync-management__tools { display: grid; align-content: start; align-items: start; gap: 16px; min-width: 0; }
+.sync-management__tools > :only-child { grid-column: 1 / -1; }
+.sync-management__protection { display: grid; gap: 10px; min-width: 0; }
 .sync-invite { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; padding: 16px; border: 1px solid var(--primary-wash-strong); border-radius: var(--radius-md); background: var(--primary-wash); }
 .sync-invite__copy { display: grid; gap: 12px; min-width: 0; }
 .sync-qr { display: block; width: 200px; max-width: 100%; height: auto; padding: 10px; border-radius: var(--radius-md); background: #fff; }
@@ -5326,3 +5325,12 @@ label.settings-row__text {
   .sync-reset-footer > .button { width: 100%; }
   .sync-choice { padding: 14px; }
 }
+
+.monthly-planning { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 24px; flex-wrap: wrap; }
+.monthly-planning__copy { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 240px; }
+.monthly-planning__copy > svg { color: var(--text-muted); flex-shrink: 0; }
+.monthly-planning__copy small, .monthly-planning__copy p { color: var(--text-muted); }
+.monthly-planning__copy h2 { font-size: 16px; margin: 5px 0; }
+.monthly-planning__copy p { font-size: 13px; margin: 0; }
+.monthly-planning__action { display: flex; align-items: center; gap: 18px; }
+.monthly-planning__action strong { font-size: 20px; white-space: nowrap; }

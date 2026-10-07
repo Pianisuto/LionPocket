@@ -1,5 +1,7 @@
 # Planejamento local no LionPocket Mobile
 
+A seção **Planejamento do mês** em Recorrências permite definir a [margem de segurança mensal](monthly-planning.md): um valor para imprevistos que não cria despesas nem altera o saldo financeiro. A margem funciona offline, participa de sync e backup e permanece ao desvincular o servidor.
+
 > Estado atualizado: [paridade funcional local](mobile-functional-parity.md). O novo bloco completa os fluxos restantes, adiciona preferências e migração v5 com suporte a valores zero.
 
 

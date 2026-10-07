@@ -16,6 +16,8 @@ import {
   validateGoal,
   validateInstallment,
   validateMonth,
+  validateMonthlyPlanning,
+  type MonthlyPlanning,
 } from '@lionpocket/core';
 import type {
   Catalogs,
@@ -41,6 +43,23 @@ export async function newId(db: Query): Promise<string> {
 // Transactions must use the native tx handle, never the queued connection inside a callback.
 export class PlanningRepository {
   constructor(protected db: Connection, syncUuid?: ()=>string) { this.db=captureConnection(db,syncUuid); }
+
+  async getMonthlyPlanning(month: string): Promise<MonthlyPlanning | null> {
+    validateMonth(month);
+    const row = (await this.db.executeAsync<{ safety_margin_cents: number }>(
+      'SELECT safety_margin_cents FROM monthly_planning WHERE month=? AND deleted_at IS NULL', [month])).rows._array[0];
+    return row ? { month, safetyMarginCents: row.safety_margin_cents } : null;
+  }
+
+  async saveMonthlyPlanning(input: MonthlyPlanning): Promise<void> {
+    validateMonthlyPlanning(input);
+    await this.db.transaction(async tx => {
+      const timestamp = new Date().toISOString();
+      await tx.executeAsync(`INSERT INTO monthly_planning VALUES(?,?,?,?,?,NULL)
+        ON CONFLICT(id) DO UPDATE SET safety_margin_cents=excluded.safety_margin_cents,updated_at=excluded.updated_at,deleted_at=NULL`,
+        [input.month, input.month, input.safetyMarginCents, timestamp, timestamp]);
+    });
+  }
 
   protected async readCatalogs(db: Query): Promise<Catalogs> {
     const categories = await db.executeAsync<SqlRow<Catalogs['categories'][number]>>(

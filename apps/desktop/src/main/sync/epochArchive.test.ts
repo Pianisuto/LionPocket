@@ -515,6 +515,8 @@ describe('anchor archive and graph planning; activation remains unavailable', ()
   });
   it('replays priorities, goals, series, installment slots and aliases with logical IDs intact', async () => {
     const f = await fixture(), bank = f.bank!;
+    bank.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50001 });
+    bank.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 0 });
     bank.createCatalogItem({ type: 'card', name: 'CARD', dueDay: 10, closingDay: 3 });
     const card = bank.getCatalogs().cards[0];
     bank.saveRecurringExpense({ kind: 'expense', active: true, description: 'SERIES', plannedAmount: 10, startMonth: '2026-10', dueDay: 10, chargeDay: 5, cardId: card.id });
@@ -525,7 +527,7 @@ describe('anchor archive and graph planning; activation remains unavailable', ()
     const identity = f.sqlite.prepare('SELECT * FROM sync_identity LIMIT 1').get()!;
     f.sqlite.prepare('INSERT INTO sync_aliases VALUES(?,?)').run(randomUUID(), identity.object_id);
     const before = f.snapshot(); const ops = await plan(f);
-    expect(ops.map(o => o.revision.entityType)).toEqual(expect.arrayContaining(['recurring', 'installmentPurchase', 'monthlyPriorityList', 'recurringPriorityList', 'goal']));
+    expect(ops.map(o => o.revision.entityType)).toEqual(expect.arrayContaining(['recurring', 'installmentPurchase', 'monthlyPriorityList', 'recurringPriorityList', 'goal', 'monthlyPlanning']));
     expect(f.snapshot()).toEqual(before);
     for (const op of ops) {
       const original = JSON.parse(String(f.sqlite.prepare('SELECT payload_json FROM sync_revisions WHERE revision_id=?').get(op.revision.restoredFrom!)!.payload_json));

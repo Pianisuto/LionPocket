@@ -165,10 +165,10 @@ export const financialSidecars = [
   'CREATE TABLE sync_aliases(alias_id TEXT PRIMARY KEY,object_id TEXT NOT NULL)',
 ];
 export const financialTableTypes = {
-  categories: 'category', payment_methods: 'paymentMethod', cards: 'card', recurring_expenses: 'recurring', installment_purchases: 'installmentPurchase', transactions: 'transaction', goals: 'goal', recurring_transaction_priorities: 'recurringPriorityList', transaction_priority_order: 'monthlyPriorityList',
+  categories: 'category', payment_methods: 'paymentMethod', cards: 'card', recurring_expenses: 'recurring', installment_purchases: 'installmentPurchase', transactions: 'transaction', goals: 'goal', recurring_transaction_priorities: 'recurringPriorityList', transaction_priority_order: 'monthlyPriorityList', monthly_planning: 'monthlyPlanning',
 } as const;
 export function financialTriggers(dialect: 'desktop' | 'android', columns: Record<string, string[]>): string[] {
-  return Object.keys(financialTableTypes).flatMap(table => ['INSERT', 'UPDATE', 'DELETE'].map(action => {
+  return Object.keys(financialTableTypes).filter(table => columns[table]?.length).flatMap(table => ['INSERT', 'UPDATE', 'DELETE'].map(action => {
     const row = action === 'DELETE' ? 'OLD' : 'NEW';
     const id = table === 'transaction_priority_order' ? `${row}.month` : table === 'recurring_transaction_priorities' ? "'recurring-priorities'" : `${row}.id`;
     const json = columns[table].flatMap(c => [`'${c}'`, `${row}.${c}`]).join(',');
@@ -188,4 +188,18 @@ export const financialMigration = [
   "UPDATE sync_local_state SET local_scope_id=(SELECT local_scope_id FROM financial_old_sync_local_state),mode=(SELECT mode FROM financial_old_sync_local_state),server_id=(SELECT server_id FROM financial_old_sync_local_state),server_epoch=(SELECT server_epoch FROM financial_old_sync_local_state),vault_id=(SELECT vault_id FROM financial_old_sync_local_state),device_id=(SELECT device_id FROM financial_old_sync_local_state),local_seq=(SELECT local_seq FROM financial_old_sync_local_state),device_seq=(SELECT device_seq FROM financial_old_sync_local_state),received_cursor=(SELECT received_cursor FROM financial_old_sync_local_state),applied_cursor=(SELECT applied_cursor FROM financial_old_sync_local_state),binding_id=(SELECT binding_id FROM financial_old_sync_local_state),pull_upper_bound=(SELECT pull_upper_bound FROM financial_old_sync_local_state) WHERE id=1",
   ...transportTables.map(t => `DROP TABLE financial_old_${t}`),
   ...financialSidecars,
+];
+
+/** One aggregate per month. Clearing a component is a put of zero, retaining identity. */
+export const monthlyPlanningColumns = ['id', 'month', 'safety_margin_cents', 'created_at', 'updated_at', 'deleted_at'];
+export const monthlyPlanningMigration = [
+  // Widen sync_identity's SQLite CHECK using the existing transactional sidecar rebuild.
+  // Historical financialMigration stays unchanged; queues, receipts and DAG are copied verbatim.
+  ...financialMigration.slice(0, -financialSidecars.length).map(statement =>
+    statement.replace("'monthlyPriorityList'))", "'monthlyPriorityList','monthlyPlanning'))")),
+  `CREATE TABLE monthly_planning (
+    id TEXT PRIMARY KEY NOT NULL, month TEXT NOT NULL UNIQUE CHECK(id=month AND month GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' AND substr(month,6,2) BETWEEN '01' AND '12'),
+    safety_margin_cents INTEGER NOT NULL DEFAULT 0 CHECK(typeof(safety_margin_cents)='integer' AND safety_margin_cents BETWEEN 0 AND 9007199254740991),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
+  )`,
 ];

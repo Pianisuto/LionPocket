@@ -1,3 +1,4 @@
+import { MonthlyPlanningSection } from './MonthlyPlanningSection';
 import { useAppearance } from './Appearance';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -231,6 +232,7 @@ export function PlanningScreen({
                   </View>
                 </>
               )}
+              {area === 'recurring' && <MonthlyPlanningSection key={month} month={month} onMonth={onMonth} onChanged={onChanged} />}
               {!loading && area === 'goals' && (
                 <View style={styles.card}>
                   <Text style={styles.heading}>

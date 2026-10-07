@@ -235,6 +235,7 @@ export interface CategorySummary {
 }
 
 export interface Overview {
+  planning?: MonthlyPlanningBalance;
   summary: MonthSummary;
   annual: MonthSummary[];
   categoryBreakdown: CategorySummary[];
@@ -257,4 +258,15 @@ export interface CatalogInput {
   color?: string;
   dueDay?: number;
   closingDay?: number | null;
+}
+
+/** Planejamento por mês; não é movimento financeiro. Zero desativa a margem. */
+export interface MonthlyPlanning {
+  month: string;
+  safetyMarginCents: number;
+}
+export interface MonthlyPlanningBalance {
+  projectedBalance: number;
+  safetyMargin: number;
+  balanceAfterSafetyMargin: number;
 }

@@ -2,13 +2,13 @@
 
 O domínio financeiro e os envelopes criptográficos usam versão 1. Pareamento usa exclusivamente [LPV2](device-pairing-lpv2.md); recuperação usa [pacote LPR1 e código próprio](recovery.md). Versões desses contratos são independentes.
 
-Os nove escopos financeiros têm captura, validação e projeção compartilhadas em Desktop/Android. Identidades comuns usam UUIDv4; importações comprovadas e reservas de slots podem usar UUIDv5. Foreground e botão manual acionam o mesmo motor. Tipos e validação estão em [`packages/sync-protocol/src`](../packages/sync-protocol/src); armazenamento, causalidade e transporte em `packages/sync-local`.
+Os dez escopos financeiros/de planejamento têm captura, validação e projeção compartilhadas em Desktop/Android. Identidades comuns usam UUIDv4; importações comprovadas, reservas de slots e planejamento mensal podem usar UUIDv5. Foreground e botão manual acionam o mesmo motor. Tipos e validação estão em [`packages/sync-protocol/src`](../packages/sync-protocol/src); armazenamento, causalidade e transporte em `packages/sync-local`.
 
 ## 1. Versões, escopo e limites de responsabilidade
 
 `protocolVersion=1` governa o envelope; `domainSchema=1` governa plaintext. Versões SQLite desktop/mobile e formato do backup são independentes. `cryptoSuite="lp-sodium-v1"` escolhe parâmetros exatos; nenhuma negociação pode substituí-la por plaintext ou outra construção sob o mesmo nome.
 
-Discovery anuncia `category`, `paymentMethod`, `card`, `recurring`, `installmentPurchase`, `transaction`, `goal`, `recurringPriorityList` e `monthlyPriorityList`. O opt-in de sincronização é explícito; o uso financeiro local independe do servidor. Versão desconhecida conserva bytes em quarentena e não fecha o banco local.
+Discovery anuncia `category`, `paymentMethod`, `card`, `recurring`, `installmentPurchase`, `transaction`, `goal`, `recurringPriorityList`, `monthlyPriorityList` e `monthlyPlanning`. O opt-in de sincronização é explícito; o uso financeiro local independe do servidor. Escopo desconhecido no discovery é rejeitado com `unsupported_capability` antes de receber revisões; não chega à quarentena. A inclusão de `monthlyPlanning` exige atualização conjunta de servidor e clientes vinculados, sem negociação para rolling upgrade. A quarentena conserva bytes de revisões desconhecidas recebidas em um ambiente compatível; não substitui a validação do discovery. Veja [comportamento e compatibilidade do planejamento mensal](monthly-planning.md).
 
 Core: datas/invariantes/regras financeiras. Protocolo: DTO, formato e validação portável. Motor: transações, causalidade, projeção e conflitos. Apps: drivers, UTF-8/CSPRNG/crypto/cofre e rede. Servidor: autorização, idempotência, grafo público e log atômico; não executa regras financeiras ou lê o tipo dos objetos.
 

@@ -173,3 +173,28 @@ describe('exibição de contas a pagar', () => {
     expect(markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')).toContain('21 jul');
   });
 });
+
+describe('auxiliary safety margin in the existing projected balance card', () => {
+  const overview: Overview = {
+    summary: { month: '2026-10', plannedIncome: 3200, receivedIncome: 0, plannedExpenses: 0, paidExpenses: 0, overdueExpenses: 0, projectedBalance: 3200, realizedBalance: 0, committedPercent: 0 },
+    annual: [], categoryBreakdown: [], upcoming: [], recent: [], goals: [],
+  };
+  const render = (data: Overview) => renderToStaticMarkup(createElement(Dashboard, { overview: data, loading: false, onNavigate: () => undefined, onEditTransaction: () => undefined, onSettleTransactions: async () => true }));
+  it('preserves the original hint with no configured margin, including zero', () => {
+    expect(render(overview)).toContain('Se tudo ocorrer como planejado');
+    expect(render(overview)).not.toContain('após margem de segurança');
+    expect(render({ ...overview, planning: { projectedBalance: 3200, safetyMargin: 0, balanceAfterSafetyMargin: 3200 } })).toBe(render(overview));
+  });
+  it('keeps four cards and original projection while displaying availability as a hint', () => {
+    const html = render({ ...overview, planning: { projectedBalance: 3200, safetyMargin: 500, balanceAfterSafetyMargin: 2700 } });
+    expect(html).toMatch(/3\.200,00/);
+    expect(html).toMatch(/2\.700,00 após margem de segurança/);
+    expect(html.match(/<article class="metric-card /g)).toHaveLength(4);
+    expect(html).not.toContain('Se tudo ocorrer como planejado');
+  });
+  it('shows a negative amount after the margin without replacing the main projected balance', () => {
+    const html = render({ ...overview, summary: { ...overview.summary, projectedBalance: 300 }, planning: { projectedBalance: 300, safetyMargin: 500, balanceAfterSafetyMargin: -200 } });
+    expect(html).toMatch(/-R\$.*200,00 após margem de segurança/);
+    expect(html).toMatch(/300,00/);
+  });
+});

@@ -2,7 +2,7 @@ import { syncColumns } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-export const desktopSchemaVersion = 14;
+export const desktopSchemaVersion = 15;
 
 const financialColumns: Record<string, string[]> = {
     categories: ['id'],
@@ -48,7 +48,8 @@ export function initializeLocalSchema(db: DatabaseSync, path: string, upgrade: (
   // Historical markers were also used for seeds; inspect additive columns as well.
   const complete = Array.from({ length: desktopSchemaVersion }, (_, index) => index + 1)
     .every((version) => versions.includes(version))
-    && hasCurrentFinancialSchema(db, versions) && columnsPresent(db, syncColumns);
+    && hasCurrentFinancialSchema(db, versions) && columnsPresent(db, syncColumns)
+    && columnsPresent(db, { monthly_planning: ['month', 'safety_margin_cents'] });
   if (complete) return; // Do not replay historical data corrections on current databases.
 
   if (existing && path !== ':memory:') {

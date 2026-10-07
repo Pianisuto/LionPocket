@@ -1,3 +1,4 @@
+import { safetyMarginHint } from './planningPresentation';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -131,6 +132,7 @@ export function OverviewScreen({
                 >
                   {money(summary.projectedBalance)}
                 </Text>
+                {safetyMarginHint(overview.planning) && <Text style={overview.planning.balanceAfterSafetyMargin < 0 ? styles.danger : styles.muted}>{safetyMarginHint(overview.planning)}</Text>}
                 <Text style={styles.muted}>
                   Realizado: {money(summary.realizedBalance)}
                 </Text>

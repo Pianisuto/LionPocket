@@ -133,7 +133,7 @@ describe('paridade funcional e atualização protegida', () => {
     expect(protect).toHaveBeenCalledTimes(1);
     const after = await captureBackup(db);
     const { local_preferences, ...financial } = after.data;
-    expect(Object.fromEntries(Object.entries(financial).filter(([table]) => !syncTables.includes(table)))).toEqual(before.data);
+    expect(Object.fromEntries(Object.entries(financial).filter(([table]) => !syncTables.includes(table) && table !== 'monthly_planning'))).toEqual(before.data);
     expect(local_preferences).toEqual([]);
     await verifyDatabase(db, migrations.length);
     await migrate(db, protect);
@@ -331,9 +331,11 @@ describe('paridade funcional e atualização protegida', () => {
     );
     const stage = sqliteTestConnection();
     cleanup.push(() => stage.sqlite.close());
+    const historical = desktopBackupData(desktop.exportData());
+    delete historical.monthly_planning;
     const imported = await loadBackupData(
       stage.db,
-      { ...desktopBackupData(desktop.exportData()), local_preferences: [] },
+      { ...historical, local_preferences: [] },
       5,
     );
     await writePreferences(db, { theme: 'light' });

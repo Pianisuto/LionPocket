@@ -13,6 +13,7 @@ export const financialScopes: EntityType[] = [
   "goal",
   "recurringPriorityList",
   "monthlyPriorityList",
+  "monthlyPlanning",
 ];
 const fields: Record<EntityType, string[]> = {
   category: ["name", "kind", "color"],
@@ -87,6 +88,7 @@ const fields: Record<EntityType, string[]> = {
   ],
   recurringPriorityList: ["entries"],
   monthlyPriorityList: ["month", "transactionIds"],
+  monthlyPlanning: ["month", "safetyMarginCents"],
 };
 const exact = (v: unknown, keys: string[]): Record<string, unknown> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
@@ -287,6 +289,7 @@ export function assertFinancialRevision(
     oneOf(s.status, ["planned", "saving", "completed", "paused", "cancelled"]);
     oneOf(s.priority, ["low", "medium", "high"]);
   }
+  if (r.entityType === "monthlyPlanning") month(s.month);
   if (r.entityType === "monthlyPriorityList") {
     month(s.month);
     const ids = array(s.transactionIds);

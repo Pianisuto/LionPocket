@@ -58,6 +58,7 @@ export interface GoalSnapshot {
   dueDate: string | null; status: GoalStatus; notes: string;
 }
 export interface Snapshots {
+  monthlyPlanning: { month: string; safetyMarginCents: number };
   transaction: TransactionSnapshot;
   category: CategorySnapshot;
   paymentMethod: PaymentMethodSnapshot;

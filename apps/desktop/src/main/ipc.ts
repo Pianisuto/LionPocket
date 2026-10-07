@@ -45,6 +45,8 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
   ipcMain.handle('catalogs:delete', (_event, type: 'category' | 'card', id: string) =>
     database.deleteCatalogItem(type, id),
   );
+  ipcMain.handle('monthly-planning:get', (_event, month: string) => database.getMonthlyPlanning(month));
+  ipcMain.handle('monthly-planning:save', (_event, input: import('@lionpocket/core').MonthlyPlanning) => database.saveMonthlyPlanning(input));
   ipcMain.handle('overview:get', (_event, month: string) => database.getOverview(month));
   ipcMain.handle('transactions:list', (_event, filters: TransactionFilters) =>
     database.listTransactions(filters),
@@ -103,7 +105,7 @@ export const registerIpcHandlers = (database: LionPocketDatabase) => {
     if (selection.canceled || !selection.filePath) return null;
     await fs.writeFile(
       selection.filePath,
-      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), schemaVersion: 13, data: database.exportData(true) }, null, 2),
+      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), schemaVersion: 15, data: database.exportData(true) }, null, 2),
       'utf8',
     );
     return selection.filePath;

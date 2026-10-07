@@ -22,6 +22,8 @@ test('native fixtures preserve historical schema versions and cover the current 
         assert.equal(JSON.parse(readFileSync(join(directory, `v${version}.json`), 'utf8')).userVersion, version);
         if (version === metadata.currentSchemaVersion)
           assert.ok(db.prepare('SELECT count(*) AS n FROM recurring_expenses WHERE start_date IS NULL').get().n > 0);
+        if (version === metadata.currentSchemaVersion)
+          assert.deepEqual(db.prepare('SELECT month,safety_margin_cents FROM monthly_planning ORDER BY month').all().map(row => ({ ...row })), [{ month: '2026-10', safety_margin_cents: 50001 }, { month: '2026-11', safety_margin_cents: 30000 }]);
         assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
         assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
       } finally { db.close(); }

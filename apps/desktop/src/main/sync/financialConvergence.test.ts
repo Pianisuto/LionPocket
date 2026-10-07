@@ -6,6 +6,8 @@ import {
   ProvisioningCrypto,
   startFinancialBaseline,
   applyCommit,
+  unlinkLocalServer,
+  reconnectFinancial,
   resolveFinancial,
   type LocalSyncDatabase,
   type DecodedOperation,
@@ -124,6 +126,67 @@ async function deliver(
   );
 }
 describe('financial domain across desktop and Android repositories', () => {
+  it('syncs independent monthly planning, edits, zero removal and recreation in both directions with stable identity', async () => {
+    const x = await banks();
+    x.desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
+    x.desktop.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 30000 });
+    await deliver(x.db, x.mb, x.a, 'android');
+    expect(await x.repo.getMonthlyPlanning('2026-10')).toMatchObject({ safetyMarginCents: 50000 });
+    const id = String((await x.db.read("SELECT object_id FROM sync_identity WHERE entity_type='monthlyPlanning' AND local_id='2026-10'"))[0].object_id);
+    await x.repo.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 60000 });
+    await deliver(x.mb, x.db, x.b, 'desktop');
+    expect(x.desktop.getMonthlyPlanning('2026-10')).toMatchObject({ safetyMarginCents: 60000 });
+    x.desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 0 });
+    await deliver(x.db, x.mb, x.a, 'android');
+    expect(await x.repo.getMonthlyPlanning('2026-10')).toMatchObject({ safetyMarginCents: 0 });
+    await x.repo.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 999 });
+    await deliver(x.mb, x.db, x.b, 'desktop');
+    expect(x.desktop.getMonthlyPlanning('2026-10')).toMatchObject({ safetyMarginCents: 999 });
+    expect(x.desktop.getMonthlyPlanning('2026-11')).toMatchObject({ safetyMarginCents: 30000 });
+    expect(x.desktop.getMonthlyPlanning('2026-12')).toBeNull();
+    for (const db of [x.db, x.mb]) {
+      expect(await db.read("SELECT object_id FROM sync_identity WHERE entity_type='monthlyPlanning' AND local_id='2026-10'")).toEqual([{ object_id: id }]);
+      expect(await db.read('SELECT * FROM sync_tombstones')).toEqual([]);
+    }
+  });
+  it('keeps concurrent different margins as a review conflict instead of silently taking the old value', async () => {
+    const x = await banks();
+    x.desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
+    await deliver(x.db, x.mb, x.a, 'android');
+    x.desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 40000 });
+    await x.repo.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 60000 });
+    await deliver(x.db, x.mb, x.a, 'android');
+    await deliver(x.mb, x.db, x.b, 'desktop');
+    expect(await x.db.read('SELECT * FROM sync_conflicts WHERE resolution_id IS NULL')).toHaveLength(1);
+    expect(await x.mb.read('SELECT * FROM sync_conflicts WHERE resolution_id IS NULL')).toHaveLength(1);
+  });
+  it('preserves planning through local detach, offline edits and a fresh baseline to a different server', async () => {
+    const x = await banks();
+    x.desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
+    await deliver(x.db, x.mb, x.a, 'android');
+    const before = await x.mb.read('SELECT * FROM monthly_planning');
+    await x.mb.run(unlinkLocalServer());
+    expect(await x.mb.read('SELECT * FROM monthly_planning')).toEqual(before);
+    await x.repo.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 70000 });
+    await x.repo.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 30000 });
+    expect(await x.mb.read('SELECT * FROM sync_outbox')).toEqual([]);
+    const pin = { ...x.b.profile.pin, vaultId: randomUUID(), serverId: randomUUID() };
+    await x.mb.run(startFinancialBaseline({ ...x.b.profile, pin }, 'https://new.invalid', '/fixture/new.sqlite', randomUUID));
+    const values = (await x.mb.read('SELECT payload_json FROM sync_revisions')).map(row => JSON.parse(String(row.payload_json))).filter(r => r.entityType === 'monthlyPlanning');
+    expect(values.map(r => r.snapshot)).toEqual(expect.arrayContaining([{ month: '2026-10', safetyMarginCents: 70000 }, { month: '2026-11', safetyMarginCents: 30000 }]));
+    expect(await x.repo.getMonthlyPlanning('2026-10')).toMatchObject({ safetyMarginCents: 70000 });
+  });
+  it('captures offline planning edits after restoring and reconnecting the same binding', async () => {
+    const x = await banks();
+    x.desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
+    await x.db.run((function* () { yield { sql: "UPDATE sync_local_state SET mode='disabled' WHERE id=1" }; })());
+    x.desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 0 });
+    x.desktop.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 12345 });
+    await x.db.run(reconnectFinancial(x.a.profile, 'https://fixture.invalid', '/fixture/restore.sqlite', randomUUID));
+    await deliver(x.db, x.mb, x.a, 'android');
+    expect(await x.repo.getMonthlyPlanning('2026-10')).toMatchObject({ safetyMarginCents: 0 });
+    expect(await x.repo.getMonthlyPlanning('2026-11')).toMatchObject({ safetyMarginCents: 12345 });
+  });
   it('converges catalogs, linked cents/zero/NULL/Unicode, goals, edits and deletes in both directions', async () => {
     const x = await banks();
     x.desktop.createCatalogItem({

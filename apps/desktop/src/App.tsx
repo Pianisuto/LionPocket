@@ -290,6 +290,7 @@ export default function App() {
           )}
           {view === 'recurring' && (
             <Recurring
+              month={month}
               refreshKey={refreshKey}
               onAdd={() => setModal({ type: 'recurring' })}
               onEdit={(item) => setModal({ type: 'recurring', item })}
