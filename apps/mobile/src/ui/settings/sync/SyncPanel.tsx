@@ -7,6 +7,7 @@ import { InvitationSection, PairingProgress } from './Pairing';
 import { ProtectionSection } from './Protection';
 import { ServerRecovery } from './ServerRecovery';
 import { ServerResetContinuation, ServerResetForm } from './ServerReset';
+import { UnlinkServer } from './UnlinkServer';
 import { SyncOverview } from './SyncOverview';
 import { SyncDiagnostics, SyncReviews } from './SyncReviews';
 import { RecoverVault, ResumeVaultCreation, SyncSetup } from './SyncSetup';
@@ -42,7 +43,7 @@ export function SyncPanel({
 
   const session: SyncSession = { status, busy, act, setError };
   const view = syncPanelState(status);
-  const local = status.phase === 'local';
+  const local = status.phase === 'local' && !status.unlinkPending;
   const fromLink = !!initialInvitation;
   const invitationProps = {
     ...session,
@@ -102,8 +103,8 @@ export function SyncPanel({
         />
       )}
       {local && !fromLink && <RecoverVault {...session} />}
-      {status.phase === 'creating' && <ResumeVaultCreation {...session} />}
-      {status.phase === 'pairing' && <PairingProgress {...invitationProps} />}
+      {!status.unlinkPending && status.phase === 'creating' && <ResumeVaultCreation {...session} />}
+      {!status.unlinkPending && status.phase === 'pairing' && <PairingProgress {...invitationProps} />}
 
       {view.canManage && (
         <>
@@ -114,6 +115,8 @@ export function SyncPanel({
       )}
 
       {view.connected && <ServerResetForm {...session} />}
+
+      {view.canUnlink && <UnlinkServer {...session} />}
 
       {!fromLink && (
         <Text style={styles.muted}>
