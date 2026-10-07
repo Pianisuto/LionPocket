@@ -77,7 +77,7 @@ export function SyncStatusBadge({ activity }: { activity: SyncActivity | null })
         <Icon size={16} className={activity === 'syncing' ? 'sync-spinning' : undefined} />
       </span>
       <div>
-        <strong>Seus dados</strong>
+        <strong>{activity === 'local' ? 'Dados locais' : activity ? 'Status' : 'Seus dados'}</strong>
         <small>{presentation.label}</small>
       </div>
     </div>
