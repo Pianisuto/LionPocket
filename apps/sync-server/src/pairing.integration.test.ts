@@ -59,10 +59,17 @@ vi.mock('react-native', () => ({
   Text: 'mobile-text',
   TextInput: 'mobile-input',
   View: 'mobile-view',
+  Pressable: 'mobile-pressable',
+  StyleSheet: { create: (styles: Record<string, unknown>) => styles },
   Share: { share: vi.fn() },
   Image: 'mobile-image',
   NativeModules: { LionPocketPairing: { renderQr: vi.fn(async () => 'data:image/png;base64,synthetic'), copyLink: vi.fn(async () => undefined), scan: vi.fn(async () => { throw new Error('Camera must not be needed'); }) } },
 }));
+vi.mock('../../mobile/src/ui/Appearance', async () => {
+  const { darkColors } = await import('../../mobile/src/ui/theme');
+  return { useAppearance: () => ({ colors: darkColors }) };
+});
+vi.mock('../../mobile/src/ui/Icon', () => ({ Icon: 'mobile-icon' }));
 vi.mock('../../mobile/src/ui/components', async () => {
   const React = await import('react');
   return {

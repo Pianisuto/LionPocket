@@ -380,52 +380,61 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       )}
 
       {status.phase === 'bound' && (
-        <SyncSection icon={Server} title="Servidor de sincronização recriado">
-          <p>
-            O remoto anterior será abandonado. Um backup completo será criado
-            antes de remover o vínculo. Seus dados financeiros locais não serão
-            apagados.
-          </p>
-          <fieldset disabled={busy}>
+        <SyncSection
+          icon={Server}
+          title="Servidor de sincronização recriado"
+          description="O remoto anterior será abandonado. Um backup completo será criado antes de remover o vínculo. Seus dados financeiros locais não serão apagados."
+        >
+          <fieldset className="sync-reset-choices" disabled={busy}>
             <legend>Como este aparelho deve continuar?</legend>
-            <label>
-              <input
-                type="radio"
-                name="server-reset-intent"
-                value="source-of-truth"
-                checked={resetIntent === 'source-of-truth'}
-                onChange={() => {
-                  setResetIntent('source-of-truth');
-                  setResetConfirmed(false);
-                }}
-              />{' '}
-              Usar este aparelho como fonte de verdade
-            </label>
-            <p>
-              Depois do backup e da desvinculação, crie um novo cofre usando os
-              dados deste aparelho. Usar esta opção em mais de um aparelho pode
-              criar cofres independentes.
-            </p>
-            <label>
-              <input
-                type="radio"
-                name="server-reset-intent"
-                value="join-existing"
-                checked={resetIntent === 'join-existing'}
-                onChange={() => {
-                  setResetIntent('join-existing');
-                  setResetConfirmed(false);
-                }}
-              />{' '}
-              Conectar este aparelho a um cofre já recriado
-            </label>
-            <p>
-              Outro aparelho já criou o novo cofre. Depois do backup e da
-              desvinculação, use o convite LPV2 desse aparelho e aguarde sua
-              aprovação. Este fluxo não cria um novo cofre.
-            </p>
+            <div className="sync-reset-choices__grid">
+              <label className="sync-choice sync-reset-choice">
+                <input
+                  type="radio"
+                  name="server-reset-intent"
+                  value="source-of-truth"
+                  aria-label="Usar este aparelho como fonte de verdade"
+                  aria-describedby="server-reset-source-description"
+                  checked={resetIntent === 'source-of-truth'}
+                  onChange={() => {
+                    setResetIntent('source-of-truth');
+                    setResetConfirmed(false);
+                  }}
+                />
+                <span>
+                  <strong>Usar este aparelho como fonte de verdade</strong>
+                  <small id="server-reset-source-description">
+                    Depois do backup e da desvinculação, crie um novo cofre usando
+                    os dados deste aparelho. Usar esta opção em mais de um aparelho
+                    pode criar cofres independentes.
+                  </small>
+                </span>
+              </label>
+              <label className="sync-choice sync-reset-choice">
+                <input
+                  type="radio"
+                  name="server-reset-intent"
+                  value="join-existing"
+                  aria-label="Conectar este aparelho a um cofre já recriado"
+                  aria-describedby="server-reset-join-description"
+                  checked={resetIntent === 'join-existing'}
+                  onChange={() => {
+                    setResetIntent('join-existing');
+                    setResetConfirmed(false);
+                  }}
+                />
+                <span>
+                  <strong>Conectar este aparelho a um cofre já recriado</strong>
+                  <small id="server-reset-join-description">
+                    Outro aparelho já criou o novo cofre. Depois do backup e da
+                    desvinculação, use o convite LPV2 desse aparelho e aguarde sua
+                    aprovação. Este fluxo não cria um novo cofre.
+                  </small>
+                </span>
+              </label>
+            </div>
           </fieldset>
-          <label className="field">
+          <label className="field sync-reset-endpoint">
             <span>Novo servidor</span>
             <input
               aria-label="Novo servidor"
@@ -433,25 +442,29 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
               onChange={(e) => setEndpoint(e.target.value)}
             />
           </label>
-          <label>
+          <label className="sync-consent">
             <input
               type="checkbox"
               checked={resetConfirmed}
               disabled={busy || !resetIntent}
               onChange={(e) => setResetConfirmed(e.target.checked)}
-            />{' '}
-            Entendo que o remoto anterior será abandonado e que o backup será
-            preservado antes de remover o vínculo.
+            />
+            <span>
+              Entendo que o remoto anterior será abandonado e que o backup será
+              preservado antes de remover o vínculo.
+            </span>
           </label>
-          <button
-            className="button"
-            disabled={busy || !resetIntent || !resetConfirmed || !endpoint.trim()}
-            onClick={() =>
-              void run('server-reset', [endpoint, resetIntent, resetConfirmed])
-            }
-          >
-            Preservar backup e remover vínculo antigo
-          </button>
+          <div className="sync-actions sync-actions--end sync-reset-footer">
+            <button
+              className="button button--primary"
+              disabled={busy || !resetIntent || !resetConfirmed || !endpoint.trim()}
+              onClick={() =>
+                void run('server-reset', [endpoint, resetIntent, resetConfirmed])
+              }
+            >
+              Preservar backup e remover vínculo antigo
+            </button>
+          </div>
         </SyncSection>
       )}
       {resetReady && (

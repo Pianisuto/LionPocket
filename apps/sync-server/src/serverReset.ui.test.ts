@@ -19,10 +19,17 @@ vi.mock('react-native', () => ({
   Text: 'mobile-text',
   TextInput: 'mobile-input',
   View: 'mobile-view',
+  Pressable: 'mobile-pressable',
+  StyleSheet: { create: (styles: Record<string, unknown>) => styles },
   Image: 'mobile-image',
   Share: {},
   NativeModules: {},
 }));
+vi.mock('../../mobile/src/ui/Appearance', async () => {
+  const { darkColors } = await import('../../mobile/src/ui/theme');
+  return { useAppearance: () => ({ colors: darkColors }) };
+});
+vi.mock('../../mobile/src/ui/Icon', () => ({ Icon: 'mobile-icon' }));
 vi.mock('../../mobile/src/ui/components', async () => {
   const React = await import('react');
   return {
@@ -143,8 +150,10 @@ describe.each(['desktop', 'android'] as const)(
         renderer!.root.findAll((node) =>
           platform === 'desktop'
             ? node.type === 'button' && text(node).trim() === label
-            : node.type === ('mobile-button' as unknown) &&
-              node.props.label === label,
+            : (node.type === ('mobile-button' as unknown) &&
+                node.props.label === label) ||
+              (node.type === ('mobile-pressable' as unknown) &&
+                node.props.accessibilityLabel === label),
         )[0];
       const press = async (label: string) => {
         expect(button(label)).toBeTruthy();
@@ -216,7 +225,7 @@ describe.each(['desktop', 'android'] as const)(
               .disabled,
           ).toBe(true);
           await ui.press(labels[intent === 'source-of-truth' ? 0 : 1]);
-          await ui.press('Entendo e confirmo a desvinculação');
+          await ui.press('Entendo que o remoto anterior será abandonado e que o backup será preservado antes de remover o vínculo.');
         }
         expect(text(renderer!.root)).toContain('cofres independentes');
         expect(text(renderer!.root)).toContain(
@@ -323,7 +332,7 @@ describe.each(['desktop', 'android'] as const)(
         await choose('join-existing');
       } else {
         await ui.press('Usar este aparelho como fonte de verdade');
-        await ui.press('Entendo e confirmo a desvinculação');
+        await ui.press('Entendo que o remoto anterior será abandonado e que o backup será preservado antes de remover o vínculo.');
         await ui.press('Conectar este aparelho a um cofre já recriado');
       }
       expect(

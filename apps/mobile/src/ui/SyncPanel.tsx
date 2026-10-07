@@ -11,11 +11,15 @@ import {
   Share,
   NativeModules,
   Image,
+  Pressable,
+  StyleSheet,
 } from 'react-native';
 import type { ServerResetIntent, SyncStatus } from '@lionpocket/sync-local';
 import { pairingErrorMessage } from '@lionpocket/sync-protocol';
 import { syncController, betaEndpoint } from '../sync/sync';
 import { Button, useStyles } from './components';
+import { useAppearance } from './Appearance';
+import { Icon } from './Icon';
 export function SyncPanel({
   onChanged,
   initialInvitation,
@@ -41,6 +45,7 @@ export function SyncPanel({
     [setup, setSetup] = useState(false),
     [advanced, setAdvanced] = useState(false),
     [adding, setAdding] = useState(false);
+  const { colors } = useAppearance();
   const invitationInput = useRef<React.ComponentRef<typeof TextInput>>(null);
   const refresh = async () => {
     const s = await (await syncController()).status();
@@ -156,83 +161,104 @@ export function SyncPanel({
         </Text>
       )}
       {status.phase === 'bound' && (
-        <View>
-          <Text style={styles.heading}>Servidor de sincronização recriado</Text>
-          <Text style={styles.text}>
-            O remoto anterior será abandonado. Um backup completo será criado
-            antes de remover o vínculo. Seus dados financeiros locais não serão
-            apagados.
-          </Text>
-          <Text style={styles.text}>Como este aparelho deve continuar?</Text>
-          <Button
-            label="Usar este aparelho como fonte de verdade"
-            tone={resetIntent === 'source-of-truth' ? 'primary' : 'normal'}
-            disabled={busy}
-            onPress={() => {
-              setResetIntent('source-of-truth');
-              setResetConfirmed(false);
-            }}
-          />
-          <Text style={styles.text}>
-            Depois do backup e da desvinculação, crie um novo cofre usando os
-            dados deste aparelho. Usar esta opção em mais de um aparelho pode
-            criar cofres independentes.
-          </Text>
-          <Button
-            label="Conectar este aparelho a um cofre já recriado"
-            tone={resetIntent === 'join-existing' ? 'primary' : 'normal'}
-            disabled={busy}
-            onPress={() => {
-              setResetIntent('join-existing');
-              setResetConfirmed(false);
-            }}
-          />
-          <Text style={styles.text}>
-            Outro aparelho já criou o novo cofre. Depois do backup e da
-            desvinculação, use o convite LPV2 desse aparelho e aguarde sua
-            aprovação. Este fluxo não cria um novo cofre.
-          </Text>
-          {resetIntent && (
-            <Text style={styles.text}>
-              Escolha:{' '}
-              {resetIntent === 'source-of-truth'
-                ? 'Usar este aparelho como fonte de verdade'
-                : 'Conectar este aparelho a um cofre já recriado'}
+        <View style={[resetStyles.section, { borderTopColor: colors.line }]}>
+          <View style={resetStyles.header}>
+            <Text accessibilityRole="header" style={styles.heading}>
+              Servidor de sincronização recriado
             </Text>
-          )}
-          <TextInput
-            style={styles.input}
-            accessibilityLabel="Novo servidor"
-            value={endpoint}
-            onChangeText={setEndpoint}
-            autoCapitalize="none"
-          />
-          <Text style={styles.text}>
-            Confirme que o remoto anterior será abandonado e que o backup será
-            preservado antes de remover o vínculo.
-          </Text>
-          <Button
-            label={
-              resetConfirmed
-                ? 'Desvinculação confirmada'
-                : 'Entendo e confirmo a desvinculação'
-            }
+            <Text style={styles.muted}>
+              O remoto anterior será abandonado. Um backup completo será criado
+              antes de remover o vínculo. Seus dados financeiros locais não serão
+              apagados.
+            </Text>
+          </View>
+          <View style={resetStyles.choices}>
+            <Text style={styles.label}>Como este aparelho deve continuar?</Text>
+            <ServerResetChoice
+              label="Usar este aparelho como fonte de verdade"
+              description="Depois do backup e da desvinculação, crie um novo cofre usando os dados deste aparelho. Usar esta opção em mais de um aparelho pode criar cofres independentes."
+              checked={resetIntent === 'source-of-truth'}
+              disabled={busy}
+              onPress={() => {
+                setResetIntent('source-of-truth');
+                setResetConfirmed(false);
+              }}
+            />
+            <ServerResetChoice
+              label="Conectar este aparelho a um cofre já recriado"
+              description="Outro aparelho já criou o novo cofre. Depois do backup e da desvinculação, use o convite LPV2 desse aparelho e aguarde sua aprovação. Este fluxo não cria um novo cofre."
+              checked={resetIntent === 'join-existing'}
+              disabled={busy}
+              onPress={() => {
+                setResetIntent('join-existing');
+                setResetConfirmed(false);
+              }}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Novo servidor</Text>
+            <TextInput
+              style={styles.input}
+              accessibilityLabel="Novo servidor"
+              value={endpoint}
+              onChangeText={setEndpoint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              selectionColor={colors.primary}
+            />
+          </View>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityLabel="Entendo que o remoto anterior será abandonado e que o backup será preservado antes de remover o vínculo."
+            accessibilityState={{
+              checked: resetConfirmed,
+              disabled: busy || !resetIntent,
+            }}
             disabled={busy || !resetIntent}
             onPress={() => setResetConfirmed(!resetConfirmed)}
-          />
-          <Button
-            label="Preservar backup e remover vínculo antigo"
-            disabled={busy || !resetIntent || !resetConfirmed || !endpoint.trim()}
-            onPress={() =>
-              act((c) =>
-                c.resetForRecreatedServer(endpoint, resetIntent!, resetConfirmed),
-              )
-            }
-          />
+            style={({ pressed }) => [
+              resetStyles.choice,
+              { backgroundColor: colors.surface2, borderColor: colors.line },
+              (busy || !resetIntent) && styles.disabled,
+              pressed && { opacity: 0.72 },
+            ]}
+          >
+            <View
+              style={[
+                resetStyles.indicator,
+                {
+                  borderRadius: 5,
+                  borderColor: resetConfirmed ? colors.primary : colors.lineStrong,
+                  backgroundColor: resetConfirmed ? colors.primary : 'transparent',
+                },
+              ]}
+            >
+              {resetConfirmed && (
+                <Icon name="check" size={14} color={colors.onPrimary} />
+              )}
+            </View>
+            <Text style={[styles.text, resetStyles.copy]}>
+              Entendo que o remoto anterior será abandonado e que o backup será
+              preservado antes de remover o vínculo.
+            </Text>
+          </Pressable>
+          <View style={[resetStyles.footer, { borderTopColor: colors.line }]}>
+            <Button
+              label="Preservar backup e remover vínculo antigo"
+              tone="primary"
+              disabled={busy || !resetIntent || !resetConfirmed || !endpoint.trim()}
+              onPress={() =>
+                act((c) =>
+                  c.resetForRecreatedServer(endpoint, resetIntent!, resetConfirmed),
+                )
+              }
+            />
+          </View>
         </View>
       )}
       {resetReady && (
-        <View>
+        <View style={resetStyles.choices}>
           <Text style={styles.text}>
             Backup criado: {status.serverReset!.backupPath}
           </Text>
@@ -865,3 +891,84 @@ function PairingQR({ link }: { link: string }) {
     <Text>Preparando QR Code…</Text>
   );
 }
+
+function ServerResetChoice({
+  label,
+  description,
+  checked,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const styles = useStyles();
+  const { colors } = useAppearance();
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={label}
+      accessibilityHint={description}
+      accessibilityState={{ checked, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        resetStyles.choice,
+        {
+          borderColor: checked ? colors.primary : colors.line,
+          backgroundColor: checked ? colors.primaryWash : colors.surface2,
+        },
+        disabled && styles.disabled,
+        pressed && { opacity: 0.72 },
+      ]}
+    >
+      <View
+        style={[
+          resetStyles.indicator,
+          { borderColor: checked ? colors.primary : colors.lineStrong },
+        ]}
+      >
+        {checked && (
+          <View style={[resetStyles.dot, { backgroundColor: colors.primary }]} />
+        )}
+      </View>
+      <View style={[resetStyles.copy, resetStyles.header]}>
+        <Text style={[styles.buttonText, checked && { color: colors.primaryInk }]}>
+          {label}
+        </Text>
+        <Text style={styles.muted}>{description}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+const resetStyles = StyleSheet.create({
+  section: { gap: 16, marginTop: 6, paddingTop: 18, borderTopWidth: 1 },
+  header: { gap: 8 },
+  choices: { gap: 12 },
+  choice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderRadius: 16,
+    minHeight: 48,
+  },
+  copy: { flex: 1, minWidth: 0 },
+  indicator: {
+    width: 20,
+    height: 20,
+    flexShrink: 0,
+    marginTop: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  footer: { paddingTop: 16, borderTopWidth: 1 },
+});
