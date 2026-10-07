@@ -1,3 +1,4 @@
+import { unlinkLocalServer, serverSecretScopes } from './unlink';
 import { assertServerResetIntent, type ServerResetIntent, unlinkRecreatedServer } from './server-reset';
 import { createRecoveryPackage, parseRecoveryPackage } from './recovery-package';
 import { parsePairingInvitation, pairingLink, inviteSigningInput, pairingSecurityCode, pairingErrorMessage, verifyPairing, verifyInvite, barePairing, pairingCapabilityInput, type PairingInvite, type NamedPairing } from '@lionpocket/sync-protocol';
@@ -88,6 +89,8 @@ export interface SyncSession {
 }
 export interface SyncSaved {
   endpoint: string;
+  /** Durable local-only cleanup intent; resumed before any transport or onboarding. */
+  unlinkPending?: true;
   serverReset?: { phase: 'pending-unlink' | 'ready'; backupPath: string; intent: ServerResetIntent };
   identity?: { issuer: string; subject: string };
   profile?: ProvisionedProfile;
@@ -163,6 +166,8 @@ export class SyncController {
   private pairingStep: 'preparing' | 'waiting' | 'connecting' | undefined;
   private approvalRunning = false;
   private resetting = false;
+  private unlinking = false;
+  private operations = new Set<Promise<unknown>>();
   constructor(readonly options: SyncOptions) {
     this.coordinator = bankSyncCoordinator(options.db, {
       eligible: async () => {
@@ -175,7 +180,7 @@ export class SyncController {
           'SELECT paused FROM sync_control WHERE id=1',
         );
         return (
-          !this.resetting && saved?.phase === 'bound' &&
+          !this.resetting && !this.unlinking && !saved?.unlinkPending && saved?.phase === 'bound' &&
           state.mode === 'financial' &&
           !!state.binding_id &&
           !control.paused
@@ -183,6 +188,43 @@ export class SyncController {
       },
       cycle: (interactive, signal) => this.syncCycle(interactive, signal),
     });
+    // Commands from another window/deep link must not race local unlink cleanup.
+    const track = <Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) =>
+      (...args: Args): Promise<Result> => {
+        if (this.unlinking) return Promise.reject(new Error('Aguarde a desvinculação terminar.'));
+        const flight = (async () => {
+          if ((await options.storage.load())?.unlinkPending)
+            throw new Error('Conclua a desvinculação do servidor antes de configurar a sincronização.');
+          return operation(...args);
+        })();
+        this.operations.add(flight);
+        void flight.then(
+          () => this.operations.delete(flight),
+          () => this.operations.delete(flight),
+        );
+        return flight;
+      };
+    this.prepareServerRecovery = track(this.prepareServerRecovery.bind(this));
+    this.confirmServerRecovery = track(this.confirmServerRecovery.bind(this));
+    this.activateServerRecovery = track(this.activateServerRecovery.bind(this));
+    this.createInvitation = track(this.createInvitation.bind(this));
+    this.cancelInvitation = track(this.cancelInvitation.bind(this));
+    this.connectInvitation = track(this.connectInvitation.bind(this));
+    this.deny = track(this.deny.bind(this));
+    this.configure = track(this.configure.bind(this));
+    this.create = track(this.create.bind(this));
+    this.sync = track(this.sync.bind(this));
+    this.approve = track(this.approve.bind(this));
+    this.rotateKeys = track(this.rotateKeys.bind(this));
+    this.revoke = track(this.revoke.bind(this));
+    this.generateRecovery = track(this.generateRecovery.bind(this));
+    this.confirmRecovery = track(this.confirmRecovery.bind(this));
+    this.recover = track(this.recover.bind(this));
+    this.resetForRecreatedServer = track(this.resetForRecreatedServer.bind(this));
+    this.reconnectRestored = track(this.reconnectRestored.bind(this));
+    this.pause = track(this.pause.bind(this));
+    this.confirmLegacyDeletion = track(this.confirmLegacyDeletion.bind(this));
+    this.resolve = track(this.resolve.bind(this));
   }
   private async incompleteActivation() {
     if (
@@ -518,6 +560,7 @@ export class SyncController {
   }
   /** Native startup calls this before subscribing to foreground. It never reserves new consent. */
   async resumeRecoveryOnStartup() {
+    if (await this.resumeUnlink()) return;
     await this.resumeServerReset();
     const pending = await this.incompleteActivation();
     if (!pending) return;
@@ -532,7 +575,7 @@ export class SyncController {
     this.coordinator.error = undefined;
   }
   localWriteCommitted() {
-    this.coordinator.request('local-write');
+    if (!this.unlinking) this.coordinator.request('local-write');
   }
   setForeground(active: boolean) {
     this.coordinator.setForeground(active);
@@ -553,14 +596,14 @@ export class SyncController {
   }
   /** Foreground polling is single-flight, resumable from public metadata and protected device seeds. */
   private async pollPairing() {
-    if (this.resetting || this.pairingRunning || this.invitationFlight || !this.coordinator.foreground) return;
+    if (this.unlinking || this.resetting || this.pairingRunning || this.invitationFlight || !this.coordinator.foreground) return;
     clearTimeout(this.pairingTimer);
     this.pairingAbort = new AbortController();
     this.pairingRunning = true;
     let observe = false;
     try {
       const s = await this.options.storage.load();
-      if (this.invitationFlight) return;
+      if (this.invitationFlight || s?.unlinkPending) return;
       if (s?.phase === 'pairing' && s.pairingInvite) {
         observe = true;
         if (!s.pairingSubmitted) await this.submitPairing(s,this.pairingAbort.signal);
@@ -596,7 +639,7 @@ export class SyncController {
     } finally {
       this.pairingRunning = false;
       if (observe) this.pairingChanged();
-      if (observe && this.coordinator.foreground) this.pairingTimer = setTimeout(() => void this.pollPairing(),3000);
+      if (observe && !this.unlinking && this.coordinator.foreground) this.pairingTimer = setTimeout(() => void this.pollPairing(),3000);
     }
   }
   async createInvitation() {
@@ -721,7 +764,7 @@ export class SyncController {
     const saved = await this.options.storage.load();
     const normalized = normalizeEndpoint(endpoint, this.options.allowLocalDevelopment);
     if (saved?.profile && normalized !== saved.endpoint)
-      throw new Error('Desconecte com revisão antes de trocar o servidor.');
+      throw new Error('Desvincule este aparelho antes de trocar o servidor.');
     const [binding] = await this.options.db.read('SELECT endpoint FROM sync_bindings WHERE binding_id=(SELECT binding_id FROM sync_local_state WHERE id=1)');
     if (binding && binding.endpoint !== normalized)
       throw new Error('Esta base está vinculada a outro servidor. Troca direta indisponível; preserve a base e as pendências para uma migração revisada.');
@@ -1320,6 +1363,47 @@ export class SyncController {
     await this.bind(s);
     return this.status();
   }
+  /** Local-only: no remote revoke, deletion, login or discovery. */
+  async unlinkServer(confirmed: boolean) {
+    if (confirmed !== true) throw new Error('Confirme a desvinculação. Seus dados financeiros locais serão mantidos.');
+    if (this.unlinking) throw new Error('Aguarde a desvinculação terminar.');
+    this.unlinking = true;
+    clearTimeout(this.pairingTimer);
+    this.pairingAbort?.abort();
+    try {
+      await this.coordinator.cancelAndWait();
+      await Promise.allSettled([...this.operations]);
+      while (this.pairingRunning) await new Promise<void>(resolve => setTimeout(resolve, 20));
+      // Existing commands may have scheduled another pass while finishing.
+      clearTimeout(this.pairingTimer);
+      await this.coordinator.cancelAndWait();
+      const saved = await this.options.storage.load();
+      await this.options.storage.save({ ...(saved ?? { endpoint: '' }), unlinkPending: true });
+      await this.resumeUnlink();
+      return this.status();
+    } finally {
+      this.unlinking = false;
+      this.pairingChanged();
+    }
+  }
+  private async resumeUnlink() {
+    const saved = await this.options.storage.load();
+    if (!saved?.unlinkPending) return false;
+    await this.coordinator.cancelAndWait();
+    // Keep the intent/profile until every idempotent cleanup step succeeds.
+    // A failure or crash therefore cannot silently reconnect with partial credentials.
+    for (const scope of await serverSecretScopes(this.options.db, saved))
+      await this.options.secrets.remove(scope);
+    await this.options.db.run(unlinkLocalServer());
+    await this.options.storage.save({ endpoint: '' });
+    this.cachedSession = undefined;
+    this.pendingRequests = [];
+    this.pairingError = undefined;
+    this.pairingStep = undefined;
+    this.coordinator.error = undefined;
+    this.coordinator.lastCompletedAt = undefined;
+    return true;
+  }
   /** Explicit consent is durable only after the full local backup succeeds. No remote deletion occurs. */
   async resetForRecreatedServer(endpoint: string, intent: ServerResetIntent, confirmed: boolean) {
     assertServerResetIntent(intent);
@@ -1336,7 +1420,7 @@ export class SyncController {
       const discovered = await this.environment(normalized);
       if (discovered.pairingVersion !== 2) throw new Error('client_upgrade_required');
       const conflicts = await this.options.db.read('SELECT conflict_id FROM sync_conflicts WHERE resolution_id IS NULL LIMIT 1');
-      const reviews = await this.options.db.read("SELECT review_id FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance','catalog_projection_audit','restore_reconnect_backup') AND reason NOT LIKE 'import_receipt:%' LIMIT 1");
+      const reviews = await this.options.db.read("SELECT review_id FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance','catalog_projection_audit','restore_reconnect_backup','detached_history') AND reason NOT LIKE 'import_receipt:%' LIMIT 1");
       if (conflicts.length || reviews.length) throw new Error('Resolva as revisões locais antes de recriar a sincronização.');
       let backupPath: string;
       try { backupPath = await this.options.backup(); }
@@ -1492,7 +1576,7 @@ export class SyncController {
       'SELECT * FROM sync_control WHERE id=1',
     );
     const reviews = await this.options.db.read(
-      "SELECT * FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance','catalog_projection_audit','restore_reconnect_backup') AND reason NOT LIKE 'import_receipt:%'",
+      "SELECT * FROM sync_review WHERE reason NOT IN ('active_key_version','reemission_provenance','legacy_import_review_provenance','catalog_projection_audit','restore_reconnect_backup','detached_history') AND reason NOT LIKE 'import_receipt:%'",
     );
     const quarantine = await this.options.db.read(
       "SELECT commit_id,last_error FROM sync_inbox WHERE state='quarantined'",
@@ -1551,7 +1635,9 @@ export class SyncController {
       blocked.length ||
       (state.mode === 'disabled' && state.binding_id)
     );
-    const activity = this.coordinator.running
+    const activity = saved?.unlinkPending
+      ? 'action-required'
+      : this.coordinator.running
       ? 'syncing'
       : control.paused
         ? 'paused'
@@ -1571,6 +1657,7 @@ export class SyncController {
                     ? 'synced'
                     : 'ready';
     return {
+      ...(saved?.unlinkPending ? { unlinkPending: true as const } : {}),
       pairingInviteId: saved?.pairingInvite?.id ?? null,
       pairingRequests: this.pendingRequests,
       pairingCode: saved?.pairingInvite && saved.request ? pairingSecurityCode(saved.pairingInvite.id,saved.request,this.crypto()) : '',
@@ -1580,7 +1667,9 @@ export class SyncController {
       anchorRecoveryAvailable: !!this.options.epochBackup && !!saved?.owner,
       activity: (activation ? 'action-required' : activity) as SyncActivity,
       discovered: saved?.discovered ?? null,
-      compatibilityMessage: ['unsupported_version', 'unsupported_capability', 'client_upgrade_required'].includes(error ?? '')
+      compatibilityMessage: saved?.unlinkPending
+        ? 'A desvinculação precisa ser concluída. Seus dados financeiros locais estão preservados; tente desvincular novamente.'
+        : ['unsupported_version', 'unsupported_capability', 'client_upgrade_required'].includes(error ?? '')
         ? 'Atualização necessária: cliente e servidor incompatíveis. Banco local e pendências preservados; nenhum envio realizado.'
         : error === 'epoch_changed'
           ? 'O histórico do servidor mudou. Este aparelho ainda precisa ser reconectado após a recuperação do servidor. Seus dados e alterações locais estão preservados.'

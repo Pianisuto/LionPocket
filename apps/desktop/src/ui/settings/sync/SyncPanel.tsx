@@ -7,6 +7,7 @@ import { SyncNotice } from './primitives';
 import { ProtectionSection } from './Protection';
 import { ServerRecovery } from './ServerRecovery';
 import { ServerResetContinuation, ServerResetForm } from './ServerReset';
+import { UnlinkServer } from './UnlinkServer';
 import { SyncOverview } from './SyncOverview';
 import { SyncDiagnostics, SyncReviews } from './SyncReviews';
 import { RecoverVault, ResumeVaultCreation, SyncSetup } from './SyncSetup';
@@ -23,7 +24,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
 
   const session: SyncSession = { status, busy, run, setError };
   const view = syncPanelState(status);
-  const local = status.phase === 'local';
+  const local = status.phase === 'local' && !status.unlinkPending;
 
   return (
     <div className="sync-panel" role="region" aria-label="Sincronização">
@@ -66,8 +67,8 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
           <RecoverVault {...session} />
         </>
       )}
-      {status.phase === 'creating' && <ResumeVaultCreation {...session} />}
-      {status.phase === 'pairing' && <PairingProgress {...session} />}
+      {!status.unlinkPending && status.phase === 'creating' && <ResumeVaultCreation {...session} />}
+      {!status.unlinkPending && status.phase === 'pairing' && <PairingProgress {...session} />}
 
       {view.connected && (
         <div className={view.canManage ? 'sync-management' : undefined}>
@@ -79,6 +80,8 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
           </div>
         </div>
       )}
+
+      {view.canUnlink && <UnlinkServer {...session} />}
 
       <footer className="sync-panel__footnote">
         <LockKeyhole size={14} aria-hidden="true" />

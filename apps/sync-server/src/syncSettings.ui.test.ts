@@ -95,6 +95,7 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
       status: vi.fn(async () => current),
       subscribe: (f: () => void) => { subscribers.add(f); return () => subscribers.delete(f); },
       coordinator: {},
+      unlinkServer: vi.fn(async (_confirmed: boolean) => { current = { ...baseStatus('local'), endpoint: '' }; }),
       configure: vi.fn(async (_endpoint: string) => undefined),
       create: vi.fn(async () => { current = { ...current, phase: 'bound', activity: 'ready', owner: true }; }),
       sync: vi.fn(async () => undefined),
@@ -114,6 +115,7 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
     };
     const command = vi.fn(async (name: string, args: unknown[]) => {
       switch (name) {
+        case 'unlink': return controller.unlinkServer(args[0] === true);
         case 'setup': await controller.configure(String(args[0])); return controller.create();
         case 'create': return controller.create();
         case 'sync': return controller.sync();
@@ -158,6 +160,49 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
     };
     return { controller, changed, button, press, input, change, subscribers };
   }
+  it('requires confirmation, supports cancellation, and returns to local setup after unlink', async () => {
+    const ui = await mount({ phase: 'bound', activity: 'ready' });
+    expect(ui.button('Confirmar desvinculação')).toBeUndefined();
+    await ui.press('Desvincular servidor');
+    expect(text(renderer!.root)).toContain('Seus dados financeiros locais serão mantidos');
+    expect(text(renderer!.root)).toContain('alterações ainda não sincronizadas');
+    expect(text(renderer!.root)).toContain('dados de outros aparelhos não serão apagados');
+    await ui.press('Cancelar');
+    expect(ui.controller.unlinkServer).not.toHaveBeenCalled();
+    await ui.press('Desvincular servidor');
+    await ui.press('Confirmar desvinculação');
+    expect(ui.controller.unlinkServer).toHaveBeenCalledExactlyOnceWith(true);
+    expect(ui.button('Desvincular servidor')).toBeUndefined();
+    expect(ui.button('Configurar sincronização')).toBeTruthy();
+    expect(text(renderer!.root)).toContain('Somente neste aparelho');
+    expect(ui.controller.create).not.toHaveBeenCalled();
+  });
+  it.each(['pairing', 'creating'] as const)('allows unlink during %s without remote access', async phase => {
+    const ui = await mount({ phase, activity: 'action-required' });
+    await ui.press('Desvincular servidor');
+    await ui.press('Confirmar desvinculação');
+    expect(ui.controller.unlinkServer).toHaveBeenCalledExactlyOnceWith(true);
+  });
+  it('keeps the confirmed action available to retry after cleanup fails', async () => {
+    const ui = await mount({ phase: 'bound', activity: 'unavailable' });
+    ui.controller.unlinkServer.mockRejectedValueOnce(new Error('Não foi possível limpar as credenciais locais'));
+    await ui.press('Desvincular servidor');
+    await ui.press('Confirmar desvinculação');
+    expect(text(renderer!.root)).toContain('Servidor indisponível');
+    expect(ui.button('Confirmar desvinculação').props.disabled).toBe(false);
+    await ui.press('Confirmar desvinculação');
+    expect(ui.controller.unlinkServer).toHaveBeenCalledTimes(2);
+    expect(ui.button('Configurar sincronização')).toBeTruthy();
+  });
+  it('exposes only unlink retry when a configured device has pending cleanup', async () => {
+    const ui = await mount({ phase: 'local', activity: 'action-required', unlinkPending: true });
+    expect(ui.button('Configurar sincronização')).toBeUndefined();
+    expect(text(renderer!.root)).toContain('Desvinculação pendente');
+    await ui.press('Desvincular servidor');
+    await ui.press('Confirmar desvinculação');
+    expect(ui.controller.unlinkServer).toHaveBeenCalledExactlyOnceWith(true);
+    expect(ui.button('Configurar sincronização')).toBeTruthy();
+  });
   it('configures and creates a vault, then synchronizes and pauses/resumes', async () => {
     const ui = await mount();
     await ui.press('Configurar sincronização');

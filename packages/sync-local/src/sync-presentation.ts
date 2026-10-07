@@ -63,7 +63,7 @@ export function serverRecoveryTitle(phase: string | null | undefined): string {
 export function syncPanelState(status: SyncStatus) {
   const resetReady =
     status.phase === 'local' && status.serverReset?.phase === 'ready';
-  const connected = status.phase === 'bound';
+  const connected = status.phase === 'bound' && !status.unlinkPending;
   return {
     /** Backup/unlink finished; the next step depends on the durable intent. */
     resetReady,
@@ -71,6 +71,7 @@ export function syncPanelState(status: SyncStatus) {
     creatingFromReset:
       resetReady && status.serverReset?.intent === 'source-of-truth',
     connected,
+    canUnlink: status.phase !== 'local' || !!status.discovered || !!status.serverReset || !!status.unlinkPending,
     /** Device, protection and review tools are hidden during server recovery. */
     canManage:
       connected &&
@@ -81,7 +82,7 @@ export function syncPanelState(status: SyncStatus) {
       'review',
       'action-required',
     ].includes(status.activity),
-    showServerRecovery: Boolean(
+    showServerRecovery: !status.unlinkPending && Boolean(
       status.recoveryPhase ||
         (status.anchorRecoveryAvailable &&
           status.compatibilityMessage?.includes('histórico')),
@@ -92,12 +93,14 @@ export function syncPanelState(status: SyncStatus) {
 }
 
 export function syncStatusTitle(status: SyncStatus): string {
+  if (status.unlinkPending) return 'Desvinculação pendente';
   return status.activity === 'paused'
     ? 'Sincronização pausada'
     : syncActivityLabel[status.activity];
 }
 
 export function syncStatusDescription(status: SyncStatus): string {
+  if (status.unlinkPending) return 'Conclua a desvinculação neste aparelho. Seus dados financeiros locais estão preservados.';
   const pending = status.sync?.pending ?? 0;
   if (status.phase === 'local')
     return 'Funciona sem conta e sem conexão com a internet.';

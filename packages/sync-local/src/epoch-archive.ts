@@ -207,7 +207,7 @@ function* planAnchorBaselineWorkflow(restoreId: string, uuid: () => string): Sql
   const args = [journal.vault_id, journal.from_epoch];
   const query = (table: string) => sql(`SELECT * FROM recovery_archive_${table} WHERE vault_id_scope=? AND epoch_scope=?`, args);
   const reviews: { reason: string; objectId: string | null; revision: string | null }[] = [];
-  const informativeReviews = new Set(['active_key_version', 'reemission_provenance', 'legacy_import_review_provenance', 'catalog_projection_audit', 'restore_reconnect_backup']);
+  const informativeReviews = new Set(['active_key_version', 'reemission_provenance', 'legacy_import_review_provenance', 'catalog_projection_audit', 'restore_reconnect_backup', 'detached_history']);
   const reviewKeys = new Set<string>();
   for (const row of [...(yield query('sync_review')), ...(yield sql('SELECT * FROM sync_review'))])
     if (!informativeReviews.has(String(row.reason)) && !String(row.reason).startsWith('import_receipt:'))

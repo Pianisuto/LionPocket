@@ -105,6 +105,8 @@ export async function registerSyncController(bank: LionPocketDatabase) {
         throw new Error('Invalid sync action.');
       const c = await get();
       switch (action) {
+        case 'unlink':
+          return c.unlinkServer(args[0] === true);
         case 'server-reset':
           assertServerResetIntent(args[1]);
           return c.resetForRecreatedServer(String(args[0]),args[1],args[2] === true);
