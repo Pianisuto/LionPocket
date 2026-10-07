@@ -239,7 +239,7 @@ export default function App() {
           <div className="local-badge">
             <span className="local-badge__dot" />
             <div>
-              <strong>Dados locais</strong>
+              <strong>Seus dados</strong>
               <small>
                 {syncPhase === 'bound'
                   ? 'Sincronização criptografada'
