@@ -295,9 +295,10 @@ export function DataSettings({
       </Text>
 
       <View style={{ gap: 10 }}>
-        <SettingsNote icon="data" title="Seus dados ficam neste aparelho">
-          Suas finanças ficam no banco deste aparelho. O LionPocket funciona sem
-          internet e sem conta.
+        <SettingsNote icon="data" title="Seus dados são salvos primeiro aqui">
+          O LionPocket salva seus dados neste aparelho e funciona sem conta e
+          sem internet. Com a sincronização ativada, seus dados financeiros
+          também são enviados criptografados ao servidor.
         </SettingsNote>
         <SettingsNote icon="shield" title="Protegidos pelo Android">
           O banco e as cópias privadas são protegidos pelo armazenamento do

@@ -118,8 +118,8 @@ export function SettingsScreen({
                   ))}
                 </SettingsGroup>
                 <Text style={settingsStyles.lead}>
-                  Suas finanças ficam neste aparelho. A sincronização é opcional e
-                  usa criptografia de ponta a ponta.
+                  Suas finanças são salvas primeiro neste aparelho. A
+                  sincronização é opcional e usa criptografia de ponta a ponta.
                 </Text>
               </>
             )}

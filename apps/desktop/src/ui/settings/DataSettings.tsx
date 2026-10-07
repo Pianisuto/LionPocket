@@ -70,8 +70,8 @@ export function DataSettings({ month, notify }: SettingsContext) {
         </div>
       </SettingsGroup>
       <div className="settings-notes">
-        <SettingsNote icon={HardDrive} title="Seus dados ficam neste computador">
-          <p>O uso local funciona sem conta e sem internet. Importações, cópias e exportações são salvas onde você escolher.</p>
+        <SettingsNote icon={HardDrive} title="Seus dados são salvos primeiro aqui">
+          <p>O LionPocket salva seus dados neste computador e funciona sem conta e sem internet. Com a sincronização ativada, seus dados financeiros também são enviados criptografados ao servidor. Cópias e exportações são salvas no local que você escolher.</p>
         </SettingsNote>
         <SettingsNote icon={ShieldCheck} title="Proteja também o computador">
           <p>O banco e as cópias locais ficam em claro. Ative a criptografia de disco do Linux ou Windows para protegê-los contra acesso físico.</p>
