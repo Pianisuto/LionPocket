@@ -454,7 +454,7 @@ export function* projectObject(
           : null));
     if (selected) yield* projectFinancial(localId, selected, dialect);
     else if (
-      ['transaction', 'recurring', 'installmentPurchase', 'goal'].includes(
+      ['transaction', 'recurring', 'installmentPurchase', 'goal', 'goalMonthlyReinforcement'].includes(
         String(identity.entity_type),
       )
     ) {
@@ -463,6 +463,7 @@ export function* projectObject(
         recurring: 'recurring_expenses',
         installmentPurchase: 'installment_purchases',
         goal: 'goals',
+        goalMonthlyReinforcement: 'goal_monthly_reinforcements',
       }[String(identity.entity_type) as 'transaction'];
       yield sql(`UPDATE ${table} SET deleted_at=? WHERE id=?`, [
         projectionTime ?? new Date().toISOString(),

@@ -12,8 +12,11 @@ import {
   cardStatementDueDate,
   externalGoalUrl,
   isValidDate,
+  goalCountsReinforcement,
+  goalReinforcementToCents,
   nextCardDueDate,
   safetyMarginToCents,
+  suggestionToReinforcementCents,
 } from '@lionpocket/core';
 import type {
   Catalogs,
@@ -43,12 +46,16 @@ function Editor({
   onSave,
   children,
   onRemove,
+  removeLabel = 'Remover margem',
+  hideSave = false,
 }: {
   title: string;
   onClose: () => void;
   onSave: () => Promise<void>;
   children: React.ReactNode;
   onRemove?: () => Promise<void>;
+  removeLabel?: string;
+  hideSave?: boolean;
 }) {
   const styles = useStyles();
   const [busy, setBusy] = useState(false),
@@ -94,13 +101,13 @@ function Editor({
             ) : null}
           </ScrollView>
           <View style={styles.formFooter}>
-            {onRemove && <Button label="Remover margem" tone="danger" disabled={busy} onPress={() => void save(onRemove)} />}
-            <Button
+            {onRemove && <Button label={removeLabel} tone="danger" disabled={busy} onPress={() => void save(onRemove)} />}
+            {!hideSave && <Button
               label={busy ? 'Salvando…' : 'Salvar'}
               tone="primary"
               disabled={busy}
               onPress={() => void save()}
-            />
+            />}
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -603,5 +610,30 @@ export function SafetyMarginEditor({ month, cents, onClose, onSave }: {
     <Text style={styles.muted}>Reserve uma parte do saldo para imprevistos. Esse valor não cria nenhuma despesa e vale somente para este mês.</Text>
     {cents > 0 && <Text style={styles.muted}>Margem atual: {money(cents / 100)}</Text>}
     <Field label="Margem de segurança (R$)" value={value} onChange={setValue} numeric />
+  </Editor>;
+}
+
+/** Planning only: nothing here creates a transaction or changes the saved amount. */
+export function GoalReinforcementEditor({ goal, month, cents, onClose, onSave }: {
+  goal: Goal; month: string; cents: number; onClose: () => void; onSave: (cents: number) => Promise<void>;
+}) {
+  const styles = useStyles();
+  const [value, setValue] = useState(cents ? String(cents / 100).replace('.', ',') : '');
+  const editable = goalCountsReinforcement(goal.status);
+  const suggestion = suggestionToReinforcementCents(goal.suggestedMonthlyAmount);
+  const label = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(`${month}-15T12:00:00`));
+  return <Editor title="Reforço do mês" onClose={onClose} hideSave={!editable} removeLabel="Remover reforço"
+    onSave={() => onSave(goalReinforcementToCents(parseMoney(value, true)))}
+    onRemove={cents > 0 ? () => onSave(0) : undefined}>
+    <Text style={styles.heading}>{goal.name}</Text>
+    <Text style={styles.text}>{label}</Text>
+    <Text style={styles.muted}>Quanto você pretende reservar para este objetivo neste mês. É apenas planejamento: não cria despesa nem altera o valor guardado.</Text>
+    {cents > 0 && <Text style={styles.muted}>Reforço atual: {money(cents / 100)}</Text>}
+    {editable
+      ? <>
+        <Field label="Reforço do mês (R$)" value={value} onChange={setValue} numeric />
+        {suggestion !== null && <Button label={`Usar sugestão: ${money(suggestion / 100)}`} onPress={() => setValue(String(suggestion / 100).replace('.', ','))} />}
+      </>
+      : <Text style={styles.muted}>{goal.status === 'paused' ? 'Retome o objetivo para alterar o reforço. Você ainda pode removê-lo.' : 'Este objetivo não aceita novo reforço. Você ainda pode removê-lo.'}</Text>}
   </Editor>;
 }

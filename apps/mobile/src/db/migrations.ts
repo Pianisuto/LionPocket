@@ -1,4 +1,4 @@
-import { monthlyPlanningMigration, syncMigration, transportMigration, financialMigration, financialTriggers, financialTableTypes } from '@lionpocket/sync-local';
+import { goalReinforcementMigration, monthlyPlanningMigration, syncMigration, transportMigration, financialMigration, financialTriggers, financialTableTypes } from '@lionpocket/sync-local';
 import type { NitroSQLiteConnection } from 'react-native-nitro-sqlite';
 import { seedNewCatalogs } from './catalogDefaults';
 
@@ -168,6 +168,7 @@ export const migrations: ReadonlyArray<ReadonlyArray<string>> = [
   financialMigration,
   nullableScheduleMigration,
   monthlyPlanningMigration,
+  goalReinforcementMigration,
 ];
 
 export async function migrate(

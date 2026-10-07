@@ -59,6 +59,7 @@ export interface GoalSnapshot {
 }
 export interface Snapshots {
   monthlyPlanning: { month: string; safetyMarginCents: number };
+  goalMonthlyReinforcement: { goalId: GlobalId; month: string; amountCents: number };
   transaction: TransactionSnapshot;
   category: CategorySnapshot;
   paymentMethod: PaymentMethodSnapshot;

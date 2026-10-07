@@ -51,10 +51,18 @@ describe.each(['desktop', 'android'] as const)('%s local server unlink', dialect
     }
     if (desktop) desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
     else await repo!.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
+    const goalId = desktop ? desktop.listGoals()[0].id : (await repo!.listGoals())[0].id;
+    const reinforce = async (month: string, amountCents: number) => {
+      if (desktop) desktop.saveGoalReinforcement({ goalId, month, amountCents });
+      else await repo!.saveGoalReinforcement({ goalId, month, amountCents });
+    };
+    await reinforce('2026-10', 50000);
+    await reinforce('2026-11', 70000);
     await db.run(startFinancialBaseline(client.profile, 'https://old.invalid', '/fixture/before.sqlite', randomUUID));
     await save({ description: 'Ainda não sincronizada', plannedAmount: 98.76 });
     if (desktop) desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50123 });
     else await repo!.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50123 });
+    await reinforce('2026-10', 51000);
     let saved: SyncSaved = { endpoint: 'https://old.invalid', profile: client.profile, phase: 'bound', owner: true, identity: { issuer: 'https://identity.invalid', subject: 'alice' } };
     const options: SyncOptions = {
       db, secrets, sodium, dialect,
@@ -67,7 +75,7 @@ describe.each(['desktop', 'android'] as const)('%s local server unlink', dialect
     vi.stubGlobal('fetch', fetch);
     const preserved = () => Object.fromEntries(sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'sync_%' AND name NOT LIKE 'recovery_%'").all().map(row => [row.name, sqlite.prepare(`SELECT * FROM ${row.name} ORDER BY rowid`).all()]));
     const history = (table: string) => sqlite.prepare("SELECT payload_json FROM sync_review WHERE reason='detached_history' ORDER BY rowid").all().map(row => JSON.parse(String(row.payload_json))).filter(item => item.sourceTable === table).map(item => item.row);
-    return { db, sqlite, native, history, client, secrets, saved: () => saved, options, controller, fetch, save, preserved };
+    return { db, sqlite, native, reinforce, history, client, secrets, saved: () => saved, options, controller, fetch, save, preserved };
   }
   it('requires explicit consent before touching credentials or data', async () => {
     const c = await setup(), before = c.preserved(), profile = c.saved();
@@ -106,6 +114,13 @@ describe.each(['desktop', 'android'] as const)('%s local server unlink', dialect
     if (c.native) await verifyDatabase(c.native.db, migrations.length);
     await c.save({ description: 'Salva sem conta nem servidor' });
     expect(c.sqlite.prepare("SELECT * FROM transactions WHERE description='Salva sem conta nem servidor'").get()).toBeTruthy();
+    // Goal planning survives detaching untouched, stays editable offline and queues nothing.
+    const reinforcements = () => c.sqlite.prepare('SELECT month,amount_cents FROM goal_monthly_reinforcements ORDER BY month').all().map(row => ({ ...row }));
+    expect(reinforcements()).toEqual([{ month: '2026-10', amount_cents: 51000 }, { month: '2026-11', amount_cents: 70000 }]);
+    await c.reinforce('2026-11', 0);
+    await c.reinforce('2026-12', 90000);
+    expect(reinforcements()).toEqual([{ month: '2026-10', amount_cents: 51000 }, { month: '2026-11', amount_cents: 0 }, { month: '2026-12', amount_cents: 90000 }]);
+    expect(c.sqlite.prepare('SELECT * FROM sync_outbox').all()).toEqual([]);
     const financial = c.preserved();
     await c.db.run(startFinancialBaseline(other.client.profile, 'https://new.invalid', '/fixture/new.sqlite', randomUUID));
     expect(c.preserved()).toEqual(financial);

@@ -14,17 +14,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   addMonths,
   externalGoalUrl,
+  goalReinforcementAction,
+  goalReinforcementNote,
+  goalReinforcementPlan,
   toCents,
   fromCents,
 } from '@lionpocket/core';
 import type {
   Catalogs,
   Goal,
+  GoalMonthlyReinforcement,
   InstallmentPurchase,
   RecurringExpense,
 } from '@lionpocket/core';
 import {
   deleteGoal,
+  listGoalReinforcements,
+  saveGoalReinforcement,
   deleteInstallment,
   deleteRecurring,
   listGoals,
@@ -45,6 +51,7 @@ import {
 import {
   frequencies,
   GoalEditor,
+  GoalReinforcementEditor,
   goalStatuses,
   InstallmentEditor,
   RecurringEditor,
@@ -84,6 +91,8 @@ export function PlanningScreen({
   const [recurring, setRecurring] = useState<RecurringExpense[]>([]),
     [purchases, setPurchases] = useState<Purchase[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]),
+    [reinforcements, setReinforcements] = useState<GoalMonthlyReinforcement[]>([]),
+    [reinforcing, setReinforcing] = useState<Goal | null>(null),
     [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
@@ -103,10 +112,14 @@ export function PlanningScreen({
           : area === 'installments'
             ? await listInstallments(month)
             : await listGoals();
+      const monthly = area === 'goals' ? await listGoalReinforcements(month) : [];
       if (revision.current !== request) return;
       if (area === 'recurring') setRecurring(values as RecurringExpense[]);
       else if (area === 'installments') setPurchases(values as Purchase[]);
-      else setGoals(values as Goal[]);
+      else {
+        setGoals(values as Goal[]);
+        setReinforcements(monthly);
+      }
     } catch (cause) {
       if (request === revision.current)
         setError(cause instanceof Error ? cause.message : 'Falha ao carregar.');
@@ -181,6 +194,8 @@ export function PlanningScreen({
       }),
       { saved: 0, target: 0 },
     );
+  const reinforcementPlan = goalReinforcementPlan(goals, reinforcements, month);
+  const monthLong = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(`${month}-15T12:00:00`));
   const recurringTotal = (kind: 'income' | 'expense') =>
     fromCents(
       recurring
@@ -232,6 +247,26 @@ export function PlanningScreen({
                   </View>
                 </>
               )}
+              {area === 'goals' && (
+                <View style={styles.card}>
+                  <Text style={styles.label}>Planejando o mês</Text>
+                  <View style={styles.row}>
+                    <IconButton
+                      icon="left"
+                      label="Mês anterior"
+                      disabled={busy || month === '1000-01'}
+                      onPress={() => onMonth(addMonths(`${month}-01`, -1).slice(0, 7))}
+                    />
+                    <Text style={[styles.text, { flex: 1, textAlign: 'center' }]}>{monthLong}</Text>
+                    <IconButton
+                      icon="right"
+                      label="Próximo mês"
+                      disabled={busy || month === '9999-12'}
+                      onPress={() => onMonth(addMonths(`${month}-01`, 1).slice(0, 7))}
+                    />
+                  </View>
+                </View>
+              )}
               {area === 'recurring' && <MonthlyPlanningSection key={month} month={month} onMonth={onMonth} onChanged={onChanged} />}
               {!loading && area === 'goals' && (
                 <View style={styles.card}>
@@ -250,6 +285,9 @@ export function PlanningScreen({
                     }
                     label="Progresso geral dos objetivos"
                   />
+                  <Text style={styles.muted}>
+                    Planejado para objetivos em {monthLong}: {money(reinforcementPlan.totalCents / 100)}
+                  </Text>
                 </View>
               )}
               {!loading && area === 'recurring' && (
@@ -429,6 +467,26 @@ export function PlanningScreen({
                       Sugestão mensal: {money(item.suggestedMonthlyAmount)}
                     </Text>
                   )}
+                  {(() => {
+                    const entry = reinforcementPlan.items.find((candidate) => candidate.goalId === item.id);
+                    const action = entry && goalReinforcementAction(entry);
+                    if (!entry || !action) return null;
+                    const note = goalReinforcementNote(entry);
+                    return (
+                      <>
+                        <Text style={styles.text}>
+                          Reforço de {month.split('-').reverse().join('/')}:{' '}
+                          {entry.amountCents > 0 ? money(entry.amountCents / 100) : 'sem reforço'}
+                        </Text>
+                        {note ? <Text style={styles.muted}>{note}</Text> : null}
+                        <Button
+                          label={{ define: 'Definir reforço', edit: 'Editar reforço', remove: 'Remover reforço' }[action]}
+                          disabled={busy}
+                          onPress={() => setReinforcing(item as Goal)}
+                        />
+                      </>
+                    );
+                  })()}
                   {item.dueDate && (
                     <Text style={styles.muted}>
                       Prazo: {dateLabel(item.dueDate)}
@@ -486,6 +544,20 @@ export function PlanningScreen({
             </View>
           )}
         />
+        {reinforcing && (
+          <GoalReinforcementEditor
+            goal={reinforcing}
+            month={month}
+            cents={reinforcementPlan.items.find((candidate) => candidate.goalId === reinforcing.id)?.amountCents ?? 0}
+            onClose={() => setReinforcing(null)}
+            onSave={async (amountCents) => {
+              await saveGoalReinforcement({ goalId: reinforcing.id, month, amountCents });
+              setReinforcing(null);
+              await onChanged();
+              await load();
+            }}
+          />
+        )}
         {editor &&
           (area === 'recurring' ? (
             <RecurringEditor

@@ -2,6 +2,8 @@
 
 A seção **Planejamento do mês** em Recorrências permite definir a [margem de segurança mensal](monthly-planning.md): um valor para imprevistos que não cria despesas nem altera o saldo financeiro. A margem funciona offline, participa de sync e backup e permanece ao desvincular o servidor.
 
+Na área de objetivos, o [reforço mensal](goal-monthly-reinforcement.md) permite planejar quanto reservar para cada objetivo em cada mês, com navegação de mês própria, total planejado e a sugestão como ação explícita. Também é só planejamento: não cria lançamentos nem altera o valor guardado.
+
 > Estado atualizado: [paridade funcional local](mobile-functional-parity.md). O novo bloco completa os fluxos restantes, adiciona preferências e migração v5 com suporte a valores zero.
 
 

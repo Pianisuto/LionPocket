@@ -1,4 +1,4 @@
-import { monthlyPlanningMigration, syncMigration, transportMigration, captureFinancial, financialMigration, financialTriggers, financialTableTypes, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type LocalSyncDatabase, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
+import { goalReinforcementMigration, monthlyPlanningMigration, syncMigration, transportMigration, captureFinancial, financialMigration, financialTriggers, financialTableTypes, syncTables, recordManualMutation, activateSyntheticManualPilot, validateSyncBackup, type LocalSyncDatabase, type SqlWorkflow, type SqlRow } from '@lionpocket/sync-local';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { initializeLocalSchema, hasCurrentFinancialSchema, assertSupportedDesktopSchema } from './migrationProtection';
@@ -36,7 +36,7 @@ import {
   todayIso,
 } from '@lionpocket/core/finance';
 import { fixedRecurringDates, planInstallmentUpdate, recurringEffectiveDate, recurringOccurrence, rollingRecurringDates, type RecurringSchedule } from '@lionpocket/core/planning';
-import { monthlyPlanningBalance, validateMonthlyPlanning, type MonthlyPlanning } from '@lionpocket/core';
+import { assertGoalReinforcementAllowed, monthlyPlanningBalance, validateGoalReinforcement, validateMonthlyPlanning, type GoalMonthlyReinforcement, type MonthlyPlanning } from '@lionpocket/core';
 import { expenseCountsInMonth } from '@lionpocket/core/transactions';
 
 type Row = Record<string, string | number | null>;
@@ -533,6 +533,16 @@ export class LionPocketDatabase {
           this.db.exec(`DROP TRIGGER IF EXISTS sync_capture_${table}_${action}`);
       for (const sql of financialTriggers('desktop', columns)) this.db.exec(sql);
       this.db.exec("INSERT INTO migrations VALUES (15, datetime('now'))");
+    }
+    if (!this.db.prepare('SELECT 1 FROM migrations WHERE version = 16').get()) {
+      for (const sql of goalReinforcementMigration) this.db.exec(sql);
+      const columns = Object.fromEntries(Object.keys(financialTableTypes).map(t =>
+        [t, this.db.prepare(`PRAGMA table_info(${t})`).all().map(r => String(r.name))]));
+      for (const table of Object.keys(financialTableTypes))
+        for (const action of ['insert', 'update', 'delete'])
+          this.db.exec(`DROP TRIGGER IF EXISTS sync_capture_${table}_${action}`);
+      for (const sql of financialTriggers('desktop', columns)) this.db.exec(sql);
+      this.db.exec("INSERT INTO migrations VALUES (16, datetime('now'))");
     }
   }
 
@@ -2087,13 +2097,57 @@ export class LionPocketDatabase {
     return saved;
   }
 
+  /** Deleting a goal retires its monthly planning in the same transaction: no orphan or phantom amount. */
   deleteGoal(id: string) {
     const timestamp = now();
-    this.db.prepare('UPDATE goals SET deleted_at = ?, updated_at = ? WHERE id = ?').run(
-      timestamp,
-      timestamp,
-      id,
-    );
+    this.atomic(() => {
+      this.db.prepare('UPDATE goals SET deleted_at = ?, updated_at = ? WHERE id = ?').run(
+        timestamp,
+        timestamp,
+        id,
+      );
+      this.db.prepare(
+        'UPDATE goal_monthly_reinforcements SET deleted_at = ?, updated_at = ? WHERE goal_id = ? AND deleted_at IS NULL',
+      ).run(timestamp, timestamp, id);
+    });
+  }
+
+  /** Reinforcements with a value for the month, only for goals that still exist. Zero means none. */
+  listGoalReinforcements(month: string): GoalMonthlyReinforcement[] {
+    validateMonthlyPlanning({ month, safetyMarginCents: 0 });
+    return this.db.prepare(`
+      SELECT r.goal_id, r.month, r.amount_cents FROM goal_monthly_reinforcements r
+      JOIN goals g ON g.id = r.goal_id AND g.deleted_at IS NULL
+      WHERE r.month = ? AND r.deleted_at IS NULL AND r.amount_cents > 0
+      ORDER BY r.goal_id
+    `).all(month).map((row) => ({
+      goalId: String(row.goal_id),
+      month: String(row.month),
+      amountCents: Number(row.amount_cents),
+    }));
+  }
+
+  /** Planning only: never touches saved_cents, progress or transactions. Zero removes the reinforcement. */
+  saveGoalReinforcement(input: GoalMonthlyReinforcement): void {
+    validateGoalReinforcement(input);
+    this.atomic(() => {
+      const goal = this.db.prepare('SELECT status FROM goals WHERE id = ? AND deleted_at IS NULL').get(input.goalId);
+      if (!goal) throw new Error('Objetivo não encontrado.');
+      assertGoalReinforcementAllowed(goal.status as Goal['status'], input.amountCents);
+      const existing = this.db.prepare(
+        'SELECT amount_cents, deleted_at FROM goal_monthly_reinforcements WHERE goal_id = ? AND month = ?',
+      ).get(input.goalId, input.month);
+      if (!existing && input.amountCents === 0) return;
+      if (existing && existing.deleted_at === null && Number(existing.amount_cents) === input.amountCents) return;
+      const timestamp = now();
+      this.db.prepare(`INSERT INTO goal_monthly_reinforcements VALUES(?,?,?,?,?,?,NULL)
+        ON CONFLICT(goal_id, month) DO UPDATE SET amount_cents=excluded.amount_cents,updated_at=excluded.updated_at,deleted_at=NULL`)
+        .run(`${input.goalId}:${input.month}`, input.goalId, input.month, input.amountCents, timestamp, timestamp);
+    });
+  }
+
+  removeGoalReinforcement(goalId: string, month: string): void {
+    this.saveGoalReinforcement({ goalId, month, amountCents: 0 });
   }
 
   getMonthlyPlanning(month: string): MonthlyPlanning | null {
@@ -2218,6 +2272,7 @@ export class LionPocketDatabase {
       'transaction_priority_order',
       'goals',
       'monthly_planning',
+      'goal_monthly_reinforcements',
       ...(includeSync ? syncTables : []),
     ];
     return Object.fromEntries(

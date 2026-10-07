@@ -45,6 +45,12 @@ async function main() {
           await repo.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50001 });
           await repo.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 30000 });
         }
+        if (version >= 11) {
+          await repo.saveGoal({ name: 'Fixture notebook', targetAmount: 3000, savedAmount: 250.5, priority: 'medium', status: 'saving' });
+          const [goal] = await repo.listGoals();
+          await repo.saveGoalReinforcement({ goalId: goal.id, month: '2026-10', amountCents: 50000 });
+          await repo.saveGoalReinforcement({ goalId: goal.id, month: '2026-11', amountCents: 70000 });
+        }
         if (version >= 9) {
           await repo.saveRecurring({ kind: 'expense', active: false, description: 'Fixture nullable schedule', plannedAmount: 0, startMonth: '2026-02', dueDay: 31 });
           sqlite.exec('UPDATE recurring_expenses SET start_date=NULL');

@@ -270,3 +270,28 @@ export interface MonthlyPlanningBalance {
   safetyMargin: number;
   balanceAfterSafetyMargin: number;
 }
+
+/**
+ * Reforço planejado para um objetivo em um mês específico. É decisão do usuário,
+ * não lançamento: não altera savedAmount, progresso nem cria movimentação.
+ * Zero (ou ausência) significa "sem reforço"; nada vale para outros meses.
+ */
+export interface GoalMonthlyReinforcement {
+  goalId: string;
+  month: string;
+  amountCents: number;
+}
+export interface GoalReinforcementItem {
+  goalId: string;
+  status: GoalStatus;
+  amountCents: number;
+  /** Só objetivos planned/saving contam como valor protegido no mês. */
+  counted: boolean;
+  /** Pode definir ou aumentar o reforço (planned/saving). */
+  editable: boolean;
+}
+export interface GoalReinforcementPlan {
+  month: string;
+  totalCents: number;
+  items: GoalReinforcementItem[];
+}

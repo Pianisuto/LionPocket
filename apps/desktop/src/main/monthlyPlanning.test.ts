@@ -79,8 +79,8 @@ describe('monthly planning persistence and restoration', () => {
   });
   it('imports complete Desktop JSON into Android without losing cents or planning', async () => {
     const b = bank(); b.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50001 });
-    const parsed = parseBackupJson(JSON.stringify({ version: 1, schemaVersion: 15, data: b.exportData(true) }));
-    expect(parsed.schemaVersion).toBe(10);
+    const parsed = parseBackupJson(JSON.stringify({ version: 1, schemaVersion: 16, data: b.exportData(true) }));
+    expect(parsed.schemaVersion).toBe(11);
     const stage = sqliteTestConnection(); close.push(() => stage.sqlite.close());
     const staged = await loadBackupData(stage.db, desktopBackupData(parsed.data), parsed.schemaVersion);
     const target = await mobile(); await restoreBackup(target.db, staged, async () => { /* Disposable target; no personal database. */ });
@@ -88,7 +88,7 @@ describe('monthly planning persistence and restoration', () => {
   });
   it('adds absent months from complete JSON and refuses a conflicting month without overwriting local data', async () => {
     const b = bank(); b.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 30000 });
-    const parsed = parseBackupJson(JSON.stringify({ version: 1, schemaVersion: 15, data: b.exportData(true) }));
+    const parsed = parseBackupJson(JSON.stringify({ version: 1, schemaVersion: 16, data: b.exportData(true) }));
     const stage = sqliteTestConnection(); close.push(() => stage.sqlite.close());
     const incoming = await loadBackupData(stage.db, desktopBackupData(parsed.data), parsed.schemaVersion);
     const target = await mobile(); await target.repo.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50000 });
@@ -98,7 +98,7 @@ describe('monthly planning persistence and restoration', () => {
     expect(await target.repo.getMonthlyPlanning('2026-10')).toMatchObject({ safetyMarginCents: 50000 });
     expect(await target.repo.getMonthlyPlanning('2026-11')).toMatchObject({ safetyMarginCents: 30000 });
     b.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 10000 });
-    const conflicting = desktopBackupData(parseBackupJson(JSON.stringify({ version: 1, schemaVersion: 15, data: b.exportData(true) })).data);
+    const conflicting = desktopBackupData(parseBackupJson(JSON.stringify({ version: 1, schemaVersion: 16, data: b.exportData(true) })).data);
     const current = await captureBackup(target.db);
     expect(() => mergeBackupData(current.data, conflicting)).toThrow('conflitam');
     expect(await captureBackup(target.db)).toEqual(expect.objectContaining({ data: current.data }));
@@ -147,7 +147,7 @@ describe('monthly planning persistence and restoration', () => {
       expect(before[table].length).toBeGreaterThan(0);
     }
     // Freeze the v14 definition independently of the migration under test. Removing
-    // only the v15 table/marker would leave its widened identity CHECK in place.
+    // only the later tables/markers would leave their widened identity CHECK in place.
     old.db.exec(`
       PRAGMA foreign_keys=OFF;
       BEGIN;
@@ -158,8 +158,9 @@ describe('monthly planning persistence and restoration', () => {
       INSERT INTO sync_identity_v14 SELECT * FROM sync_identity;
       DROP TABLE sync_identity;
       ALTER TABLE sync_identity_v14 RENAME TO sync_identity;
+      DROP TABLE goal_monthly_reinforcements;
       DROP TABLE monthly_planning;
-      DELETE FROM migrations WHERE version=15;
+      DELETE FROM migrations WHERE version IN (15,16);
       COMMIT;
       PRAGMA foreign_keys=ON;
     `);
@@ -170,7 +171,7 @@ describe('monthly planning persistence and restoration', () => {
     expect(old.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     old.db.close();
     const upgraded = bank(path);
-    expect(upgraded.db.prepare('SELECT MAX(version) AS version FROM migrations').get()).toMatchObject({ version: 15 });
+    expect(upgraded.db.prepare('SELECT MAX(version) AS version FROM migrations').get()).toMatchObject({ version: 16 });
     expect(upgraded.getMonthlyPlanning('2026-10')).toBeNull();
     for (const [t, rows] of Object.entries(before)) expect(upgraded.db.prepare(`SELECT * FROM ${t}`).all()).toEqual(rows);
     expect(upgraded.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

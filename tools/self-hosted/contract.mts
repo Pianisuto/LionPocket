@@ -40,6 +40,9 @@ if (phase === 'initial') {
   mobile.sqlite.exec('DELETE FROM categories; DELETE FROM payment_methods; DELETE FROM cards;');
   desktop.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 50001 });
   desktop.saveMonthlyPlanning({ month: '2026-11', safetyMarginCents: 30000 });
+  const plannedGoal = desktop.saveGoal({ name: 'LP_SELFHOST_GOAL', targetAmount: 3000, savedAmount: 100, priority: 'medium', status: 'saving' });
+  desktop.saveGoalReinforcement({ goalId: plannedGoal.id, month: '2026-10', amountCents: 50000 });
+  desktop.saveGoalReinforcement({ goalId: plannedGoal.id, month: '2026-11', amountCents: 70000 });
   desktop.saveTransaction({ kind: 'expense', description: 'LP_SELFHOST_CANARY_DESCRIPTION_72319', notes: 'LP_SELFHOST_CANARY_NOTE_87931', plannedAmount: 98765.43, dueDate: '2026-10-02', status: 'planned' });
   assert.equal(desktop.db.prepare('SELECT count(*) AS n FROM sync_outbox').get()?.n, 0);
 }
@@ -118,6 +121,7 @@ try {
     assert.equal(discovery.controlVersion, 2); assert.equal(discovery.protocolVersion, 1); assert.equal(discovery.domainSchema, 1);
     assert.deepEqual([...discovery.entityScopes].sort(), [...financialScopes].sort());
     assert.ok(discovery.entityScopes.includes('monthlyPlanning'));
+    assert.ok(discovery.entityScopes.includes('goalMonthlyReinforcement'));
     const first = await a.create();
     assert.equal(first.phase, 'bound');
     assert.ok(desktop.db.prepare('SELECT binding_id FROM sync_local_state').get()?.binding_id);
@@ -150,6 +154,11 @@ try {
     desktop.saveTransaction({ ...input, id: tx.id, plannedAmount: 12.34 }); await a.sync(); await b.sync();
     assert.deepEqual(await repo.getMonthlyPlanning('2026-10'), { month: '2026-10', safetyMarginCents: 50001 });
     assert.deepEqual(await repo.getMonthlyPlanning('2026-11'), { month: '2026-11', safetyMarginCents: 30000 });
+    const syncedGoal = (await repo.listGoals()).find(g => g.name === 'LP_SELFHOST_GOAL');
+    assert.ok(syncedGoal);
+    assert.deepEqual(await repo.listGoalReinforcements('2026-10'), [{ goalId: syncedGoal.id, month: '2026-10', amountCents: 50000 }]);
+    assert.deepEqual(await repo.listGoalReinforcements('2026-11'), [{ goalId: syncedGoal.id, month: '2026-11', amountCents: 70000 }]);
+    assert.equal(syncedGoal.savedAmount, 100);
     assert.equal((await repo.list({ month: '2026-10' })).find(t => t.description === input.description)?.plannedAmount, 12.34);
     await assert.rejects(a.configure('https://operator-different.fixture.test'));
     // Account B cannot access account A's vault, even with the right proof.

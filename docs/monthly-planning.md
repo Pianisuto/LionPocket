@@ -2,6 +2,8 @@
 
 A margem de segurança é uma restrição de planejamento para imprevistos, definida separadamente para cada mês. Não é despesa, lançamento, categoria, conta a pagar ou movimentação de dinheiro. Não altera entradas, saídas, saldo realizado, saldo projetado original, renda comprometida, gráficos ou contas a caminho. Nenhuma margem é copiada automaticamente para o mês seguinte.
 
+O [reforço mensal dos objetivos](goal-monthly-reinforcement.md) é um planejamento separado, por objetivo e mês, e não faz parte da margem de segurança.
+
 ## Uso e apresentação
 
 Em **Recorrências → Planejamento do mês**, a pessoa define ou edita a margem em um formulário temporário. O mês aparece tanto na seção quanto no editor; remover a margem é uma ação explícita dentro do editor, e salvar zero também a desativa. Desktop aproveita o seletor de mês da barra existente. Android usa o mesmo estado de mês da tela principal, com navegação anterior/próximo na seção de planejamento. A seção tem identidade própria e fica fora das listas/totais de recorrências.

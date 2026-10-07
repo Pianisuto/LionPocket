@@ -154,6 +154,7 @@ describe.skipIf(!enabled)(
       let write: () => Promise<void>, rows: () => Promise<unknown[]>;
       let backupTo: (path: string) => Promise<void>;
       let savePlanning: (month: string, safetyMarginCents: number) => Promise<void>;
+      let saveGoalPlan: (name: string, month: string, amountCents: number) => Promise<void>;
       if (dialect === 'desktop') {
         const bank = new LionPocketDatabase(':memory:');
         backupTo = async path => {bank.db.prepare('VACUUM INTO ?').run(path);};
@@ -173,6 +174,10 @@ describe.skipIf(!enabled)(
         };
         rows = async () => bank.listTransactions({ month: '2026-10' });
         savePlanning = async (month, safetyMarginCents) => { bank.saveMonthlyPlanning({ month, safetyMarginCents }); };
+        saveGoalPlan = async (name, month, amountCents) => {
+          const goal = bank.listGoals().find(g => g.name === name) ?? bank.saveGoal({ name, targetAmount: 3000, savedAmount: 100, priority: 'medium', status: 'saving' });
+          bank.saveGoalReinforcement({ goalId: goal.id, month, amountCents });
+        };
       } else {
         const bank = sqliteTestConnection();
         backupTo = async path => {bank.sqlite.prepare('VACUUM INTO ?').run(path);};
@@ -193,6 +198,11 @@ describe.skipIf(!enabled)(
           });
         rows = () => repo.list({ month: '2026-10' });
         savePlanning = (month, safetyMarginCents) => repo.saveMonthlyPlanning({ month, safetyMarginCents });
+        saveGoalPlan = async (name, month, amountCents) => {
+          if (!(await repo.listGoals()).some(g => g.name === name)) await repo.saveGoal({ name, targetAmount: 3000, savedAmount: 100, priority: 'medium', status: 'saving' });
+          const goal = (await repo.listGoals()).find(g => g.name === name)!;
+          await repo.saveGoalReinforcement({ goalId: goal.id, month, amountCents });
+        };
       }
       let saved: SyncSaved | null = null;
       const secrets = new TestSecrets(),
@@ -246,6 +256,7 @@ describe.skipIf(!enabled)(
         restart,
         backupTo,
         savePlanning,
+        saveGoalPlan,
       };
     }
     async function send(
@@ -408,6 +419,32 @@ describe.skipIf(!enabled)(
       const stored = canonicalStringify((await pool.query('SELECT * FROM sync_commits WHERE vault_id=$1', [a.profile().profile!.pin.vaultId])).rows);
       expect(stored).not.toContain('safetyMarginCents');
       expect(stored).not.toContain('monthlyPlanning');
+      a.sync.setForeground(false); b.sync.setForeground(false);
+    }, 30000);
+
+    it.each([['desktop', 'android'], ['android', 'desktop']] as const)('%s → %s syncs goal monthly reinforcement via encrypted server transport with a stable identity, clear and redefine', async (from, to) => {
+      const a = await owner(from), b = await client(to);
+      await a.saveGoalPlan('Notebook', '2026-10', 50000);
+      await a.saveGoalPlan('Notebook', '2026-11', 70000);
+      await a.sync.sync();
+      await b.sync.connectInvitation((await a.sync.createInvitation()).link);
+      await expect.poll(async () => (await a.sync.status()).pairingRequests.length, { timeout: 15000 }).toBe(1);
+      await a.sync.approve(b.profile().profile!.deviceId);
+      await expect.poll(async () => (await b.sync.status()).phase, { timeout: 15000 }).toBe('bound');
+      await b.sync.sync();
+      const plans = (c: typeof a) => c.options.db.read('SELECT g.name,r.month,r.amount_cents FROM goal_monthly_reinforcements r JOIN goals g ON g.id=r.goal_id ORDER BY r.month');
+      expect(await plans(b)).toEqual([{ name: 'Notebook', month: '2026-10', amount_cents: 50000 }, { name: 'Notebook', month: '2026-11', amount_cents: 70000 }]);
+      await b.saveGoalPlan('Notebook', '2026-10', 60000); await b.sync.sync(); await a.sync.sync();
+      expect((await plans(a))[0].amount_cents).toBe(60000);
+      await a.saveGoalPlan('Notebook', '2026-10', 0); await a.sync.sync(); await b.sync.sync();
+      expect((await plans(b))[0].amount_cents).toBe(0);
+      await b.saveGoalPlan('Notebook', '2026-10', 12345); await b.sync.sync(); await a.sync.sync();
+      expect(await plans(a)).toEqual(await plans(b));
+      const objects = "SELECT object_id FROM sync_identity WHERE entity_type='goalMonthlyReinforcement' ORDER BY object_id";
+      expect(await a.options.db.read(objects)).toEqual(await b.options.db.read(objects));
+      const stored = canonicalStringify((await pool.query('SELECT * FROM sync_commits WHERE vault_id=$1', [a.profile().profile!.pin.vaultId])).rows);
+      expect(stored).not.toContain('amountCents');
+      expect(stored).not.toContain('goalMonthlyReinforcement');
       a.sync.setForeground(false); b.sync.setForeground(false);
     }, 30000);
 
