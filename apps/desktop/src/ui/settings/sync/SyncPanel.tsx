@@ -15,7 +15,7 @@ import { useSyncSession, type SyncSession } from './useSyncSession';
 
 /**
  * Sync settings, composed by phase: overview and pending decisions first,
- * then setup or devices, with recovery tools in an independent column.
+ * then setup or devices, with recovery tools side by side below the devices.
  */
 export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const { status, busy, error, run, setError } = useSyncSession(onChanged);
@@ -29,6 +29,7 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   return (
     <div className="sync-panel" role="region" aria-label="Sincronização">
       <SyncOverview {...session} />
+      {view.canUnlink && <UnlinkServer {...session} />}
 
       {status.compatibilityMessage && (
         <SyncNotice title="A sincronização precisa da sua atenção" tone="warning">
@@ -71,17 +72,19 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       {!status.unlinkPending && status.phase === 'pairing' && <PairingProgress {...session} />}
 
       {view.connected && (
-        <div className={view.canManage ? 'sync-management' : undefined}>
+        <div className="sync-management">
           {view.canManage && <DevicesSection {...session} />}
           <div className="sync-management__tools">
-            {view.canManage && status.owner && <ProtectionSection {...session} />}
-            {view.canManage && <SyncDiagnostics {...session} />}
+            {view.canManage && status.owner && (
+              <div className="sync-management__protection">
+                <ProtectionSection {...session} />
+              </div>
+            )}
             <ServerResetForm {...session} />
           </div>
+          {view.canManage && <SyncDiagnostics {...session} />}
         </div>
       )}
-
-      {view.canUnlink && <UnlinkServer {...session} />}
 
       <footer className="sync-panel__footnote">
         <LockKeyhole size={14} aria-hidden="true" />
