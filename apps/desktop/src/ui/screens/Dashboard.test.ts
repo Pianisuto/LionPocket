@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { Overview, Transaction } from '@lionpocket/core/types';
+import { monthlyProtectionOverview } from '@lionpocket/core/free-now';
 import { Dashboard, groupUpcoming } from './Dashboard';
 
 const transaction = (overrides: Partial<Transaction>): Transaction => ({
@@ -180,21 +181,79 @@ describe('auxiliary safety margin in the existing projected balance card', () =>
     annual: [], categoryBreakdown: [], upcoming: [], recent: [], goals: [],
   };
   const render = (data: Overview) => renderToStaticMarkup(createElement(Dashboard, { overview: data, loading: false, onNavigate: () => undefined, onEditTransaction: () => undefined, onSettleTransactions: async () => true }));
+  const protect = (projected: number, marginCents: number) => monthlyProtectionOverview([], [], [], { month: '2026-10', safetyMarginCents: marginCents }, '2026-10', '2026-10-10', projected).protection;
   it('preserves the original hint with no configured margin, including zero', () => {
     expect(render(overview)).toContain('Se tudo ocorrer como planejado');
     expect(render(overview)).not.toContain('após margem de segurança');
-    expect(render({ ...overview, planning: { projectedBalance: 3200, safetyMargin: 0, balanceAfterSafetyMargin: 3200 } })).toBe(render(overview));
+    expect(render({ ...overview, protection: protect(3200, 0) })).toBe(render(overview));
   });
   it('keeps four cards and original projection while displaying availability as a hint', () => {
-    const html = render({ ...overview, planning: { projectedBalance: 3200, safetyMargin: 500, balanceAfterSafetyMargin: 2700 } });
+    const html = render({ ...overview, protection: protect(3200, 50000) });
     expect(html).toMatch(/3\.200,00/);
     expect(html).toMatch(/2\.700,00 após margem de segurança/);
     expect(html.match(/<article class="metric-card /g)).toHaveLength(4);
     expect(html).not.toContain('Se tudo ocorrer como planejado');
   });
   it('shows a negative amount after the margin without replacing the main projected balance', () => {
-    const html = render({ ...overview, summary: { ...overview.summary, projectedBalance: 300 }, planning: { projectedBalance: 300, safetyMargin: 500, balanceAfterSafetyMargin: -200 } });
+    const html = render({ ...overview, summary: { ...overview.summary, projectedBalance: 300 }, protection: protect(300, 50000) });
     expect(html).toMatch(/-R\$.*200,00 após margem de segurança/);
     expect(html).toMatch(/300,00/);
+  });
+});
+
+describe('Livre agora in the Dashboard', () => {
+  const day = (date: string, kind: Transaction['kind'], amount: number, extra: Partial<Transaction> = {}) => transaction({
+    id: `${kind}-${date}-${amount}`, kind, dueDate: date, plannedAmount: amount, isOverdue: false, cardId: null, cardName: null, paymentMethodId: null, paymentMethodName: null, ...extra,
+  });
+  const items = [
+    day('2026-10-05', 'income', 3000, { status: 'received', actualAmount: 3000, settledDate: '2026-10-05' }),
+    day('2026-10-02', 'expense', 1000, { status: 'paid', actualAmount: 1000, settledDate: '2026-10-02' }),
+    day('2026-10-12', 'expense', 200, { description: 'Luz' }),
+    day('2026-10-14', 'expense', 100, { description: 'Internet' }),
+    day('2026-10-15', 'income', 500, { description: 'Freela' }),
+    day('2026-10-20', 'expense', 400, { description: 'Cartão' }),
+  ];
+  const overviewFor = (margin: number, reinforcement: number, today = '2026-10-10'): Overview => {
+    const goals = [{ id: 'g', status: 'saving' as const }];
+    const result = monthlyProtectionOverview(items, goals, reinforcement ? [{ goalId: 'g', month: '2026-10', amountCents: reinforcement }] : [], margin ? { month: '2026-10', safetyMarginCents: margin } : null, '2026-10', today, 1800);
+    return { summary: { month: '2026-10', plannedIncome: 3500, receivedIncome: 3000, plannedExpenses: 1700, paidExpenses: 1000, overdueExpenses: 0, projectedBalance: 1800, realizedBalance: 2000, committedPercent: 0.48 }, annual: [], categoryBreakdown: [], upcoming: [], recent: [], goals: [], ...result };
+  };
+  const text = (data: Overview) => renderToStaticMarkup(createElement(Dashboard, { overview: data, loading: false, onNavigate: () => undefined, onEditTransaction: () => undefined, onSettleTransactions: async () => true })).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const html = (data: Overview) => renderToStaticMarkup(createElement(Dashboard, { overview: data, loading: false, onNavigate: () => undefined, onEditTransaction: () => undefined, onSettleTransactions: async () => true }));
+
+  it('keeps the four metric cards and adds a single compact strip, with Saldo projetado as the main card', () => {
+    const markup = html(overviewFor(50000, 70000));
+    expect(markup.match(/<article class="metric-card /g)).toHaveLength(4);
+    expect(markup.match(/class="free-now"/g)).toHaveLength(1);
+    expect(text(overviewFor(50000, 70000))).toMatch(/Saldo projetado R\$.*1\.800,00 R\$.*600,00 após proteções/);
+  });
+  it('shows the value, the period and the whole composition', () => {
+    const content = text(overviewFor(50000, 70000));
+    expect(content).toMatch(/Livre agora R\$.*500,00/);
+    expect(content).toContain('Até a próxima entrada: Freela, em 15/10.');
+    expect(content).toMatch(/Saldo realizado do mês R\$.*2\.000,00/);
+    expect(content).toMatch(/Contas antes da próxima entrada -R\$.*300,00/);
+    expect(content).toMatch(/Margem de segurança -R\$.*500,00/);
+    expect(content).toMatch(/Objetivos -R\$.*700,00/);
+  });
+  it('works without protections: only the bills line, original projected hint', () => {
+    const content = text(overviewFor(0, 0));
+    expect(content).toMatch(/Livre agora R\$.*1\.700,00/);
+    expect(content).toContain('Se tudo ocorrer como planejado');
+    expect(content).not.toContain('Margem de segurança');
+    expect(content).not.toContain('Objetivos -R$');
+  });
+  it('shows a negative value with the attention colour instead of zero', () => {
+    const markup = html(overviewFor(150000, 70000));
+    expect(markup).toMatch(/free-now__value money-negative">-R\$.*500,00/);
+  });
+  it('does not render the strip for other months or old overviews', () => {
+    expect(html({ ...overviewFor(0, 0), freeNow: null })).not.toContain('free-now');
+    const { freeNow: _unused, ...legacy } = overviewFor(0, 0);
+    expect(html(legacy)).not.toContain('free-now');
+  });
+  it('describes a month without another income in plain words', () => {
+    const noIncome = monthlyProtectionOverview(items.filter((item) => item.id !== 'income-2026-10-15-500'), [], [], null, '2026-10', '2026-10-10', 0);
+    expect(text({ ...overviewFor(0, 0), ...noIncome })).toContain('Sem outra entrada prevista: considera as contas até o fim do mês.');
   });
 });

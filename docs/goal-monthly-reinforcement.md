@@ -19,7 +19,7 @@ O reforço é um dado mensal próprio: uma linha por objetivo e mês, em centavo
 
 Zero é um `put`, não um tombstone: remover o reforço mantém a identidade e permite redefinir o mesmo mês quantas vezes for preciso. Ausência de linha e zero têm a mesma apresentação e cálculo.
 
-O core expõe `goalReinforcementPlan`, `totalGoalReinforcementForMonth` (total em centavos, pronto para o futuro “Livre agora”), `goalReinforcementAction`, `goalReinforcementNote`, `suggestionToReinforcementCents` e a validação, todos compartilhados pelas duas plataformas.
+O core expõe `goalReinforcementPlan`, `totalGoalReinforcementForMonth` (total em centavos, usado pelo [dinheiro protegido](protected-money-free-now.md)), `goalReinforcementAction`, `goalReinforcementNote`, `suggestionToReinforcementCents` e a validação, todos compartilhados pelas duas plataformas.
 
 ## Comportamento por status do objetivo
 
@@ -55,4 +55,4 @@ O servidor anuncia o novo escopo `goalMonthlyReinforcement`. Protocolo, envelope
 
 Testes de UI (`apps/sync-server/src/goalReinforcement.ui.test.ts`) cobrem o mês local do Mobile e a falha de leitura no Desktop e no Mobile. Testes cobrem: criar/editar/remover/redefinir; meses independentes; vários objetivos no mesmo mês e total mensal; sugestão diferente do reforço; `savedAmount`, progresso e lançamentos inalterados; planejado/em andamento/pausado/concluído/cancelado; exclusão de objetivo; Desktop e Mobile com os mesmos casos; backup, JSON, merge e conversão; os upgrades reais a partir do Desktop v15 e do Mobile v10 (com rollback tardio); sync bidirecional, identidade estável, conflitos, objetivo excluído em outro aparelho, desvinculação, nova baseline, reconexão, replay de epoch e as fixtures nativas. O caso com servidor real (`pairing.integration.test.ts`) exige Postgres. Testes com `node:sqlite` não substituem o Nitro SQLite no Android, e Windows instalado exige um host Windows descartável.
 
-Fora do escopo: Livre agora, análise temporal, reserva ou transferência automática, alteração automática de `savedAmount` e reforço recorrente.
+Fora do escopo: reserva ou transferência automática, alteração automática de `savedAmount` e reforço recorrente.

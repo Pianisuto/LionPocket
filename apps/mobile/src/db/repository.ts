@@ -121,7 +121,9 @@ export class MobileRepository extends PlanningRepository {
 
   async monthlyOverview(month: string) {
     const items = await this.list({ month });
-    return monthlyOverview(items, await this.listGoals(), month, todayIso(), await this.getMonthlyPlanning(month));
+    return monthlyOverview(
+      items, await this.listGoals(), month, todayIso(), await this.getMonthlyPlanning(month), await this.listGoalReinforcements(month),
+    );
   }
 
   /** Explicit additive action; never repopulates a user's deletions on restore/open. */

@@ -236,6 +236,10 @@ export interface CategorySummary {
 
 export interface Overview {
   planning?: MonthlyPlanningBalance;
+  /** Derivado de margem + reforços; ausente em visões antigas, nunca persistido nem sincronizado. */
+  protection?: ProtectionBalance;
+  /** Só existe quando o mês consultado é o mês atual. */
+  freeNow?: FreeNow | null;
   summary: MonthSummary;
   annual: MonthSummary[];
   categoryBreakdown: CategorySummary[];
@@ -294,4 +298,39 @@ export interface GoalReinforcementPlan {
   month: string;
   totalCents: number;
   items: GoalReinforcementItem[];
+}
+
+/** Dinheiro protegido de um mês: margem de segurança + reforços ativos dos objetivos. Derivado. */
+export interface ProtectedMoney {
+  month: string;
+  safetyMarginCents: number;
+  goalReinforcementCents: number;
+  protectedMoneyCents: number;
+}
+export interface ProtectionBalance extends ProtectedMoney {
+  projectedBalanceCents: number;
+  balanceAfterProtectionCents: number;
+}
+/** Receitas previstas, ainda não recebidas, que caem no primeiro dia com entrada. */
+export interface NextIncome {
+  date: string;
+  /** Soma das entradas previstas nessa data. */
+  amountCents: number;
+  count: number;
+  /** Descrição da entrada quando é uma só; nulo quando há várias na mesma data. */
+  description: string | null;
+}
+/**
+ * "Livre agora": o que sobra do saldo realizado do mês depois das contas que vencem até a
+ * próxima entrada e do dinheiro protegido. Pode ser negativo. Não é saldo bancário.
+ */
+export interface FreeNow extends ProtectedMoney {
+  today: string;
+  /** Recebido - pago no mês; o LionPocket não conhece saldo de conta nem sobra de meses anteriores. */
+  realizedBalanceCents: number;
+  nextIncome: NextIncome | null;
+  /** Último dia (inclusive) dos compromissos: a data da próxima entrada ou o fim do mês. */
+  commitmentsUntil: string;
+  commitmentsBeforeNextIncomeCents: number;
+  freeNowCents: number;
 }

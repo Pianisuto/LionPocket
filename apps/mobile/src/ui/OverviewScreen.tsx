@@ -1,4 +1,5 @@
-import { safetyMarginHint } from './planningPresentation';
+import { protectionLine } from './planningPresentation';
+import { FreeNowSummary } from './FreeNowSummary';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -132,7 +133,8 @@ export function OverviewScreen({
                 >
                   {money(summary.projectedBalance)}
                 </Text>
-                {safetyMarginHint(overview.planning) && <Text style={overview.planning.balanceAfterSafetyMargin < 0 ? styles.danger : styles.muted}>{safetyMarginHint(overview.planning)}</Text>}
+                {protectionLine(overview.protection) && <Text style={protectionLine(overview.protection)!.negative ? styles.danger : styles.muted}>{protectionLine(overview.protection)!.text}</Text>}
+                <FreeNowSummary freeNow={overview.freeNow} />
                 <Text style={styles.muted}>
                   Realizado: {money(summary.realizedBalance)}
                 </Text>

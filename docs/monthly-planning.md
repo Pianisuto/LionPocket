@@ -10,7 +10,7 @@ Em **Recorrências → Planejamento do mês**, a pessoa define ou edita a margem
 
 No Dashboard Desktop, os quatro cards e o valor principal de **Saldo projetado** ficam iguais. Com margem, apenas a dica passa a mostrar “R$ … após margem de segurança”. Sem margem/zero, continua “Se tudo ocorrer como planejado”. No Mobile, a informação auxiliar aparece junto ao saldo projetado no card de saldo existente e na Visão geral; o restante desses cards permanece igual. Resultados negativos são mostrados normalmente, com a cor de atenção já existente no Mobile.
 
-`monthlyPlanningBalance` no core compartilhado devolve `projectedBalance`, `safetyMargin` e `balanceAfterSafetyMargin`. A subtração ocorre em centavos e não limita o resultado a zero. Por exemplo, saldo projetado de R$ 300 com margem de R$ 500 resulta em -R$ 200 após margem. Isso ainda não implementa **Livre agora** ou qualquer transferência/reserva automática.
+`monthlyPlanningBalance` no core compartilhado devolve `projectedBalance`, `safetyMargin` e `balanceAfterSafetyMargin`. A subtração ocorre em centavos e não limita o resultado a zero. Por exemplo, saldo projetado de R$ 300 com margem de R$ 500 resulta em -R$ 200 após margem. O [Dinheiro protegido e Livre agora](protected-money-free-now.md) usam esta margem; nenhuma transferência/reserva automática existe.
 
 ## Modelo e persistência
 

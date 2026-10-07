@@ -29,6 +29,10 @@
     "./planning": {
       "types": "./dist/planning.d.ts",
       "default": "./dist/planning.js"
+    },
+    "./free-now": {
+      "types": "./dist/free-now.d.ts",
+      "default": "./dist/free-now.js"
     }
   },
   "scripts": {

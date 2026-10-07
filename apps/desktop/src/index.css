@@ -2099,6 +2099,87 @@ strong,
   --metric-wash: var(--violet-wash);
 }
 
+/* Livre agora: uma faixa discreta sob as métricas; a composição abre sob demanda. */
+.free-now {
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.free-now__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 12px 18px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.free-now__summary::-webkit-details-marker { display: none; }
+
+.free-now__label {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 620;
+}
+
+.free-now__value {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 19px;
+  letter-spacing: -0.02em;
+}
+
+.free-now__horizon {
+  flex: 1 1 220px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.free-now__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  font-weight: 620;
+}
+
+.free-now[open] .free-now__toggle svg {
+  transform: rotate(180deg);
+}
+
+.free-now__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 18px 14px;
+}
+
+.free-now__lines > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-soft);
+  font-size: 12.5px;
+}
+
+.free-now__lines dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.free-now__result {
+  padding-top: 8px;
+  border-top: 1px solid var(--line-1);
+  color: var(--text);
+  font-weight: 650;
+}
+
 /* Colunas fluidas com teto de três: cada faixa nunca fica menor que
    (100% - vãos) / 3, então nem uma tela ultralarga quebra em quatro colunas —
    e o mínimo de 320px derruba para duas ou uma quando o espaço aperta. */

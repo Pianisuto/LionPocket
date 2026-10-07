@@ -72,7 +72,7 @@ export function goalReinforcementPlan(
   return { month, totalCents, items };
 }
 
-/** Total reserved for goals in a month, in cents; ready for a future "Livre agora". */
+/** Total reserved for goals in a month, in cents; the goals part of the protected money. */
 export function totalGoalReinforcementForMonth(
   goals: Pick<Goal, 'id' | 'status'>[],
   reinforcements: GoalMonthlyReinforcement[],
