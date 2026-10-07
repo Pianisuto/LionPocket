@@ -321,16 +321,20 @@ export interface NextIncome {
   description: string | null;
 }
 /**
- * "Livre agora": o que sobra do saldo realizado do mês depois das contas que vencem até a
- * próxima entrada e do dinheiro protegido. Pode ser negativo. Não é saldo bancário.
+ * "Livre agora": o ponto mais baixo do saldo do mês (em mãos, aplicando cada conta e cada
+ * entrada prevista na sua data) menos o dinheiro protegido. Pode ser negativo. Não é saldo bancário.
  */
 export interface FreeNow extends ProtectedMoney {
   today: string;
   /** Recebido - pago no mês; o LionPocket não conhece saldo de conta nem sobra de meses anteriores. */
   realizedBalanceCents: number;
+  /** Informativa: a próxima entrada ainda prevista, se houver. */
   nextIncome: NextIncome | null;
-  /** Último dia (inclusive) dos compromissos: a data da próxima entrada ou o fim do mês. */
-  commitmentsUntil: string;
-  commitmentsBeforeNextIncomeCents: number;
+  /** Menor saldo do mês a partir de hoje (inclui o saldo de hoje) e a primeira data em que ocorre. */
+  lowestPointCents: number;
+  lowestPointDate: string;
+  /** Soma das contas e das entradas aplicadas até o ponto mais baixo, inclusive. */
+  commitmentsUntilLowestPointCents: number;
+  incomesUntilLowestPointCents: number;
   freeNowCents: number;
 }

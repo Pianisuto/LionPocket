@@ -121,20 +121,23 @@ describe('protectionBalance and hint', () => {
   });
 });
 
-describe('Livre agora', () => {
-  it('without margin or goals: realized balance minus bills before the next income', () => {
+describe('Livre agora (ponto mais baixo do mês)', () => {
+  it('without margin or goals: the lowest balance on the way to the end of the month', () => {
+    // 2000 em mãos → 1800 (12) → 1700 (14) → 2200 (15, entrada) → 1800 (20)
     const result = free(baseMonth())!;
     expect(result).toMatchObject({
       protectedMoneyCents: 0,
       realizedBalanceCents: 200000,
-      commitmentsBeforeNextIncomeCents: 30000,
-      commitmentsUntil: '2026-10-15',
+      lowestPointCents: 170000,
+      lowestPointDate: '2026-10-14',
+      commitmentsUntilLowestPointCents: 30000,
+      incomesUntilLowestPointCents: 0,
       freeNowCents: 170000,
     });
     expect(result.nextIncome).toEqual({ date: '2026-10-15', amountCents: 50000, count: 1, description: 'Freela' });
   });
 
-  it('uses the same realized balance shown by the "Saldo realizado" card', () => {
+  it('starts from the same realized balance shown by the "Saldo realizado" card', () => {
     const items = baseMonth();
     expect(free(items)!.realizedBalanceCents).toBe(Math.round(summarizeMonth(items, MONTH, TODAY).realizedBalance * 100));
   });
@@ -146,97 +149,91 @@ describe('Livre agora', () => {
     const goals = [goal('a', 'saving'), goal('paused', 'paused')];
     expect(free(baseMonth(), null, goals, [reinforcement('a', 70000), reinforcement('paused', 99999)])!.freeNowCents).toBe(100000);
   });
-  it('subtracts margin and reinforcements, exposing the composition', () => {
+  it('subtracts margin and reinforcements, and the composition adds up to the result', () => {
     const result = free(baseMonth(), planning(50000), [goal('a', 'saving')], [reinforcement('a', 70000)])!;
     expect(result).toMatchObject({ safetyMarginCents: 50000, goalReinforcementCents: 70000, protectedMoneyCents: 120000, freeNowCents: 50000 });
     expect(freeNowComposition(result)).toEqual([
-      { key: 'realized', label: 'Saldo realizado do mês', cents: 200000 },
-      { key: 'commitments', label: 'Contas antes da próxima entrada', cents: -30000 },
+      { key: 'realized', label: 'Em mãos (recebido − pago no mês)', cents: 200000 },
+      { key: 'commitments', label: 'Contas até 14/10', cents: -30000 },
       { key: 'safetyMargin', label: 'Margem de segurança', cents: -50000 },
       { key: 'goals', label: 'Objetivos', cents: -70000 },
     ]);
     expect(freeNowComposition(result).reduce((sum, line) => sum + line.cents, 0)).toBe(result.freeNowCents);
   });
-  it('omits zero protections from the composition', () => {
-    expect(freeNowComposition(free(baseMonth())!).map((line) => line.key)).toEqual(['realized', 'commitments']);
+  it('omits lines that are zero, except the starting balance', () => {
+    const calm = [received('2026-10-01', 500), income('2026-10-15', 300)];
+    expect(freeNowComposition(free(calm)!).map((line) => line.key)).toEqual(['realized']);
   });
 
-  it('next income tomorrow only counts what is due today or tomorrow', () => {
+  it('next income tomorrow: bills before and after it are applied on their dates', () => {
+    // 1000 → 950 (hoje) → 920 (11, conta) → 1720 (11, entrada) → 721 (12)
     const items = [received('2026-10-01', 1000), expense('2026-10-10', 50), expense('2026-10-11', 30), expense('2026-10-12', 999), income('2026-10-11', 800)];
     const result = free(items)!;
     expect(result.nextIncome?.date).toBe('2026-10-11');
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(8000);
-    expect(result.freeNowCents).toBe(100000 - 8000);
+    expect(result).toMatchObject({ lowestPointCents: 72100, lowestPointDate: '2026-10-12', freeNowCents: 72100 });
   });
   it('sums several bills before the next income', () => {
     const items = [received('2026-10-01', 1000), expense('2026-10-11', 10.1), expense('2026-10-12', 20.2), expense('2026-10-13', 30.3), income('2026-10-14', 5000)];
-    expect(free(items)!.commitmentsBeforeNextIncomeCents).toBe(6060);
+    expect(free(items)!).toMatchObject({ lowestPointCents: 100000 - 6060, commitmentsUntilLowestPointCents: 6060, lowestPointDate: '2026-10-13' });
   });
-  it('bills after the next income do not reduce the immediate value', () => {
-    const items = [received('2026-10-01', 1000), income('2026-10-12', 500), expense('2026-10-13', 700), expense('2026-10-30', 900)];
-    expect(free(items)!.commitmentsBeforeNextIncomeCents).toBe(0);
-    expect(free(items)!.freeNowCents).toBe(100000);
+  it('later bills covered by the income that arrives first do not reduce the immediate value', () => {
+    const items = [received('2026-10-01', 1000), income('2026-10-12', 5000), expense('2026-10-13', 700), expense('2026-10-30', 900)];
+    expect(free(items)!).toMatchObject({ lowestPointCents: 100000, lowestPointDate: TODAY, freeNowCents: 100000 });
+    expect(freeNowHorizon(free(items)!)).toMatch(/mais apertado hoje/);
   });
-  it('a bill due on the same day as the next income counts as before it (deterministic, conservative)', () => {
-    const items = [received('2026-10-01', 1000), income('2026-10-15', 500), expense('2026-10-15', 120), expense('2026-10-16', 80)];
-    expect(free(items)!.commitmentsBeforeNextIncomeCents).toBe(12000);
+  it('later bills that the next income does not cover do reduce it', () => {
+    const items = [received('2026-10-01', 100), income('2026-10-12', 50), expense('2026-10-13', 700)];
+    expect(free(items)!).toMatchObject({ lowestPointCents: -55000, lowestPointDate: '2026-10-13', freeNowCents: -55000 });
   });
-  it('an income still planned for today is the next income, and bills due today count', () => {
-    const items = [received('2026-10-01', 1000), income('2026-10-10', 500), expense('2026-10-10', 60), expense('2026-10-11', 40)];
+  it('bills due the same day as an income leave first (deterministic, conservative)', () => {
+    const items = [received('2026-10-01', 100), income('2026-10-15', 500), expense('2026-10-15', 120)];
+    expect(free(items)!).toMatchObject({ lowestPointCents: -2000, lowestPointDate: '2026-10-15', commitmentsUntilLowestPointCents: 12000, incomesUntilLowestPointCents: 0 });
+  });
+  it('an income still planned for today arrives after today\'s bills', () => {
+    const items = [received('2026-10-01', 1000), income('2026-10-10', 500), expense('2026-10-10', 60)];
     const result = free(items)!;
     expect(result.nextIncome?.date).toBe('2026-10-10');
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(6000);
-    expect(result.realizedBalanceCents).toBe(100000);
+    expect(result).toMatchObject({ lowestPointCents: 94000, realizedBalanceCents: 100000 });
   });
   it('adds incomes of the same date and drops the single description', () => {
     const items = [income('2026-10-15', 500, { description: 'B' }), income('2026-10-15', 250, { description: 'A' }), income('2026-10-20', 9)];
     expect(nextIncomeOf(items, MONTH, TODAY)).toEqual({ date: '2026-10-15', amountCents: 75000, count: 2, description: null });
   });
+  it('the earliest date wins when the lowest balance repeats', () => {
+    const items = [received('2026-10-01', 100), expense('2026-10-12', 40), income('2026-10-13', 40), expense('2026-10-14', 40)];
+    expect(free(items)!).toMatchObject({ lowestPointCents: 6000, lowestPointDate: '2026-10-12' });
+  });
 
-  it('an already received income is neither future nor the next income', () => {
+  it('an already received income is not a future one', () => {
     const items = [received('2026-10-05', 3000), received('2026-10-15', 500), expense('2026-10-12', 200), expense('2026-10-20', 400)];
     const result = free(items)!;
     expect(result.nextIncome).toBeNull();
-    expect(result.realizedBalanceCents).toBe(350000);
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(60000);
+    expect(result).toMatchObject({ realizedBalanceCents: 350000, lowestPointCents: 290000, incomesUntilLowestPointCents: 0 });
   });
   it('a late planned income is not counted on: it neither anchors nor adds to the balance', () => {
     const items = [received('2026-10-01', 1000), income('2026-10-05', 700), expense('2026-10-12', 100), income('2026-10-20', 500), expense('2026-10-25', 300)];
     const result = free(items)!;
     expect(result.nextIncome?.date).toBe('2026-10-20');
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(10000);
-    expect(result.realizedBalanceCents).toBe(100000);
+    expect(result).toMatchObject({ realizedBalanceCents: 100000, lowestPointCents: 90000, lowestPointDate: '2026-10-12' });
   });
   it('an already paid bill is not charged again', () => {
     const items = [received('2026-10-01', 1000), paid('2026-10-12', 300), income('2026-10-15', 500)];
-    const result = free(items)!;
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(0);
-    expect(result.realizedBalanceCents).toBe(70000);
-    expect(result.freeNowCents).toBe(70000);
+    expect(free(items)!).toMatchObject({ realizedBalanceCents: 70000, lowestPointCents: 70000, freeNowCents: 70000, commitmentsUntilLowestPointCents: 0 });
   });
   it('a paid bill uses the amount actually paid for the balance', () => {
-    const items = [received('2026-10-01', 1000), paid('2026-10-03', 80, { plannedAmount: 100 })];
-    expect(free(items)!.realizedBalanceCents).toBe(92000);
+    expect(free([received('2026-10-01', 1000), paid('2026-10-03', 80, { plannedAmount: 100 })])!.realizedBalanceCents).toBe(92000);
   });
   it('cancelled entries are ignored, as expenses and as incomes', () => {
     const items = [received('2026-10-01', 1000), expense('2026-10-12', 300, { status: 'cancelled' }), income('2026-10-11', 900, { status: 'cancelled' }), income('2026-10-15', 500), expense('2026-10-13', 50)];
     const result = free(items)!;
     expect(result.nextIncome?.date).toBe('2026-10-15');
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(5000);
+    expect(result).toMatchObject({ lowestPointCents: 95000, lowestPointDate: '2026-10-13' });
   });
   it('without a future income, every pending bill until the end of the month counts', () => {
     const items = [received('2026-10-01', 1000), expense('2026-10-12', 100), expense('2026-10-31', 200)];
     const result = free(items)!;
     expect(result.nextIncome).toBeNull();
-    expect(result.commitmentsUntil).toBe('2026-10-31');
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(30000);
-    expect(freeNowHorizon(result)).toMatch(/até o fim do mês/);
-    expect(freeNowComposition(result)[1].label).toBe('Contas até o fim do mês');
-  });
-  it('the last day of February is respected when no income is planned', () => {
-    const result = calculateFreeNow([expense('2028-02-29', 10)], '2028-02', '2028-02-20', null, [], [])!;
-    expect(result.commitmentsUntil).toBe('2028-02-29');
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(1000);
+    expect(result).toMatchObject({ lowestPointCents: 70000, lowestPointDate: '2026-10-31', commitmentsUntilLowestPointCents: 30000 });
   });
   it('negative results are kept, never clamped to zero', () => {
     const items = [received('2026-10-01', 100), expense('2026-10-11', 250), income('2026-10-15', 500)];
@@ -244,17 +241,16 @@ describe('Livre agora', () => {
     expect(result.freeNowCents).toBe(10000 - 25000 - 5000);
     expect(result.freeNowCents).toBeLessThan(0);
   });
-  it('overdue bills, including those carried from earlier months, are commitments before any next income', () => {
+  it('overdue bills, including those carried from earlier months, leave today', () => {
     const items = [received('2026-10-01', 1000), expense('2026-09-20', 150), expense('2026-10-03', 50), income('2026-10-15', 500)];
-    const result = free(items)!;
     expect(items[1].isOverdue).toBe(true);
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(20000);
+    expect(free(items)!).toMatchObject({ lowestPointCents: 80000, lowestPointDate: TODAY, commitmentsUntilLowestPointCents: 20000 });
   });
   it('ignores zero-value entries', () => {
     const items = [received('2026-10-01', 100), income('2026-10-12', 0), expense('2026-10-11', 0), income('2026-10-20', 300)];
     const result = free(items)!;
     expect(result.nextIncome?.date).toBe('2026-10-20');
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(0);
+    expect(result).toMatchObject({ lowestPointCents: 10000, lowestPointDate: TODAY });
   });
 
   it('cards, installments and recurrences count by the due date the system already computed, once', () => {
@@ -267,14 +263,31 @@ describe('Livre agora', () => {
       expense('2026-10-25', 120, { description: 'Notebook 4/10', sourceType: 'installment', sourceId: 'inst', installmentNumber: 4, installmentTotal: 10 }),
       income('2026-10-15', 500),
     ];
-    expect(free(items)!.commitmentsBeforeNextIncomeCents).toBe(15000 + 5000 + 12000 + 3500);
+    expect(free(items)!).toMatchObject({ lowestPointCents: 200000 - 15000 - 5000 - 12000 - 3500, lowestPointDate: '2026-10-14' });
   });
-  it('a settled card invoice leaves the commitments and enters the realized balance once', () => {
+  it('a settled card invoice leaves the pending bills and enters the balance in hand, once', () => {
     const open = [received('2026-10-01', 1000), expense('2026-10-12', 200, { cardId: 'nu' }), income('2026-10-15', 500)];
     const settled = [open[0], { ...open[1], status: 'paid' as const, actualAmount: 200, settledDate: '2026-10-10', isOverdue: false }, open[2]];
     expect(free(open)!.freeNowCents).toBe(80000);
     expect(free(settled)!.freeNowCents).toBe(80000);
-    expect(free(settled)!.commitmentsBeforeNextIncomeCents).toBe(0);
+    expect(free(settled)!.commitmentsUntilLowestPointCents).toBe(0);
+  });
+
+  it('real case: 1.688 received, 108,01 paid, bills on the 14th/21st/24th/26th, incomes on the 20th/21st', () => {
+    const items = [
+      received('2026-10-06', 1688),
+      paid('2026-10-01', 108.01),
+      expense('2026-10-14', 555.12, { description: 'Moto' }),
+      expense('2026-10-21', 1361.1, { description: 'Fatura NuBank' }),
+      expense('2026-10-24', 600, { description: 'Luz' }),
+      expense('2026-10-26', 120, { description: 'Internet' }),
+      expense('2026-10-26', 45, { description: 'Vivo' }),
+      income('2026-10-20', 1489, { description: '2ª parte do salário CLT' }),
+      income('2026-10-21', 500, { description: 'Salário mãe' }),
+    ];
+    const result = free(items)!;
+    expect(result).toMatchObject({ realizedBalanceCents: 157999, lowestPointCents: 88777, lowestPointDate: '2026-10-26', freeNowCents: 88777 });
+    expect(result.nextIncome?.date).toBe('2026-10-20');
   });
 
   it('is only defined for the current month', () => {
@@ -291,11 +304,11 @@ describe('Livre agora', () => {
     expect(firstDay.freeNowCents).toBe(90000);
     expect(calculateFreeNow([], '2026-11', '2026-10-31', null, [], [])).toBeNull();
   });
-  it('on the last day, an income of the next month is not an anchor for this period', () => {
+  it('on the last day, items of the next month are outside the period', () => {
     const items = [received('2026-10-01', 500), expense('2026-10-31', 100), income('2026-11-05', 3000), expense('2026-11-03', 999)];
     const result = calculateFreeNow(items, '2026-10', '2026-10-31', null, [], [])!;
     expect(result.nextIncome).toBeNull();
-    expect(result.commitmentsBeforeNextIncomeCents).toBe(10000);
+    expect(result).toMatchObject({ lowestPointCents: 40000, commitmentsUntilLowestPointCents: 10000 });
   });
   it('rejects an invalid date', () => {
     expect(() => calculateFreeNow([], MONTH, '2026-10-32', null, [], [])).toThrow();
@@ -306,10 +319,8 @@ describe('Livre agora', () => {
     free(items, planning(100), [goal('a', 'saving')], [reinforcement('a', 1)]);
     expect(JSON.stringify(items)).toBe(snapshot);
   });
-  it('describes the period in words', () => {
-    expect(freeNowHorizon(free(baseMonth())!)).toBe('Até a próxima entrada: Freela, em 15/10.');
-    const several = free([income('2026-10-15', 5), income('2026-10-15', 6)])!;
-    expect(freeNowHorizon(several)).toBe('Até a próxima entrada: 2 entradas, em 15/10.');
+  it('describes where the month is tightest in words', () => {
+    expect(freeNowHorizon(free(baseMonth())!)).toBe('O saldo do mês fica mais apertado em 14/10.');
   });
 });
 

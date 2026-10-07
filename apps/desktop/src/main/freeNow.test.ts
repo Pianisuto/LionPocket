@@ -57,7 +57,7 @@ describe.each(['desktop', 'android'] as const)('Livre agora on %s', dialect => {
   it('uses persisted transactions, margin and reinforcements, with no new stored value', async () => {
     const s = await subject(dialect);
     await seed(s);
-    expect((await s.overview('2026-10')).freeNow).toMatchObject({ realizedBalanceCents: 200000, commitmentsBeforeNextIncomeCents: 30000, protectedMoneyCents: 0, freeNowCents: 170000 });
+    expect((await s.overview('2026-10')).freeNow).toMatchObject({ realizedBalanceCents: 200000, lowestPointCents: 170000, lowestPointDate: '2026-10-14', commitmentsUntilLowestPointCents: 30000, protectedMoneyCents: 0, freeNowCents: 170000 });
     await s.margin('2026-10', 50000);
     const notebook = await s.saveGoal(goal('Notebook'));
     const paused = await s.saveGoal(goal('Viagem'));

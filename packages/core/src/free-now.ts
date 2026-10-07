@@ -1,4 +1,4 @@
-import { dateForMonthDay, toCents } from './finance';
+import { toCents } from './finance';
 import { isValidDate, summarizeMonth, validateMonth } from './daily-finance';
 import { goalReinforcementPlan } from './goal-reinforcement';
 import { validateMonthlyPlanning } from './monthly-planning';
@@ -91,19 +91,23 @@ export function nextIncomeOf(items: Transaction[], month: string, today: string)
 }
 
 /**
- * Livre agora = saldo realizado do mês − compromissos até a próxima entrada − dinheiro protegido.
+ * Livre agora = o ponto mais baixo do saldo até o fim do mês − dinheiro protegido.
  *
- * - Saldo disponível: o LionPocket não tem saldo bancário, então a única fonte canônica é o
- *   "Saldo realizado" do mês (recebido − pago, `summarizeMonth`), o mesmo número dos cards.
- * - Compromissos: despesas ainda pendentes (`planned`) do mês, incluindo atrasos carregados,
- *   que vencem até a data da próxima entrada, **inclusive**: uma conta que vence no dia da
- *   entrada conta antes dela, pois não há garantia de que o dinheiro chegue antes do vencimento.
- *   Sem outra entrada prevista, valem todas as pendências até o fim do mês.
- * - Pagas, recebidas e canceladas não entram. Faturas, parcelas e recorrências já são
- *   lançamentos com vencimento calculado e entram pela própria data.
- * - O resultado não é limitado a zero.
+ * É uma simulação dia a dia, sem saldo bancário: o LionPocket só conhece o "Saldo realizado"
+ * do mês (recebido − pago, `summarizeMonth`, o mesmo número dos cards), que é o ponto de
+ * partida ("em mãos"). A partir de hoje, cada conta ainda pendente sai na sua data e cada
+ * entrada ainda prevista chega na sua. O menor saldo desse caminho é quanto dá para gastar
+ * agora sem que o saldo fique negativo em nenhum dia do mês; o dinheiro protegido sai disso.
  *
- * Só existe para o mês atual; para outros meses devolve `null`.
+ * - Despesas `planned` do mês (inclusive atrasos carregados, que saem hoje). Pagas, recebidas
+ *   e canceladas não entram, nem valores zerados. Faturas, parcelas e recorrências já são
+ *   lançamentos com vencimento calculado e contam uma vez, pela própria data.
+ * - Entradas `planned` com data de hoje em diante. Entrada atrasada não conta: não se conta
+ *   com dinheiro que não chegou.
+ * - No mesmo dia, as contas saem **antes** das entradas (regra conservadora e determinística):
+ *   não há garantia de que o dinheiro chegue antes do vencimento.
+ * - O período é o mês consultado; o que vence em outro mês não entra.
+ * - O resultado não é limitado a zero. Só existe para o mês atual; para outros devolve `null`.
  */
 export function calculateFreeNow(
   items: Transaction[],
@@ -119,29 +123,41 @@ export function calculateFreeNow(
   const protectedAmount = protectedMoney(planning, goals, reinforcements, month);
   const realizedBalanceCents = toCents(summarizeMonth(items, month, today).realizedBalance) ?? 0;
   const nextIncome = nextIncomeOf(items, month, today);
-  const commitmentsUntil = nextIncome?.date ?? dateForMonthDay(month, 31);
-  const commitmentsBeforeNextIncomeCents = safe(
-    items
-      .filter(
-        (item) =>
-          item.kind === 'expense' &&
-          item.status === 'planned' &&
-          item.plannedAmount > 0 &&
-          item.dueDate <= commitmentsUntil &&
-          expenseCountsInMonth(item, month, today.slice(0, 7)),
-      )
-      .reduce((sum, item) => sum + (toCents(item.plannedAmount) ?? 0), 0),
-  );
+
+  type Event = { date: string; income: boolean; cents: number };
+  const events: Event[] = [];
+  for (const item of items) {
+    const cents = toCents(item.plannedAmount) ?? 0;
+    if (item.status !== 'planned' || cents <= 0) continue;
+    if (item.kind === 'income') {
+      if (item.dueDate.slice(0, 7) === month && item.dueDate >= today)
+        events.push({ date: item.dueDate, income: true, cents });
+    } else if (expenseCountsInMonth(item, month, today.slice(0, 7))) {
+      events.push({ date: item.dueDate < today ? today : item.dueDate, income: false, cents });
+    }
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date) || Number(a.income) - Number(b.income));
+
+  let balance = realizedBalanceCents;
+  let expenses = 0;
+  let incomes = 0;
+  let lowest = { cents: balance, date: today, expenses: 0, incomes: 0 };
+  for (const event of events) {
+    if (event.income) incomes = safe(incomes + event.cents);
+    else expenses = safe(expenses + event.cents);
+    balance = safe(balance + (event.income ? event.cents : -event.cents));
+    if (balance < lowest.cents) lowest = { cents: balance, date: event.date, expenses, incomes };
+  }
   return {
     ...protectedAmount,
     today,
     realizedBalanceCents,
     nextIncome,
-    commitmentsUntil,
-    commitmentsBeforeNextIncomeCents,
-    freeNowCents: safe(
-      realizedBalanceCents - commitmentsBeforeNextIncomeCents - protectedAmount.protectedMoneyCents,
-    ),
+    lowestPointCents: lowest.cents,
+    lowestPointDate: lowest.date,
+    commitmentsUntilLowestPointCents: lowest.expenses,
+    incomesUntilLowestPointCents: lowest.incomes,
+    freeNowCents: safe(lowest.cents - protectedAmount.protectedMoneyCents),
   };
 }
 
@@ -174,22 +190,30 @@ export function protectionHint(protection?: ProtectionBalance | null): string | 
 }
 
 export interface FreeNowLine {
-  key: 'realized' | 'commitments' | 'safetyMargin' | 'goals';
+  key: 'realized' | 'commitments' | 'incomes' | 'safetyMargin' | 'goals';
   label: string;
   /** Signed contribution to "Livre agora": positive adds, negative subtracts. */
   cents: number;
 }
 
-/** Breakdown rows shared by both platforms; protections at zero are left out. */
+/** Breakdown rows shared by both platforms; lines at zero are left out, except the starting balance. */
 export function freeNowComposition(freeNow: FreeNow): FreeNowLine[] {
+  const until = freeNow.lowestPointDate === freeNow.today ? 'hoje' : shortDate(freeNow.lowestPointDate);
   const lines: FreeNowLine[] = [
-    { key: 'realized', label: 'Saldo realizado do mês', cents: freeNow.realizedBalanceCents },
-    {
-      key: 'commitments',
-      label: freeNow.nextIncome ? 'Contas antes da próxima entrada' : 'Contas até o fim do mês',
-      cents: -freeNow.commitmentsBeforeNextIncomeCents,
-    },
+    { key: 'realized', label: 'Em mãos (recebido − pago no mês)', cents: freeNow.realizedBalanceCents },
   ];
+  if (freeNow.commitmentsUntilLowestPointCents > 0)
+    lines.push({
+      key: 'commitments',
+      label: `Contas até ${until}`,
+      cents: -freeNow.commitmentsUntilLowestPointCents,
+    });
+  if (freeNow.incomesUntilLowestPointCents > 0)
+    lines.push({
+      key: 'incomes',
+      label: `Entradas previstas até ${until}`,
+      cents: freeNow.incomesUntilLowestPointCents,
+    });
   if (freeNow.safetyMarginCents > 0)
     lines.push({ key: 'safetyMargin', label: 'Margem de segurança', cents: -freeNow.safetyMarginCents });
   if (freeNow.goalReinforcementCents > 0)
@@ -197,10 +221,9 @@ export function freeNowComposition(freeNow: FreeNow): FreeNowLine[] {
   return lines;
 }
 
-/** Which period the commitments cover, in words. */
+/** Where the month is tightest, in words. */
 export function freeNowHorizon(freeNow: FreeNow): string {
-  const { nextIncome } = freeNow;
-  if (!nextIncome) return 'Sem outra entrada prevista: considera as contas até o fim do mês.';
-  const what = nextIncome.description ?? `${nextIncome.count} entradas`;
-  return `Até a próxima entrada: ${what}, em ${shortDate(nextIncome.date)}.`;
+  if (freeNow.lowestPointDate === freeNow.today)
+    return 'O saldo do mês fica mais apertado hoje; depois disso ele só se recupera.';
+  return `O saldo do mês fica mais apertado em ${shortDate(freeNow.lowestPointDate)}.`;
 }

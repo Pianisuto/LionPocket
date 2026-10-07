@@ -41,7 +41,7 @@ describe('Livre agora view', () => {
     const data = overview(50000, 70000);
     const view = freeNowView(data.freeNow)!;
     expect(data.freeNow).toEqual(calculateFreeNow(items, '2026-10', '2026-10-10', { month: '2026-10', safetyMarginCents: 50000 }, goals, [{ goalId: 'g', month: '2026-10', amountCents: 70000 }]));
-    expect(view).toMatchObject({ negative: false, horizon: 'Até a próxima entrada: Freela, em 15/10.' });
+    expect(view).toMatchObject({ negative: false, horizon: 'O saldo do mês fica mais apertado em 14/10.' });
     expect(view.value).toMatch(/500,00/);
     expect(view.lines.map((line) => [line.key, line.negative])).toEqual([['realized', false], ['commitments', true], ['safetyMargin', true], ['goals', true]]);
     expect(view.lines[0].value).toMatch(/2\.000,00/);

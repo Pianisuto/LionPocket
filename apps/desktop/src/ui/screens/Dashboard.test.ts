@@ -230,9 +230,9 @@ describe('Livre agora in the Dashboard', () => {
   it('shows the value, the period and the whole composition', () => {
     const content = text(overviewFor(50000, 70000));
     expect(content).toMatch(/Livre agora R\$.*500,00/);
-    expect(content).toContain('Até a próxima entrada: Freela, em 15/10.');
-    expect(content).toMatch(/Saldo realizado do mês R\$.*2\.000,00/);
-    expect(content).toMatch(/Contas antes da próxima entrada -R\$.*300,00/);
+    expect(content).toContain('O saldo do mês fica mais apertado em 14/10.');
+    expect(content).toMatch(/Em mãos \(recebido − pago no mês\) R\$.*2\.000,00/);
+    expect(content).toMatch(/Contas até 14\/10 -R\$.*300,00/);
     expect(content).toMatch(/Margem de segurança -R\$.*500,00/);
     expect(content).toMatch(/Objetivos -R\$.*700,00/);
   });
@@ -252,8 +252,8 @@ describe('Livre agora in the Dashboard', () => {
     const { freeNow: _unused, ...legacy } = overviewFor(0, 0);
     expect(html(legacy)).not.toContain('free-now');
   });
-  it('describes a month without another income in plain words', () => {
-    const noIncome = monthlyProtectionOverview(items.filter((item) => item.id !== 'income-2026-10-15-500'), [], [], null, '2026-10', '2026-10-10', 0);
-    expect(text({ ...overviewFor(0, 0), ...noIncome })).toContain('Sem outra entrada prevista: considera as contas até o fim do mês.');
+  it('says so when the tightest day is today', () => {
+    const calm = monthlyProtectionOverview([items[0], items[4]], [], [], null, '2026-10', '2026-10-10', 0);
+    expect(text({ ...overviewFor(0, 0), ...calm })).toContain('O saldo do mês fica mais apertado hoje; depois disso ele só se recupera.');
   });
 });
