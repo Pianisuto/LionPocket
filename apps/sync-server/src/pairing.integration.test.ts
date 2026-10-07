@@ -12,8 +12,8 @@ import {
 import { PairingOnboarding } from '../../desktop/src/ui/PairingOnboarding';
 import { handlePairingInstances, PairingLinkInbox } from '../../desktop/src/main/pairingLinks';
 import type { PairingLinkEvent } from '../../desktop/src/api';
-import { SyncPanel as DesktopSyncPanel } from '../../desktop/src/ui/SyncPanel';
-import { SyncPanel as MobileSyncPanel } from '../../mobile/src/ui/SyncPanel';
+import { SyncPanel as DesktopSyncPanel } from '../../desktop/src/ui/settings/sync/SyncPanel';
+import { SyncPanel as MobileSyncPanel } from '../../mobile/src/ui/settings/sync/SyncPanel';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { type Server } from 'node:http';

@@ -7,8 +7,8 @@ import {
 } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerResetIntent, SyncStatus } from '@lionpocket/sync-local';
-import { SyncPanel as DesktopSyncPanel } from '../../desktop/src/ui/SyncPanel';
-import { SyncPanel as MobileSyncPanel } from '../../mobile/src/ui/SyncPanel';
+import { SyncPanel as DesktopSyncPanel } from '../../desktop/src/ui/settings/sync/SyncPanel';
+import { SyncPanel as MobileSyncPanel } from '../../mobile/src/ui/settings/sync/SyncPanel';
 
 const runtime = vi.hoisted(() => ({ controller: undefined as unknown }));
 vi.mock('../../mobile/src/sync/sync', () => ({

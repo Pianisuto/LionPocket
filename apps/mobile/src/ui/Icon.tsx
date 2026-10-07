@@ -27,6 +27,18 @@ import calendarImage from './assets/calendar.png';
 import moonImage from './assets/moon.png';
 import sunImage from './assets/sun.png';
 import settingsImage from './assets/settings.png';
+import syncImage from './assets/sync.png';
+import lockImage from './assets/lock.png';
+import deviceImage from './assets/device.png';
+import shieldImage from './assets/shield.png';
+import slidersImage from './assets/sliders.png';
+import trashImage from './assets/trash.png';
+import editImage from './assets/edit.png';
+import walletImage from './assets/wallet.png';
+import uploadImage from './assets/upload.png';
+import downloadImage from './assets/download.png';
+import copyImage from './assets/copy.png';
+import serverImage from './assets/server.png';
 const sources = {
   calendar: calendarImage,
   moon: moonImage,
@@ -54,6 +66,18 @@ const sources = {
   arrowUp: arrowUpImage,
   arrowDown: arrowDownImage,
   search: searchImage,
+  sync: syncImage,
+  lock: lockImage,
+  device: deviceImage,
+  shield: shieldImage,
+  sliders: slidersImage,
+  trash: trashImage,
+  edit: editImage,
+  wallet: walletImage,
+  upload: uploadImage,
+  download: downloadImage,
+  copy: copyImage,
+  server: serverImage,
 };
 export type IconName = keyof typeof sources;
 export function Icon({

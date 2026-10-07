@@ -32,8 +32,9 @@ import { Dashboard } from './ui/screens/Dashboard';
 import { Goals } from './ui/screens/Goals';
 import { Installments } from './ui/screens/Installments';
 import { Recurring } from './ui/screens/Recurring';
-import { Settings } from './ui/screens/Settings';
 import { Transactions } from './ui/screens/Transactions';
+import { SettingsScreen } from './ui/settings/SettingsScreen';
+import type { SettingsSectionId } from './ui/settings/sections';
 
 type View = 'dashboard' | 'transactions' | 'recurring' | 'installments' | 'goals' | 'settings';
 type ModalState =
@@ -81,12 +82,13 @@ const pageCopy: Record<View, { title: string; subtitle: string }> = {
   recurring: { title: 'Recorrências', subtitle: 'Entradas e saídas que acompanham você todo mês.' },
   installments: { title: 'Compras parceladas', subtitle: 'Compromissos futuros sem surpresas.' },
   goals: { title: 'Objetivos', subtitle: 'Transforme vontade em um plano possível.' },
-  settings: { title: 'Configurações', subtitle: 'Dados, cópias e listas do seu jeito.' },
+  settings: { title: 'Configurações', subtitle: 'Preferências, cadastros, dados e sincronização.' },
 };
 
 export default function App() {
-  const { theme, toggleTheme } = useTheme();
+  const { theme, setTheme, toggleTheme } = useTheme();
   const [view, setView] = useState<View>('dashboard');
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('general');
   const [pairingIntent, setPairingIntent] = useState<PairingLinkEvent | null>(null);
   useEffect(() => window.lionPocket.onPairingLink?.(intent => {
     setPairingIntent(previous => previous?.invitation && previous.invitation === intent.invitation ? previous : intent);
@@ -315,9 +317,13 @@ export default function App() {
             />
           )}
           {view === 'settings' && (
-            <Settings
+            <SettingsScreen
+              section={settingsSection}
+              onSectionChange={setSettingsSection}
               catalogs={catalogs}
               month={month}
+              theme={theme}
+              onThemeChange={setTheme}
               showPriorities={showPriorities}
               onShowPrioritiesChange={changePriorityVisibility}
               refreshCatalogs={refreshCatalogs}
