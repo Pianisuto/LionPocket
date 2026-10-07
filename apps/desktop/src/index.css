@@ -494,6 +494,15 @@ strong,
   box-shadow: var(--sheen);
 }
 
+.local-badge__indicator {
+  display: grid;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--positive);
+}
+
 .local-badge__dot {
   flex: 0 0 auto;
   width: 8px;

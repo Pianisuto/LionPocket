@@ -101,6 +101,7 @@ export default function App() {
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [showPriorities, setShowPriorities] = useState(readPriorityVisibility);
   const [syncPhase, setSyncPhase] = useState<SyncStatus['phase'] | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -163,6 +164,7 @@ export default function App() {
       const status = await window.lionPocket.syncStatus?.();
       if (!active || revision !== request || !status) return;
       setSyncPhase(status.phase);
+      setIsSyncing(status.phase === 'bound' && status.activity === 'syncing');
       if (refreshViews && status.lastCompletedAt && status.lastCompletedAt !== lastCompleted && status.activity !== 'syncing') {
         lastCompleted = status.lastCompletedAt;
         changed();
@@ -236,18 +238,24 @@ export default function App() {
             <SettingsIcon size={20} />
             <span>Configurações</span>
           </button>
-          <div className="local-badge">
-            <span className="local-badge__dot" />
+          <div className="local-badge" role="status">
+            <span className="local-badge__indicator" aria-hidden="true">
+              {isSyncing
+                ? <RefreshCw size={16} className="sync-spinning" />
+                : <span className="local-badge__dot" />}
+            </span>
             <div>
               <strong>Seus dados</strong>
               <small>
-                {syncPhase === 'bound'
-                  ? 'Sincronização criptografada'
-                  : syncPhase === 'local'
-                    ? 'Somente neste computador'
-                    : syncPhase
-                      ? 'Configurando sincronização'
-                      : 'Salvos neste computador'}
+                {isSyncing
+                  ? 'Sincronizando…'
+                  : syncPhase === 'bound'
+                    ? 'Sincronização criptografada'
+                    : syncPhase === 'local'
+                      ? 'Somente neste computador'
+                      : syncPhase
+                        ? 'Configurando sincronização'
+                        : 'Salvos neste computador'}
               </small>
             </div>
           </div>
