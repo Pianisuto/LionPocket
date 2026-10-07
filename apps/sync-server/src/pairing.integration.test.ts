@@ -12,8 +12,8 @@ import {
 import { PairingOnboarding } from '../../desktop/src/ui/PairingOnboarding';
 import { handlePairingInstances, PairingLinkInbox } from '../../desktop/src/main/pairingLinks';
 import type { PairingLinkEvent } from '../../desktop/src/api';
-import { SyncPanel as DesktopSyncPanel } from '../../desktop/src/ui/SyncPanel';
-import { SyncPanel as MobileSyncPanel } from '../../mobile/src/ui/SyncPanel';
+import { SyncPanel as DesktopSyncPanel } from '../../desktop/src/ui/settings/sync/SyncPanel';
+import { SyncPanel as MobileSyncPanel } from '../../mobile/src/ui/settings/sync/SyncPanel';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { type Server } from 'node:http';
@@ -59,10 +59,17 @@ vi.mock('react-native', () => ({
   Text: 'mobile-text',
   TextInput: 'mobile-input',
   View: 'mobile-view',
+  Pressable: 'mobile-pressable',
+  StyleSheet: { create: (styles: Record<string, unknown>) => styles },
   Share: { share: vi.fn() },
   Image: 'mobile-image',
   NativeModules: { LionPocketPairing: { renderQr: vi.fn(async () => 'data:image/png;base64,synthetic'), copyLink: vi.fn(async () => undefined), scan: vi.fn(async () => { throw new Error('Camera must not be needed'); }) } },
 }));
+vi.mock('../../mobile/src/ui/Appearance', async () => {
+  const { darkColors } = await import('../../mobile/src/ui/theme');
+  return { useAppearance: () => ({ colors: darkColors }) };
+});
+vi.mock('../../mobile/src/ui/Icon', () => ({ Icon: 'mobile-icon' }));
 vi.mock('../../mobile/src/ui/components', async () => {
   const React = await import('react');
   return {

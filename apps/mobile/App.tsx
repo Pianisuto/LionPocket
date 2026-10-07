@@ -1,4 +1,4 @@
-import { SyncPanel } from './src/ui/SyncPanel';
+import { SyncPanel } from './src/ui/settings/sync/SyncPanel';
 import { syncController } from './src/sync/sync';
 import { startSyncForeground } from './src/sync/foreground';
 import { AppearanceProvider, useAppearance } from './src/ui/Appearance';
@@ -63,13 +63,11 @@ import {
   money,
   useStyles,
 } from './src/ui/components';
-import { PreferencesScreen } from './src/ui/PreferencesScreen';
+import { SettingsScreen, type SettingsArea } from './src/ui/settings/SettingsScreen';
 import { OverviewScreen } from './src/ui/OverviewScreen';
 import { LeoScreen } from './src/ui/LeoScreen';
 import { exportLocal, recoveryBackup } from './src/files/localData';
 import { AnnualScreen } from './src/ui/AnnualScreen';
-import { DataScreen } from './src/ui/DataScreen';
-import { CatalogEditor } from './src/ui/CatalogEditor';
 import { PlanningScreen, type PlanningArea } from './src/ui/PlanningScreen';
 import { TransactionEditor } from './src/ui/TransactionEditor';
 
@@ -96,7 +94,7 @@ function AppContent(): React.JSX.Element {
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [pairingOpen, setPairingOpen] = useState(false);
   const [pairingInvitation, setPairingInvitation] = useState<string>();
-  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [leoOpen, setLeoOpen] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [month, setMonth] = useState(currentMonthIso());
@@ -121,7 +119,7 @@ function AppContent(): React.JSX.Element {
   const [menu, setMenu] = useState<'plan' | 'more' | null>(null);
   const [invoicesOpen, setInvoicesOpen] = useState(false);
   const [annualOpen, setAnnualOpen] = useState(false);
-  const [dataOpen, setDataOpen] = useState(false);
+  const [settingsArea, setSettingsArea] = useState<SettingsArea | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
@@ -131,12 +129,12 @@ function AppContent(): React.JSX.Element {
   );
   const [planning, setPlanning] = useState<PlanningArea | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [catalogOpen, setCatalogOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const request = useRef(0);
   const mutation = useRef(false);
   const dataScreenOpen = useRef(false);
-  dataScreenOpen.current = dataOpen;
+  // Imports replace the local bank, so background refreshes wait for them.
+  dataScreenOpen.current = settingsOpen && settingsArea === 'data';
   const refresh = useCallback(async () => {
     const revision = ++request.current;
     setLoading(true);
@@ -355,10 +353,7 @@ function AppContent(): React.JSX.Element {
               <Icon name="home" color={colors.primaryInk} size={20} />
             </View>
             <Text
-              style={[
-                layout.balance,
-                summary.realizedBalance < 0 && { color: colors.negative },
-              ]}
+              style={layout.metricValue}
               adjustsFontSizeToFit
               numberOfLines={1}
             >
@@ -367,10 +362,9 @@ function AppContent(): React.JSX.Element {
             <View style={layout.projected}>
               <Text style={styles.muted}>Projetado</Text>
               <Text
-                style={[
-                  layout.projectedValue,
-                  summary.projectedBalance < 0 && styles.danger,
-                ]}
+                style={layout.metricValue}
+                adjustsFontSizeToFit
+                numberOfLines={1}
               >
                 {money(summary.projectedBalance)}
               </Text>
@@ -383,7 +377,7 @@ function AppContent(): React.JSX.Element {
                 <Text style={styles.label}>Entradas</Text>
               </View>
               <Text
-                style={[layout.metricValue, styles.positive]}
+                style={layout.metricValue}
                 adjustsFontSizeToFit
                 numberOfLines={1}
               >
@@ -399,7 +393,7 @@ function AppContent(): React.JSX.Element {
                 <Text style={styles.label}>Saídas</Text>
               </View>
               <Text
-                style={[layout.metricValue, styles.danger]}
+                style={layout.metricValue}
                 adjustsFontSizeToFit
                 numberOfLines={1}
               >
@@ -783,14 +777,6 @@ function AppContent(): React.JSX.Element {
                 }}
               />
               <Button
-                label="Preferências"
-                icon="settings"
-                onPress={() => {
-                  setMenu(null);
-                  setPreferencesOpen(true);
-                }}
-              />
-              <Button
                 label="Falar com o Léo"
                 onPress={() => {
                   setMenu(null);
@@ -798,24 +784,17 @@ function AppContent(): React.JSX.Element {
                 }}
               />
               <Button
-                label="Cadastros"
-                icon="catalog"
+                label="Configurações"
+                icon="settings"
                 onPress={() => {
                   setMenu(null);
-                  setCatalogOpen(true);
-                }}
-              />
-              <Button
-                label="Dados locais"
-                icon="data"
-                onPress={() => {
-                  setMenu(null);
-                  setDataOpen(true);
+                  setSettingsArea(null);
+                  setSettingsOpen(true);
                 }}
               />
               <Text style={styles.muted}>
-                Seus dados ficam neste aparelho. Exporte uma cópia para guardar
-                suas finanças com você.
+                Preferências, cadastros, dados e sincronização ficam em
+                Configurações.
               </Text>
             </>
           )}
@@ -920,7 +899,7 @@ function AppContent(): React.JSX.Element {
           <Text style={styles.muted}>
             {preferences.showPriorities
               ? 'Prioridades ficam no topo.'
-              : 'Prioridades ocultas. Ative em Preferências para fixar e ordenar.'}{' '}
+              : 'Prioridades ocultas. Ative em Configurações › Geral para fixar e ordenar.'}{' '}
             Fixar uma recorrência prioriza todas as suas ocorrências a partir
             deste mês; retirar desfaz a prioridade da série.
           </Text>
@@ -950,9 +929,6 @@ function AppContent(): React.JSX.Element {
           <Button label="Fechar" onPress={() => setPairingOpen(false)} />
         </ScrollView></SafeAreaView>
       </Modal>}
-      {preferencesOpen && (
-        <PreferencesScreen onClose={() => setPreferencesOpen(false)} onChanged={async () => { await refresh(); }} />
-      )}
       {overviewOpen && (
         <OverviewScreen
           month={month}
@@ -1034,20 +1010,22 @@ function AppContent(): React.JSX.Element {
           onMonth={changeMonth}
         />
       )}
-      {dataOpen && (
-        <DataScreen
+      {settingsOpen && (
+        <SettingsScreen
+          catalogs={catalogs}
           month={month}
-          onClose={() => setDataOpen(false)}
-          onChanged={async () => {
+          onAreaChange={setSettingsArea}
+          onClose={() => {
+            setSettingsOpen(false);
+            setSettingsArea(null);
+          }}
+          onDataChanged={async () => {
             await reloadPreferences();
             await refresh();
           }}
-        />
-      )}
-      {catalogOpen && (
-        <CatalogEditor
-          catalogs={catalogs}
-          onClose={() => setCatalogOpen(false)}
+          onSyncChanged={async () => {
+            await refresh();
+          }}
           onSave={(input) =>
             mutate(() => createCatalog(input), 'Cadastro salvo.')
           }
@@ -1109,13 +1087,6 @@ const createLayout = (colors: Palette) =>
       gap: 12,
       overflow: 'hidden',
     },
-    balance: {
-      fontFamily: fonts.display,
-      fontSize: 36,
-      letterSpacing: -1,
-      color: colors.text,
-      fontVariant: ['tabular-nums'],
-    },
     projected: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -1125,11 +1096,6 @@ const createLayout = (colors: Palette) =>
       borderTopWidth: 1,
       borderTopColor: colors.lineStrong,
       flexWrap: 'wrap',
-    },
-    projectedValue: {
-      color: colors.primaryInk,
-      fontFamily: fonts.bold,
-      fontSize: 14,
     },
     metrics: { flexDirection: 'row', gap: 10 },
     metric: {
@@ -1143,9 +1109,12 @@ const createLayout = (colors: Palette) =>
       backgroundColor: colors.surface,
     },
     metricValue: {
-      fontFamily: fonts.bold,
-      fontSize: 19,
+      fontFamily: fonts.display,
+      fontSize: 25,
+      letterSpacing: -0.75,
+      color: colors.text,
       fontVariant: ['tabular-nums'],
+      maxWidth: '100%',
     },
     segments: {
       backgroundColor: colors.surface,

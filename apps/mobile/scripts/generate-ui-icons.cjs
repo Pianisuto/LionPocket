@@ -4,7 +4,7 @@ const {renderToStaticMarkup} = require('react-dom/server');
 const lucide = require('lucide-react');
 const sharp = require('sharp');
 const path = require('path');
-const icons = {home:'LayoutDashboard',plan:'CalendarClock',year:'ChartNoAxesColumnIncreasing',more:'Menu',left:'ChevronLeft',right:'ChevronRight',close:'X',plus:'Plus',filter:'SlidersHorizontal',up:'ArrowUpRight',down:'ArrowDownRight',pin:'Pin',dots:'Ellipsis',repeat:'Repeat2',card:'WalletCards',goal:'Target',data:'HardDrive',catalog:'Tags',check:'Check',arrowUp:'ArrowUp',arrowDown:'ArrowDown',search:'Search',calendar:'CalendarDays',moon:'Moon',sun:'Sun',settings:'Settings2'};
+const icons = {home:'LayoutDashboard',plan:'CalendarClock',year:'ChartNoAxesColumnIncreasing',more:'Menu',left:'ChevronLeft',right:'ChevronRight',close:'X',plus:'Plus',filter:'SlidersHorizontal',up:'ArrowUpRight',down:'ArrowDownRight',pin:'Pin',dots:'Ellipsis',repeat:'Repeat2',card:'WalletCards',goal:'Target',data:'HardDrive',catalog:'Tags',check:'Check',arrowUp:'ArrowUp',arrowDown:'ArrowDown',search:'Search',calendar:'CalendarDays',moon:'Moon',sun:'Sun',settings:'Settings2',sync:'RefreshCw',lock:'LockKeyhole',device:'Smartphone',shield:'ShieldCheck',sliders:'SlidersVertical',trash:'Trash2',edit:'Pencil',wallet:'Wallet',upload:'Upload',download:'Download',copy:'Copy',server:'Server'};
 Promise.all(Object.entries(icons).map(async ([name, component]) => {
  const svg = renderToStaticMarkup(React.createElement(lucide[component], {size:72, color:'#ffffff', strokeWidth:1.8}));
  await sharp(Buffer.from(svg)).png().toFile(path.join(__dirname,'../src/ui/assets',name+'@3x.png'));

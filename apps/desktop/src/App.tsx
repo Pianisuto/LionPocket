@@ -19,10 +19,12 @@ import type {
   Transaction,
 } from '@lionpocket/core/types';
 import type { PairingLinkEvent, UpdateInfo } from './api';
+import type { SyncActivity } from '@lionpocket/sync-local';
 import { PairingOnboarding } from './ui/PairingOnboarding';
 import { Modal, MonthPicker } from './ui/components';
 import { Leo } from './ui/Leo';
 import { TitleBar } from './ui/TitleBar';
+import { SyncStatusBadge } from './ui/SyncStatusBadge';
 import { useTheme } from './ui/theme';
 import { GoalForm, InstallmentForm, RecurringForm, TransactionForm } from './ui/forms';
 import { currentMonthIso, monthLabel, todayIso } from './ui/format';
@@ -30,8 +32,9 @@ import { Dashboard } from './ui/screens/Dashboard';
 import { Goals } from './ui/screens/Goals';
 import { Installments } from './ui/screens/Installments';
 import { Recurring } from './ui/screens/Recurring';
-import { Settings } from './ui/screens/Settings';
 import { Transactions } from './ui/screens/Transactions';
+import { SettingsScreen } from './ui/settings/SettingsScreen';
+import type { SettingsSectionId } from './ui/settings/sections';
 
 type View = 'dashboard' | 'transactions' | 'recurring' | 'installments' | 'goals' | 'settings';
 type ModalState =
@@ -79,12 +82,13 @@ const pageCopy: Record<View, { title: string; subtitle: string }> = {
   recurring: { title: 'Recorrências', subtitle: 'Entradas e saídas que acompanham você todo mês.' },
   installments: { title: 'Compras parceladas', subtitle: 'Compromissos futuros sem surpresas.' },
   goals: { title: 'Objetivos', subtitle: 'Transforme vontade em um plano possível.' },
-  settings: { title: 'Configurações', subtitle: 'Dados, cópias e listas do seu jeito.' },
+  settings: { title: 'Configurações', subtitle: 'Preferências, cadastros, dados e sincronização.' },
 };
 
 export default function App() {
-  const { theme, toggleTheme } = useTheme();
+  const { theme, setTheme, toggleTheme } = useTheme();
   const [view, setView] = useState<View>('dashboard');
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('general');
   const [pairingIntent, setPairingIntent] = useState<PairingLinkEvent | null>(null);
   useEffect(() => window.lionPocket.onPairingLink?.(intent => {
     setPairingIntent(previous => previous?.invitation && previous.invitation === intent.invitation ? previous : intent);
@@ -99,6 +103,7 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [showPriorities, setShowPriorities] = useState(readPriorityVisibility);
+  const [syncActivity, setSyncActivity] = useState<SyncActivity | null>(null);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -154,15 +159,27 @@ export default function App() {
   const changed = useCallback(() => setRefreshKey((value) => value + 1), []);
   useEffect(() => {
     let lastCompleted: string | null = null;
-    return window.lionPocket.onSyncChanged?.(() => {
-      void window.lionPocket.syncStatus?.().then(status => {
-        if (status?.lastCompletedAt && status.lastCompletedAt !== lastCompleted && status.activity !== 'syncing') {
-          lastCompleted = status.lastCompletedAt;
-          changed();
-          void refreshCatalogs().catch(() => { /* Local views remain available. */ });
-        }
-      }).catch(() => { /* Sync status cannot affect local views. */ });
+    let active = true;
+    let request = 0;
+    const refreshSyncStatus = async (refreshViews: boolean) => {
+      const revision = ++request;
+      const status = await window.lionPocket.syncStatus?.();
+      if (!active || revision !== request || !status) return;
+      setSyncActivity(status.activity);
+      if (refreshViews && status.lastCompletedAt && status.lastCompletedAt !== lastCompleted && status.activity !== 'syncing') {
+        lastCompleted = status.lastCompletedAt;
+        changed();
+        void refreshCatalogs().catch(() => { /* Local views remain available. */ });
+      }
+    };
+    const unsubscribe = window.lionPocket.onSyncChanged?.(() => {
+      void refreshSyncStatus(true).catch(() => { /* Sync status cannot affect local views. */ });
     });
+    void refreshSyncStatus(false).catch(() => { /* Keep the neutral local-storage label if status is unavailable. */ });
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
   }, [changed, refreshCatalogs]);
   const defaultDate = useMemo(() => {
     const today = todayIso();
@@ -222,13 +239,7 @@ export default function App() {
             <SettingsIcon size={20} />
             <span>Configurações</span>
           </button>
-          <div className="local-badge">
-            <span className="local-badge__dot" />
-            <div>
-              <strong>Dados locais</strong>
-              <small>Somente neste computador</small>
-            </div>
-          </div>
+          <SyncStatusBadge activity={syncActivity} />
         </div>
       </aside>
 
@@ -251,7 +262,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="page-content">
+        <div className={`page-content${view === 'settings' ? ' page-content--settings' : ''}`}>
           {view === 'dashboard' && (
             <Dashboard
               overview={overview}
@@ -306,9 +317,13 @@ export default function App() {
             />
           )}
           {view === 'settings' && (
-            <Settings
+            <SettingsScreen
+              section={settingsSection}
+              onSectionChange={setSettingsSection}
               catalogs={catalogs}
               month={month}
+              theme={theme}
+              onThemeChange={setTheme}
               showPriorities={showPriorities}
               onShowPrioritiesChange={changePriorityVisibility}
               refreshCatalogs={refreshCatalogs}

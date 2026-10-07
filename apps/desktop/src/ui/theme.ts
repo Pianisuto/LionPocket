@@ -33,5 +33,5 @@ export const useTheme = () => {
     [],
   );
 
-  return { theme, toggleTheme };
+  return { theme, setTheme, toggleTheme };
 };

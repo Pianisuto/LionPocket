@@ -30,3 +30,4 @@ export * from './pairing-qr';
 export * from './recovery-package';
 
 export { assertServerResetIntent, type ServerResetIntent } from './server-reset';
+export * from './sync-presentation';
