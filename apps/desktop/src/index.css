@@ -5144,7 +5144,9 @@ label.settings-row__text {
 .sync-invite-preview { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line-2); border-radius: var(--radius-md); background: var(--surface-2); }
 .sync-panel .sync-protection-alert { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; color: var(--gold); border: 1px solid color-mix(in srgb, var(--gold) 25%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--gold) 7%, transparent); }
 .sync-disclosure { min-width: 0; border: 1px solid var(--line-1); border-radius: var(--radius-md); background: var(--surface); }
-.sync-disclosure > summary { display: flex; align-items: center; gap: 12px; padding: 16px 18px; list-style: none; cursor: pointer; border-radius: inherit; transition: background 150ms ease; }
+/* Native summary resolves inherited radius to zero; use the inner radius explicitly. */
+.sync-disclosure > summary { display: flex; align-items: center; gap: 12px; padding: 16px 18px; list-style: none; cursor: pointer; border-radius: calc(var(--radius-md) - 1px); transition: background 150ms ease; }
+.sync-disclosure[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .sync-disclosure > summary::-webkit-details-marker { display: none; }
 .sync-disclosure > summary:hover { background: var(--surface-2); }
 .sync-disclosure > summary > svg:first-child { flex-shrink: 0; color: var(--primary-ink); }
