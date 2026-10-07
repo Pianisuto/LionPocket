@@ -336,5 +336,18 @@ export interface FreeNow extends ProtectedMoney {
   /** Soma das contas e das entradas aplicadas até o ponto mais baixo, inclusive. */
   commitmentsUntilLowestPointCents: number;
   incomesUntilLowestPointCents: number;
+  /** O caminho dia a dia: hoje e cada conta/entrada pendente, com o saldo depois dela. */
+  timeline: FreeNowTimelineRow[];
   freeNowCents: number;
+}
+export interface FreeNowTimelineRow {
+  key: string;
+  kind: 'start' | 'income' | 'expense';
+  date: string;
+  label: string;
+  /** Com sinal: entrada soma, conta subtrai; o saldo em mãos de hoje na primeira linha. */
+  cents: number;
+  balanceCents: number;
+  /** A primeira linha em que o saldo chega ao menor valor do mês. */
+  lowest: boolean;
 }

@@ -88,7 +88,7 @@ A [margem de segurança mensal](docs/monthly-planning.md) pode ser configurada e
 
 Na tela Objetivos, o [reforço mensal](docs/goal-monthly-reinforcement.md) permite planejar quanto reservar para cada objetivo em cada mês. É só planejamento: não cria lançamentos nem altera o valor guardado, e funciona offline, em backup e após desvincular o servidor.
 
-O [dinheiro protegido e o Livre agora](docs/protected-money-free-now.md) são calculados no core a partir de margem, reforços e lançamentos: o Dashboard mantém o Saldo projetado como card principal, mostra o saldo após proteções de forma discreta e uma faixa **Livre agora** (o ponto mais baixo do saldo do mês, simulando cada conta e entrada na sua data, menos o dinheiro protegido). São valores derivados, sem nova tabela e sem sincronização própria.
+O [dinheiro protegido e o Livre agora](docs/protected-money-free-now.md) são calculados no core a partir de margem, reforços e lançamentos: o Dashboard mantém o Saldo projetado como card principal, mostra o saldo após proteções de forma discreta e uma faixa **Pode gastar hoje** (o ponto mais baixo do saldo do mês, simulando cada conta e entrada na sua data, menos o dinheiro protegido), com uma linha do tempo dia a dia expansível. São valores derivados, sem nova tabela e sem sincronização própria.
 
 Consulte [o roteiro de uso diário](docs/mobile-daily-finance.md) e [as regras e a validação do planejamento](docs/mobile-planning.md). O botão **Hoje** retorna ao mês atual; deslizar a lista para baixo atualiza os dados locais. Datas são preenchidas no formato `AAAA-MM-DD` e valores aceitam vírgula ou ponto decimal (ex.: `125,50`).
 

@@ -57,7 +57,11 @@ describe.each(['desktop', 'android'] as const)('Livre agora on %s', dialect => {
   it('uses persisted transactions, margin and reinforcements, with no new stored value', async () => {
     const s = await subject(dialect);
     await seed(s);
-    expect((await s.overview('2026-10')).freeNow).toMatchObject({ realizedBalanceCents: 200000, lowestPointCents: 170000, lowestPointDate: '2026-10-14', commitmentsUntilLowestPointCents: 30000, protectedMoneyCents: 0, freeNowCents: 170000 });
+    const first = (await s.overview('2026-10')).freeNow!;
+    expect(first).toMatchObject({ realizedBalanceCents: 200000, lowestPointCents: 170000, lowestPointDate: '2026-10-14', commitmentsUntilLowestPointCents: 30000, protectedMoneyCents: 0, freeNowCents: 170000 });
+    expect(first.timeline.map(row => [row.date, row.balanceCents, row.lowest])).toEqual([
+      ['2026-10-10', 200000, false], ['2026-10-12', 180000, false], ['2026-10-14', 170000, true], ['2026-10-15', 220000, false], ['2026-10-20', 180000, false],
+    ]);
     await s.margin('2026-10', 50000);
     const notebook = await s.saveGoal(goal('Notebook'));
     const paused = await s.saveGoal(goal('Viagem'));
@@ -96,8 +100,9 @@ it('Desktop and Android produce identical Dashboard numbers for the same data', 
     await s.margin('2026-10', 50000);
     await s.reinforce(await s.saveGoal(goal('Notebook')), '2026-10', 70000);
     const { freeNow, protection } = await s.overview('2026-10');
-    results.push({ freeNow, protection });
+    // Row keys embed per-database ids, so parity compares everything else.
+    results.push({ freeNow: { ...freeNow!, timeline: freeNow!.timeline.map(({ key: _key, ...row }) => row) }, protection });
   }
   expect(results[0]).toEqual(results[1]);
-  expect(results[0].freeNow!.freeNowCents).toBe(50000);
+  expect(results[0].freeNow.freeNowCents).toBe(50000);
 });

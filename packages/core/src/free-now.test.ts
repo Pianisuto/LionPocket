@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   calculateFreeNow,
   freeNowComposition,
-  freeNowHorizon,
+  freeNowHeadline,
+  freeNowRowDate,
   monthlyProtectionOverview,
   nextIncomeOf,
   protectedMoney,
@@ -153,16 +154,15 @@ describe('Livre agora (ponto mais baixo do mês)', () => {
     const result = free(baseMonth(), planning(50000), [goal('a', 'saving')], [reinforcement('a', 70000)])!;
     expect(result).toMatchObject({ safetyMarginCents: 50000, goalReinforcementCents: 70000, protectedMoneyCents: 120000, freeNowCents: 50000 });
     expect(freeNowComposition(result)).toEqual([
-      { key: 'realized', label: 'Em mãos (recebido − pago no mês)', cents: 200000 },
-      { key: 'commitments', label: 'Contas até 14/10', cents: -30000 },
+      { key: 'lowest', label: 'Menor saldo do mês (14/10)', cents: 170000 },
       { key: 'safetyMargin', label: 'Margem de segurança', cents: -50000 },
       { key: 'goals', label: 'Objetivos', cents: -70000 },
     ]);
     expect(freeNowComposition(result).reduce((sum, line) => sum + line.cents, 0)).toBe(result.freeNowCents);
   });
-  it('omits lines that are zero, except the starting balance', () => {
+  it('omits protection lines that are zero, keeping only the lowest balance', () => {
     const calm = [received('2026-10-01', 500), income('2026-10-15', 300)];
-    expect(freeNowComposition(free(calm)!).map((line) => line.key)).toEqual(['realized']);
+    expect(freeNowComposition(free(calm)!)).toEqual([{ key: 'lowest', label: 'Menor saldo do mês (hoje)', cents: 50000 }]);
   });
 
   it('next income tomorrow: bills before and after it are applied on their dates', () => {
@@ -179,7 +179,7 @@ describe('Livre agora (ponto mais baixo do mês)', () => {
   it('later bills covered by the income that arrives first do not reduce the immediate value', () => {
     const items = [received('2026-10-01', 1000), income('2026-10-12', 5000), expense('2026-10-13', 700), expense('2026-10-30', 900)];
     expect(free(items)!).toMatchObject({ lowestPointCents: 100000, lowestPointDate: TODAY, freeNowCents: 100000 });
-    expect(freeNowHorizon(free(items)!)).toMatch(/mais apertado hoje/);
+    expect(freeNowHeadline(free(items)!).note).toBe('Sem ficar no vermelho este mês.');
   });
   it('later bills that the next income does not cover do reduce it', () => {
     const items = [received('2026-10-01', 100), income('2026-10-12', 50), expense('2026-10-13', 700)];
@@ -320,7 +320,33 @@ describe('Livre agora (ponto mais baixo do mês)', () => {
     expect(JSON.stringify(items)).toBe(snapshot);
   });
   it('describes where the month is tightest in words', () => {
-    expect(freeNowHorizon(free(baseMonth())!)).toBe('O saldo do mês fica mais apertado em 14/10.');
+    expect(freeNowHeadline(free(baseMonth())!)).toEqual({ label: 'Pode gastar hoje', cents: 170000, negative: false, note: 'Sem ficar no vermelho este mês. O mais apertado é 14/10.' });
+  });
+  it('turns a negative result into what is missing, with the day it happens', () => {
+    const items = [received('2026-10-01', 100), income('2026-10-12', 50), expense('2026-10-13', 700)];
+    expect(freeNowHeadline(free(items)!)).toEqual({ label: 'Faltam', cents: 55000, negative: true, note: 'Pelo que está planejado, o saldo não cobre tudo até 13/10.' });
+    expect(freeNowHeadline(free(items, planning(1000))!).note).toContain('contando suas proteções');
+    expect(freeNowHeadline(free([received('2026-10-01', 100), expense('2026-10-10', 300)])!).note).toBe('Pelo que está planejado, o saldo não cobre tudo hoje.');
+  });
+  it('builds a day-by-day timeline with the running balance and one lowest marker', () => {
+    const result = free(baseMonth())!;
+    expect(result.timeline[0]).toMatchObject({ kind: 'start', date: TODAY, balanceCents: 200000, lowest: false });
+    expect(result.timeline.filter((row) => row.lowest)).toHaveLength(1);
+    expect(result.timeline.find((row) => row.lowest)).toMatchObject({ date: '2026-10-14', balanceCents: result.lowestPointCents });
+    let running = result.timeline[0].balanceCents;
+    for (const row of result.timeline.slice(1)) {
+      running += row.cents;
+      expect(row.balanceCents).toBe(running);
+    }
+    expect(Math.min(...result.timeline.map((row) => row.balanceCents))).toBe(result.lowestPointCents);
+    expect(result.timeline.map((row) => freeNowRowDate(row, TODAY))[0]).toBe('Hoje');
+    expect(freeNowRowDate(result.timeline[1], TODAY)).toMatch(/^\d\d\/\d\d$/);
+  });
+  it('orders same-day expenses before incomes in the timeline and keeps the earliest lowest', () => {
+    const items = [received('2026-10-01', 100), income('2026-10-15', 500), expense('2026-10-15', 120)];
+    const rows = free(items)!.timeline;
+    expect(rows.map((row) => row.kind)).toEqual(['start', 'expense', 'income']);
+    expect(rows[1]).toMatchObject({ cents: -12000, balanceCents: -2000, lowest: true });
   });
 });
 

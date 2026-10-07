@@ -3,8 +3,10 @@ import { isValidDate, summarizeMonth, validateMonth } from './daily-finance';
 import { goalReinforcementPlan } from './goal-reinforcement';
 import { validateMonthlyPlanning } from './monthly-planning';
 import { expenseCountsInMonth } from './transactions';
+import { groupCreditCardInvoices } from './credit-cards';
 import type {
   FreeNow,
+  FreeNowTimelineRow,
   Goal,
   GoalMonthlyReinforcement,
   MonthlyPlanning,
@@ -124,30 +126,62 @@ export function calculateFreeNow(
   const realizedBalanceCents = toCents(summarizeMonth(items, month, today).realizedBalance) ?? 0;
   const nextIncome = nextIncomeOf(items, month, today);
 
-  type Event = { date: string; income: boolean; cents: number };
+  type Event = { key: string; date: string; income: boolean; cents: number; label: string };
   const events: Event[] = [];
+  const counted: Transaction[] = [];
   for (const item of items) {
     const cents = toCents(item.plannedAmount) ?? 0;
     if (item.status !== 'planned' || cents <= 0) continue;
     if (item.kind === 'income') {
       if (item.dueDate.slice(0, 7) === month && item.dueDate >= today)
-        events.push({ date: item.dueDate, income: true, cents });
+        events.push({ key: `income:${item.id}`, date: item.dueDate, income: true, cents, label: item.description });
     } else if (expenseCountsInMonth(item, month, today.slice(0, 7))) {
-      events.push({ date: item.dueDate < today ? today : item.dueDate, income: false, cents });
+      counted.push(item);
     }
   }
-  events.sort((a, b) => a.date.localeCompare(b.date) || Number(a.income) - Number(b.income));
+  // Card purchases of one invoice leave together, as the "Contas a caminho" list shows them.
+  const invoiceOf = new Map<string, ReturnType<typeof groupCreditCardInvoices>[number]>();
+  for (const invoice of groupCreditCardInvoices(counted)) for (const entry of invoice.items) invoiceOf.set(entry.id, invoice);
+  const emittedInvoices = new Set<string>();
+  for (const item of counted) {
+    const invoice = invoiceOf.get(item.id);
+    if (invoice && emittedInvoices.has(invoice.key)) continue;
+    const members = invoice ? invoice.items : [item];
+    if (invoice) emittedInvoices.add(invoice.key);
+    const date = (invoice?.dueDate ?? item.dueDate) < today ? today : (invoice?.dueDate ?? item.dueDate);
+    events.push({
+      key: invoice ? invoice.key : `expense:${item.id}`,
+      date,
+      income: false,
+      cents: safe(members.reduce((sum, member) => sum + (toCents(member.plannedAmount) ?? 0), 0)),
+      label: invoice ? invoice.name : item.description,
+    });
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date) || Number(a.income) - Number(b.income) || a.label.localeCompare(b.label, 'pt-BR') || a.key.localeCompare(b.key));
 
   let balance = realizedBalanceCents;
   let expenses = 0;
   let incomes = 0;
-  let lowest = { cents: balance, date: today, expenses: 0, incomes: 0 };
+  let lowest = { cents: balance, date: today, expenses: 0, incomes: 0, index: 0 };
+  const timeline: FreeNowTimelineRow[] = [
+    { key: 'start', kind: 'start', date: today, label: 'Em mãos', cents: balance, balanceCents: balance, lowest: false },
+  ];
   for (const event of events) {
     if (event.income) incomes = safe(incomes + event.cents);
     else expenses = safe(expenses + event.cents);
     balance = safe(balance + (event.income ? event.cents : -event.cents));
-    if (balance < lowest.cents) lowest = { cents: balance, date: event.date, expenses, incomes };
+    timeline.push({
+      key: event.key,
+      kind: event.income ? 'income' : 'expense',
+      date: event.date,
+      label: event.label,
+      cents: event.income ? event.cents : -event.cents,
+      balanceCents: balance,
+      lowest: false,
+    });
+    if (balance < lowest.cents) lowest = { cents: balance, date: event.date, expenses, incomes, index: timeline.length - 1 };
   }
+  timeline[lowest.index].lowest = true;
   return {
     ...protectedAmount,
     today,
@@ -157,6 +191,7 @@ export function calculateFreeNow(
     lowestPointDate: lowest.date,
     commitmentsUntilLowestPointCents: lowest.expenses,
     incomesUntilLowestPointCents: lowest.incomes,
+    timeline,
     freeNowCents: safe(lowest.cents - protectedAmount.protectedMoneyCents),
   };
 }
@@ -190,30 +225,16 @@ export function protectionHint(protection?: ProtectionBalance | null): string | 
 }
 
 export interface FreeNowLine {
-  key: 'realized' | 'commitments' | 'incomes' | 'safetyMargin' | 'goals';
+  key: 'lowest' | 'safetyMargin' | 'goals';
   label: string;
-  /** Signed contribution to "Livre agora": positive adds, negative subtracts. */
+  /** Signed contribution to the result: positive adds, negative subtracts. */
   cents: number;
 }
 
-/** Breakdown rows shared by both platforms; lines at zero are left out, except the starting balance. */
+/** What follows the day-by-day list: the lowest balance minus each protection (zero ones are left out). */
 export function freeNowComposition(freeNow: FreeNow): FreeNowLine[] {
-  const until = freeNow.lowestPointDate === freeNow.today ? 'hoje' : shortDate(freeNow.lowestPointDate);
-  const lines: FreeNowLine[] = [
-    { key: 'realized', label: 'Em mãos (recebido − pago no mês)', cents: freeNow.realizedBalanceCents },
-  ];
-  if (freeNow.commitmentsUntilLowestPointCents > 0)
-    lines.push({
-      key: 'commitments',
-      label: `Contas até ${until}`,
-      cents: -freeNow.commitmentsUntilLowestPointCents,
-    });
-  if (freeNow.incomesUntilLowestPointCents > 0)
-    lines.push({
-      key: 'incomes',
-      label: `Entradas previstas até ${until}`,
-      cents: freeNow.incomesUntilLowestPointCents,
-    });
+  const when = freeNow.lowestPointDate === freeNow.today ? 'hoje' : shortDate(freeNow.lowestPointDate);
+  const lines: FreeNowLine[] = [{ key: 'lowest', label: `Menor saldo do mês (${when})`, cents: freeNow.lowestPointCents }];
   if (freeNow.safetyMarginCents > 0)
     lines.push({ key: 'safetyMargin', label: 'Margem de segurança', cents: -freeNow.safetyMarginCents });
   if (freeNow.goalReinforcementCents > 0)
@@ -221,9 +242,36 @@ export function freeNowComposition(freeNow: FreeNow): FreeNowLine[] {
   return lines;
 }
 
-/** Where the month is tightest, in words. */
-export function freeNowHorizon(freeNow: FreeNow): string {
-  if (freeNow.lowestPointDate === freeNow.today)
-    return 'O saldo do mês fica mais apertado hoje; depois disso ele só se recupera.';
-  return `O saldo do mês fica mais apertado em ${shortDate(freeNow.lowestPointDate)}.`;
+export interface FreeNowHeadline {
+  label: string;
+  /** Always non-negative; `negative` says whether it is an amount that is missing. */
+  cents: number;
+  negative: boolean;
+  note: string;
+}
+
+/** Plain-language headline: how much can be spent today, or how much will be missing and when. */
+export function freeNowHeadline(freeNow: FreeNow): FreeNowHeadline {
+  const negative = freeNow.freeNowCents < 0;
+  const tight = freeNow.lowestPointDate === freeNow.today ? null : shortDate(freeNow.lowestPointDate);
+  if (negative)
+    return {
+      label: 'Faltam',
+      cents: -freeNow.freeNowCents,
+      negative,
+      note: `Pelo que está planejado${freeNow.protectedMoneyCents > 0 ? ' e contando suas proteções' : ''}, o saldo não cobre tudo ${tight ? `até ${tight}` : 'hoje'}.`,
+    };
+  return {
+    label: 'Pode gastar hoje',
+    cents: freeNow.freeNowCents,
+    negative,
+    note: tight
+      ? `Sem ficar no vermelho este mês. O mais apertado é ${tight}.`
+      : 'Sem ficar no vermelho este mês.',
+  };
+}
+
+/** Label of a timeline row's date: "Hoje" or dd/MM. */
+export function freeNowRowDate(row: FreeNowTimelineRow, today: string): string {
+  return row.date === today ? 'Hoje' : shortDate(row.date);
 }

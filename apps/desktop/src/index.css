@@ -2152,12 +2152,66 @@ strong,
   transform: rotate(180deg);
 }
 
+.free-now__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 18px 14px;
+}
+
+.free-now__timeline {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.free-now__timeline li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 110px 110px;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--text-soft);
+  font-size: 12.5px;
+}
+
+.free-now__timeline li.is-lowest {
+  background: var(--primary-wash);
+  color: var(--text);
+}
+
+.free-now__timeline em {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.free-now__date {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.free-now__delta,
+.free-now__balance {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.free-now__balance {
+  font-weight: 650;
+}
+
 .free-now__lines {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 0;
-  padding: 4px 18px 14px;
+  padding: 0;
 }
 
 .free-now__lines > div {

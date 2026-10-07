@@ -227,25 +227,33 @@ describe('Livre agora in the Dashboard', () => {
     expect(markup.match(/class="free-now"/g)).toHaveLength(1);
     expect(text(overviewFor(50000, 70000))).toMatch(/Saldo projetado R\$.*1\.800,00 R\$.*600,00 após proteções/);
   });
-  it('shows the value, the period and the whole composition', () => {
+  it('shows the headline, the day-by-day timeline and the composition', () => {
     const content = text(overviewFor(50000, 70000));
-    expect(content).toMatch(/Livre agora R\$.*500,00/);
-    expect(content).toContain('O saldo do mês fica mais apertado em 14/10.');
-    expect(content).toMatch(/Em mãos \(recebido − pago no mês\) R\$.*2\.000,00/);
-    expect(content).toMatch(/Contas até 14\/10 -R\$.*300,00/);
+    expect(content).toMatch(/Pode gastar hoje R\$.*500,00/);
+    expect(content).toContain('Sem ficar no vermelho este mês. O mais apertado é 14/10.');
+    expect(content).toContain('Ver dia a dia');
+    expect(content).toMatch(/Hoje Em mãos \(recebido − pago no mês\) R\$.*2\.000,00/);
+    expect(content).toMatch(/12\/10 Luz − R\$.*200,00 R\$.*1\.800,00/);
+    expect(content).toMatch(/14\/10 Internet · mais apertado − R\$.*100,00 R\$.*1\.700,00/);
+    expect(content).toMatch(/15\/10 Freela \+ R\$.*500,00 R\$.*2\.200,00/);
+    expect(content).toMatch(/Menor saldo do mês \(14\/10\) R\$.*1\.700,00/);
     expect(content).toMatch(/Margem de segurança -R\$.*500,00/);
     expect(content).toMatch(/Objetivos -R\$.*700,00/);
   });
-  it('works without protections: only the bills line, original projected hint', () => {
+  it('marks exactly one row as the tightest', () => {
+    expect(html(overviewFor(50000, 70000)).match(/class="is-lowest"/g)).toHaveLength(1);
+  });
+  it('works without protections: only the lowest balance line, original projected hint', () => {
     const content = text(overviewFor(0, 0));
-    expect(content).toMatch(/Livre agora R\$.*1\.700,00/);
+    expect(content).toMatch(/Pode gastar hoje R\$.*1\.700,00/);
     expect(content).toContain('Se tudo ocorrer como planejado');
     expect(content).not.toContain('Margem de segurança');
     expect(content).not.toContain('Objetivos -R$');
   });
   it('shows a negative value with the attention colour instead of zero', () => {
     const markup = html(overviewFor(150000, 70000));
-    expect(markup).toMatch(/free-now__value money-negative">-R\$.*500,00/);
+    expect(markup).toMatch(/free-now__value money-negative">R\$.*500,00/);
+    expect(text(overviewFor(150000, 70000))).toMatch(/Faltam R\$.*500,00/);
   });
   it('does not render the strip for other months or old overviews', () => {
     expect(html({ ...overviewFor(0, 0), freeNow: null })).not.toContain('free-now');
@@ -254,6 +262,7 @@ describe('Livre agora in the Dashboard', () => {
   });
   it('says so when the tightest day is today', () => {
     const calm = monthlyProtectionOverview([items[0], items[4]], [], [], null, '2026-10', '2026-10-10', 0);
-    expect(text({ ...overviewFor(0, 0), ...calm })).toContain('O saldo do mês fica mais apertado hoje; depois disso ele só se recupera.');
+    expect(text({ ...overviewFor(0, 0), ...calm })).toContain('Sem ficar no vermelho este mês.');
+    expect(text({ ...overviewFor(0, 0), ...calm })).not.toContain('O mais apertado é');
   });
 });

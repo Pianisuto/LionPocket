@@ -15,7 +15,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import type { FreeNow, Overview, Transaction } from '@lionpocket/core/types';
-import { freeNowComposition, freeNowHorizon, protectionHint } from '@lionpocket/core/free-now';
+import { freeNowComposition, freeNowHeadline, freeNowRowDate, protectionHint } from '@lionpocket/core/free-now';
 import { groupCreditCardInvoices } from '@lionpocket/core/credit-cards';
 import { EmptyState, ProgressBar, Skeleton } from '../components';
 import { compactCurrency, currency, formatDate, monthLabel, overdueLabel } from '../format';
@@ -45,26 +45,40 @@ const MetricCard = ({
   </article>
 );
 
-/** Compact "Livre agora": the value stays visible, the breakdown opens on demand. */
+/** Compact "Pode gastar hoje": the headline stays visible, the day-by-day path opens on demand. */
 export const FreeNowStrip = ({ freeNow }: { freeNow: FreeNow }) => {
-  const negative = freeNow.freeNowCents < 0;
+  const headline = freeNowHeadline(freeNow);
   return (
     <details className="free-now">
       <summary className="free-now__summary">
-        <span className="free-now__label">Livre agora</span>
-        <strong className={`free-now__value ${negative ? 'money-negative' : ''}`}>{currency.format(freeNow.freeNowCents / 100)}</strong>
-        <small className="free-now__horizon">{freeNowHorizon(freeNow)}</small>
-        <span className="free-now__toggle">Ver composição <ChevronDown size={15} /></span>
+        <span className="free-now__label">{headline.label}</span>
+        <strong className={`free-now__value ${headline.negative ? 'money-negative' : ''}`}>{currency.format(headline.cents / 100)}</strong>
+        <small className="free-now__horizon">{headline.note}</small>
+        <span className="free-now__toggle">Ver dia a dia <ChevronDown size={15} /></span>
       </summary>
-      <dl className="free-now__lines">
-        {freeNowComposition(freeNow).map((line) => (
-          <div key={line.key}>
-            <dt>{line.label}</dt>
-            <dd className={line.cents < 0 ? 'money-negative' : undefined}>{currency.format(line.cents / 100)}</dd>
-          </div>
-        ))}
-        <div className="free-now__result"><dt>Livre agora</dt><dd className={negative ? 'money-negative' : undefined}>{currency.format(freeNow.freeNowCents / 100)}</dd></div>
-      </dl>
+      <div className="free-now__body">
+        <ol className="free-now__timeline">
+          {freeNow.timeline.map((row) => (
+            <li key={row.key} className={row.lowest ? 'is-lowest' : undefined}>
+              <span className="free-now__date">{freeNowRowDate(row, freeNow.today)}</span>
+              <span className="free-now__what">{row.kind === 'start' ? 'Em mãos (recebido − pago no mês)' : row.label}{row.lowest && <em> · mais apertado</em>}</span>
+              <span className={row.kind === 'start' || row.cents >= 0 ? 'free-now__delta' : 'free-now__delta money-negative'}>
+                {row.kind === 'start' ? '' : `${row.cents >= 0 ? '+' : '−'} ${currency.format(Math.abs(row.cents) / 100)}`}
+              </span>
+              <span className={row.balanceCents < 0 ? 'free-now__balance money-negative' : 'free-now__balance'}>{currency.format(row.balanceCents / 100)}</span>
+            </li>
+          ))}
+        </ol>
+        <dl className="free-now__lines">
+          {freeNowComposition(freeNow).map((line) => (
+            <div key={line.key}>
+              <dt>{line.label}</dt>
+              <dd className={line.cents < 0 ? 'money-negative' : undefined}>{currency.format(line.cents / 100)}</dd>
+            </div>
+          ))}
+          <div className="free-now__result"><dt>{headline.label}</dt><dd className={headline.negative ? 'money-negative' : undefined}>{currency.format(headline.cents / 100)}</dd></div>
+        </dl>
+      </div>
     </details>
   );
 };

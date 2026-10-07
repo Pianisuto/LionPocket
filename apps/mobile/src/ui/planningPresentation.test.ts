@@ -41,18 +41,24 @@ describe('Livre agora view', () => {
     const data = overview(50000, 70000);
     const view = freeNowView(data.freeNow)!;
     expect(data.freeNow).toEqual(calculateFreeNow(items, '2026-10', '2026-10-10', { month: '2026-10', safetyMarginCents: 50000 }, goals, [{ goalId: 'g', month: '2026-10', amountCents: 70000 }]));
-    expect(view).toMatchObject({ negative: false, horizon: 'O saldo do mês fica mais apertado em 14/10.' });
+    expect(view).toMatchObject({ label: 'Pode gastar hoje', negative: false, note: 'Sem ficar no vermelho este mês. O mais apertado é 14/10.' });
     expect(view.value).toMatch(/500,00/);
-    expect(view.lines.map((line) => [line.key, line.negative])).toEqual([['realized', false], ['commitments', true], ['safetyMargin', true], ['goals', true]]);
-    expect(view.lines[0].value).toMatch(/2\.000,00/);
-    expect(view.lines[1].value).toMatch(/-R\$.*300,00/);
+    expect(view.timeline.map((row) => [row.date, row.balance.replace(/\s/g, ' '), row.lowest])).toEqual([
+      ['Hoje', 'R$ 2.000,00', false], ['12/10', 'R$ 1.800,00', false], ['14/10', 'R$ 1.700,00', true], ['15/10', 'R$ 2.200,00', false], ['20/10', 'R$ 1.800,00', false],
+    ]);
+    expect(view.timeline[3]).toMatchObject({ label: 'Freela', delta: expect.stringMatching(/^\+ .*500,00/) });
+    expect(view.timeline[1].delta).toMatch(/^− .*200,00/);
+    expect(view.lines.map((line) => [line.key, line.negative])).toEqual([['lowest', false], ['safetyMargin', true], ['goals', true]]);
+    expect(view.lines[0].value).toMatch(/1\.700,00/);
+    expect(view.lines[0].label).toBe('Menor saldo do mês (14/10)');
   });
   it('shows a negative result as negative', () => {
     const view = freeNowView(overview(150000, 70000).freeNow)!;
-    expect(view.negative).toBe(true);
-    expect(view.value).toMatch(/-R\$.*500,00/);
+    expect(view).toMatchObject({ negative: true, label: 'Faltam', note: expect.stringContaining('até 14/10') });
+    expect(view.value).toMatch(/500,00/);
+    expect(view.value).not.toMatch(/-/);
   });
   it('leaves out protections that are zero', () => {
-    expect(freeNowView(overview(0, 0).freeNow)!.lines.map((line) => line.key)).toEqual(['realized', 'commitments']);
+    expect(freeNowView(overview(0, 0).freeNow)!.lines.map((line) => line.key)).toEqual(['lowest']);
   });
 });
