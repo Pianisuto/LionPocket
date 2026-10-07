@@ -136,16 +136,41 @@ describe('monthly planning persistence and restoration', () => {
     await repo.saveMonthlyPlanning({ month: '2026-10', safetyMarginCents: 100 });
     expect(await repo.getMonthlyPlanning('2026-10')).toMatchObject({ safetyMarginCents: 100 });
   });
-  it('upgrades an existing Desktop bank preserving financial rows and populated sync sidecars verbatim', async () => {
+  it('upgrades the Desktop v14 identity CHECK preserving financial rows and populated sync sidecars verbatim', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lion-monthly-upgrade-')); close.push(() => rmSync(dir, { recursive: true, force: true }));
     const path = join(dir, 'old.sqlite'); const old = new LionPocketDatabase(path);
     old.saveTransaction({ kind: 'expense', description: 'Anterior', plannedAmount: 12.34, dueDate: '2026-10-10', status: 'planned' });
     const profile = { formatVersion: 1, installationId: randomUUID(), deviceId: randomUUID(), signingPublicKey: '', boxPublicKey: '', pin: { serverId: randomUUID(), serverEpoch: randomUUID(), vaultId: randomUUID(), founderDeviceId: randomUUID(), authorityPublicKey: 'A'.repeat(43), keyVersion: 1 }, grants: [], checkpoint: { version: '1', sha256: 'A'.repeat(43) } } as ProvisionedProfile;
     await old.syncDatabase().run(startFinancialBaseline(profile, 'https://fixture.invalid', '/fixture/backup.sqlite', randomUUID));
     const before = Object.fromEntries([...syncTables, 'transactions'].map(t => [t, old.db.prepare(`SELECT * FROM ${t}`).all()]));
-    // Remove only the additive v15 table/marker to rehearse a populated predecessor schema.
-    old.db.exec('DROP TABLE monthly_planning; DELETE FROM migrations WHERE version=15'); old.db.close();
+    for (const table of ['sync_identity', 'sync_revisions', 'sync_heads', 'sync_outbox', 'sync_bindings']) {
+      expect(before[table].length).toBeGreaterThan(0);
+    }
+    // Freeze the v14 definition independently of the migration under test. Removing
+    // only the v15 table/marker would leave its widened identity CHECK in place.
+    old.db.exec(`
+      PRAGMA foreign_keys=OFF;
+      BEGIN;
+      CREATE TABLE sync_identity_v14 (
+        entity_type TEXT NOT NULL CHECK(entity_type IN ('manualTransaction','transaction','category','paymentMethod','card','recurring','installmentPurchase','goal','recurringPriorityList','monthlyPriorityList')),
+        local_id TEXT NOT NULL, object_id TEXT NOT NULL UNIQUE,
+        PRIMARY KEY(entity_type,local_id));
+      INSERT INTO sync_identity_v14 SELECT * FROM sync_identity;
+      DROP TABLE sync_identity;
+      ALTER TABLE sync_identity_v14 RENAME TO sync_identity;
+      DROP TABLE monthly_planning;
+      DELETE FROM migrations WHERE version=15;
+      COMMIT;
+      PRAGMA foreign_keys=ON;
+    `);
+    expect(old.db.prepare('SELECT MAX(version) AS version FROM migrations').get()).toMatchObject({ version: 14 });
+    expect(old.db.prepare("SELECT sql FROM sqlite_master WHERE name='sync_identity'").get()!.sql).not.toContain('monthlyPlanning');
+    expect(() => old.db.prepare("INSERT INTO sync_identity VALUES('monthlyPlanning',?,?)").run('2026-10', randomUUID())).toThrow(/CHECK constraint failed/);
+    for (const [t, rows] of Object.entries(before)) expect(old.db.prepare(`SELECT * FROM ${t}`).all()).toEqual(rows);
+    expect(old.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    old.db.close();
     const upgraded = bank(path);
+    expect(upgraded.db.prepare('SELECT MAX(version) AS version FROM migrations').get()).toMatchObject({ version: 15 });
     expect(upgraded.getMonthlyPlanning('2026-10')).toBeNull();
     for (const [t, rows] of Object.entries(before)) expect(upgraded.db.prepare(`SELECT * FROM ${t}`).all()).toEqual(rows);
     expect(upgraded.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

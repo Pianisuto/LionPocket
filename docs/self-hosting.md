@@ -137,6 +137,8 @@ Depois dessa confirmação não há retorno automático ao histórico anterior. 
 
 Antes de atualizar, faça e verifique backup. Leia as notas da versão aprovada, obtenha esse commit/tag no repositório e execute `./lpctl up`. A imagem é recompilada localmente; este PR não publica imagem ou release nem oferece `lpctl update` que baixa código sem revisão. Mantenha o nome Compose, hosts, volumes e arquivos externos. Realm importado não substitui realms existentes; alterações futuras precisam de migração explícita. Não faça `down --volumes` em produção.
 
+A versão com [margem de segurança mensal](monthly-planning.md) exige atualização conjunta do servidor e de todos os clientes vinculados. Ao anunciar `monthlyPlanning`, o servidor passa a ser incompatível com clientes anteriores: eles bloqueiam o sync no discovery com `unsupported_capability`, antes de receber/quarentenar revisões. Não há negociação para rolling upgrade. O uso local e as alterações pendentes continuam preservados enquanto os clientes aguardam atualização.
+
 Endpoint é preferência por aparelho e não sincroniza. Uma base vinculada não troca operador editando URL, nem envia outbox a servidor B automaticamente. Para abandonar um remoto e publicar os dados locais em uma instalação limpa, use exclusivamente o fluxo explícito de servidor recriado abaixo. Ele não recupera o remoto anterior nem move automaticamente ciphertext entre servidores.
 
 - `status` não passa: confira DNS, portas, cadeia TLS, permissões/UID dos arquivos e saúde dos serviços. Use `lpctl logs`; não publique dumps, tokens, proofs ou recuperação em chamados.
