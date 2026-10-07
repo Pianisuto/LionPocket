@@ -9,7 +9,8 @@ A sugestão automática (`suggestedMonthlyAmount`) continua separada. O editor o
 Na tela **Objetivos**, os cards mantêm a aparência atual e ganham uma linha discreta de planejamento com o mês, o reforço do mês e a ação **Definir**, **Editar** ou **Remover**. O mês também mostra o total planejado para objetivos (“Planejado para objetivos em …”). A edição acontece em um formulário temporário com o valor, a sugestão (quando existe) e “Remover reforço”.
 
 - **Desktop** reutiliza o mês global da barra existente.
-- **Mobile** navega entre meses dentro de Objetivos (“Planejando o mês”), sem alterar o mês das demais telas.
+- **Mobile** navega entre meses dentro de Objetivos (“Planejando o mês”). O mês global só define o mês inicial; o mês de Objetivos é um estado local da tela e navegar nele não altera Dashboard, Lançamentos nem as demais telas.
+- Nas duas plataformas, se os reforços do mês não puderem ser lidos, a tela mostra o erro (Desktop com “Tentar novamente”; Mobile com o erro e puxar para atualizar) em vez de um total zerado, e não permite definir/editar reforços até o estado real ser conhecido.
 - O Dashboard não muda.
 
 ## Modelo e persistência
@@ -52,6 +53,6 @@ O servidor anuncia o novo escopo `goalMonthlyReinforcement`. Protocolo, envelope
 
 ## Cobertura
 
-Testes cobrem: criar/editar/remover/redefinir; meses independentes; vários objetivos no mesmo mês e total mensal; sugestão diferente do reforço; `savedAmount`, progresso e lançamentos inalterados; planejado/em andamento/pausado/concluído/cancelado; exclusão de objetivo; Desktop e Mobile com os mesmos casos; backup, JSON, merge e conversão; os upgrades reais a partir do Desktop v15 e do Mobile v10 (com rollback tardio); sync bidirecional, identidade estável, conflitos, objetivo excluído em outro aparelho, desvinculação, nova baseline, reconexão, replay de epoch e as fixtures nativas. O caso com servidor real (`pairing.integration.test.ts`) exige Postgres. Testes com `node:sqlite` não substituem o Nitro SQLite no Android, e Windows instalado exige um host Windows descartável.
+Testes de UI (`apps/sync-server/src/goalReinforcement.ui.test.ts`) cobrem o mês local do Mobile e a falha de leitura no Desktop e no Mobile. Testes cobrem: criar/editar/remover/redefinir; meses independentes; vários objetivos no mesmo mês e total mensal; sugestão diferente do reforço; `savedAmount`, progresso e lançamentos inalterados; planejado/em andamento/pausado/concluído/cancelado; exclusão de objetivo; Desktop e Mobile com os mesmos casos; backup, JSON, merge e conversão; os upgrades reais a partir do Desktop v15 e do Mobile v10 (com rollback tardio); sync bidirecional, identidade estável, conflitos, objetivo excluído em outro aparelho, desvinculação, nova baseline, reconexão, replay de epoch e as fixtures nativas. O caso com servidor real (`pairing.integration.test.ts`) exige Postgres. Testes com `node:sqlite` não substituem o Nitro SQLite no Android, e Windows instalado exige um host Windows descartável.
 
 Fora do escopo: Livre agora, análise temporal, reserva ou transferência automática, alteração automática de `savedAmount` e reforço recorrente.
