@@ -91,6 +91,8 @@ export interface SyncSaved {
   endpoint: string;
   /** Durable local-only cleanup intent; resumed before any transport or onboarding. */
   unlinkPending?: true;
+  /** Backup completed before cleanup; reused when a pending unlink resumes. */
+  unlinkBackupPath?: string;
   serverReset?: { phase: 'pending-unlink' | 'ready'; backupPath: string; intent: ServerResetIntent };
   identity?: { issuer: string; subject: string };
   profile?: ProvisionedProfile;
@@ -1378,7 +1380,10 @@ export class SyncController {
       clearTimeout(this.pairingTimer);
       await this.coordinator.cancelAndWait();
       const saved = await this.options.storage.load();
-      await this.options.storage.save({ ...(saved ?? { endpoint: '' }), unlinkPending: true });
+      if (!saved?.unlinkPending) {
+        const unlinkBackupPath = await this.backupBeforeUnlink();
+        await this.options.storage.save({ ...(saved ?? { endpoint: '' }), unlinkPending: true, unlinkBackupPath });
+      }
       await this.resumeUnlink();
       return this.status();
     } finally {
@@ -1386,10 +1391,24 @@ export class SyncController {
       this.pairingChanged();
     }
   }
+  private async backupBeforeUnlink() {
+    try {
+      const path = await this.options.backup();
+      if (!path) throw new Error('backup_missing');
+      return path;
+    } catch {
+      throw new Error('Não foi possível preservar o backup local. Nenhum vínculo foi removido.');
+    }
+  }
   private async resumeUnlink() {
     const saved = await this.options.storage.load();
     if (!saved?.unlinkPending) return false;
     await this.coordinator.cancelAndWait();
+    // Pending unlink from older clients may not have a backup yet.
+    if (!saved.unlinkBackupPath) {
+      saved.unlinkBackupPath = await this.backupBeforeUnlink();
+      await this.options.storage.save(saved);
+    }
     // Keep the intent/profile until every idempotent cleanup step succeeds.
     // A failure or crash therefore cannot silently reconnect with partial credentials.
     for (const scope of await serverSecretScopes(this.options.db, saved))

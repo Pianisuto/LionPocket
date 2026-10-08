@@ -6,7 +6,7 @@ import { InvitationSection, PairingProgress } from './Pairing';
 import { SyncNotice } from './primitives';
 import { ProtectionSection } from './Protection';
 import { ServerRecovery } from './ServerRecovery';
-import { ServerResetContinuation, ServerResetForm } from './ServerReset';
+import { ServerResetContinuation } from './ServerReset';
 import { UnlinkServer } from './UnlinkServer';
 import { SyncOverview } from './SyncOverview';
 import { SyncDiagnostics, SyncReviews } from './SyncReviews';
@@ -32,7 +32,10 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       {view.canUnlink && <UnlinkServer {...session} />}
 
       {status.compatibilityMessage && (
-        <SyncNotice title="A sincronização precisa da sua atenção" tone="warning">
+        <SyncNotice
+          title="A sincronização precisa da sua atenção"
+          tone="warning"
+        >
           {status.compatibilityMessage}
         </SyncNotice>
       )}
@@ -57,31 +60,38 @@ export function SyncPanel({ onChanged }: { onChanged: () => Promise<void> }) {
       {local && status.pairingStep === 'preparing' && (
         <p role="status">Preparando conexão…</p>
       )}
-      {local && !view.resetReady && <SyncSetup {...session} />}
-      {local && (
-        <>
-          <InvitationSection
-            {...session}
-            inputRef={invitationInput}
-            title={view.joiningRecreated ? 'Conectar ao cofre já recriado' : 'Colar convite'}
-          />
-          <RecoverVault {...session} />
-        </>
+      {local && !view.resetReady && (
+        <SyncSetup {...session} inputRef={invitationInput} />
       )}
-      {!status.unlinkPending && status.phase === 'creating' && <ResumeVaultCreation {...session} />}
-      {!status.unlinkPending && status.phase === 'pairing' && <PairingProgress {...session} />}
+      {local && view.resetReady && (
+        <InvitationSection
+          {...session}
+          inputRef={invitationInput}
+          title={
+            view.joiningRecreated
+              ? 'Conectar ao cofre já recriado'
+              : 'Colar convite'
+          }
+        />
+      )}
+      {local && <RecoverVault {...session} />}
+      {!status.unlinkPending && status.phase === 'creating' && (
+        <ResumeVaultCreation {...session} />
+      )}
+      {!status.unlinkPending && status.phase === 'pairing' && (
+        <PairingProgress {...session} />
+      )}
 
       {view.connected && (
         <div className="sync-management">
           {view.canManage && <DevicesSection {...session} />}
-          <div className="sync-management__tools">
-            {view.canManage && status.owner && (
+          {view.canManage && status.owner && (
+            <div className="sync-management__tools">
               <div className="sync-management__protection">
                 <ProtectionSection {...session} />
               </div>
-            )}
-            <ServerResetForm {...session} />
-          </div>
+            </div>
+          )}
           {view.canManage && <SyncDiagnostics {...session} />}
         </div>
       )}

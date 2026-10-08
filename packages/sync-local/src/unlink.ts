@@ -10,7 +10,7 @@ import type { SyncSaved } from './sync';
 export const unlinkServerCopy = {
   title: 'Desvincular servidor',
   description: 'Interrompe a sincronização e remove o vínculo e as credenciais somente deste aparelho.',
-  confirmation: 'Seus dados financeiros locais serão mantidos, incluindo alterações ainda não sincronizadas. O cofre remoto, a conta, o servidor e os dados de outros aparelhos não serão apagados. Você poderá conectar este aparelho a um servidor novamente quando quiser.',
+  confirmation: 'Um backup completo será criado antes de remover o vínculo. Seus dados financeiros locais serão mantidos, incluindo alterações ainda não sincronizadas. O cofre remoto, a conta, o servidor e os dados de outros aparelhos não serão apagados. Você poderá conectar este aparelho a um servidor novamente quando quiser.',
   action: 'Confirmar desvinculação',
 } as const;
 

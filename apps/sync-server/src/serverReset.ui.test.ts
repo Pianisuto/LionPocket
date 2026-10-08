@@ -168,16 +168,6 @@ describe.each(['desktop', 'android'] as const)(
         command,
         button,
         press,
-        openReset: async () => {
-          if (platform === 'android')
-            await press('Servidor de sincronização recriado');
-          else
-            expect(
-              renderer!.root.findAllByType('details').filter((node) =>
-                text(node).includes('Servidor de sincronização recriado'),
-              ),
-            ).toHaveLength(1);
-        },
         change: async (s: SyncStatus) => {
           current = s;
           await act(async () => {
@@ -186,140 +176,12 @@ describe.each(['desktop', 'android'] as const)(
         },
       };
     }
-    it('starts collapsed in a neutral disclosure without submitting', async () => {
+    it('removes the recreated-server disclosure from connected devices', async () => {
       const ui = await mount(status('bound'));
-      expect(text(renderer!.root)).not.toContain('Ações avançadas');
-      if (platform === 'desktop') {
-        const disclosure = renderer!.root
-          .findAllByType('details')
-          .find((node) =>
-            text(node).includes('Servidor de sincronização recriado'),
-          )!;
-        expect(disclosure.props.open).not.toBe(true);
-        expect(disclosure.findByType('summary')).toBeTruthy();
-        expect(disclosure.props.className).toBe('sync-disclosure');
-      } else {
-        expect(
-          ui.button('Servidor de sincronização recriado').props
-            .accessibilityState.expanded,
-        ).toBe(false);
-        expect(
-          ui.button('Preservar backup e remover vínculo antigo'),
-        ).toBeUndefined();
-      }
-      await ui.openReset();
-      expect(
-        ui.button('Preservar backup e remover vínculo antigo').props.disabled,
-      ).toBe(true);
+      expect(text(renderer!.root)).not.toContain('Servidor de sincronização recriado');
+      expect(ui.button('Preservar backup e remover vínculo antigo')).toBeUndefined();
       expect(ui.controller.resetForRecreatedServer).not.toHaveBeenCalled();
     });
-    if (platform === 'android')
-      it('collapsing preserves the endpoint, explicit choice and consent without submitting', async () => {
-        const ui = await mount(status('bound'));
-        await ui.openReset();
-        const endpointInput = () =>
-          renderer!.root.findAll(
-            (node) =>
-              node.type === ('mobile-input' as unknown) &&
-              node.props.accessibilityLabel === 'Novo servidor',
-          )[0];
-        await act(async () => {
-          endpointInput().props.onChangeText('https://new-sync.example.com');
-        });
-        await ui.press('Usar este aparelho como fonte de verdade');
-        await ui.press('Entendo que o remoto anterior será abandonado e que o backup será preservado antes de remover o vínculo.');
-        await ui.press('Servidor de sincronização recriado');
-        expect(
-          ui.button('Preservar backup e remover vínculo antigo'),
-        ).toBeUndefined();
-        await ui.openReset();
-        expect(
-          ui.button('Servidor de sincronização recriado').props
-            .accessibilityState.expanded,
-        ).toBe(true);
-        expect(endpointInput().props.value).toBe('https://new-sync.example.com');
-        expect(ui.controller.resetForRecreatedServer).not.toHaveBeenCalled();
-        await ui.press('Preservar backup e remover vínculo antigo');
-        expect(ui.controller.resetForRecreatedServer).toHaveBeenCalledWith(
-          'https://new-sync.example.com',
-          'source-of-truth',
-          true,
-        );
-      });
-    it.each(['source-of-truth', 'join-existing'] as const)(
-      'requires choosing %s before backup/unlink and shows its correct continuation',
-      async (intent) => {
-        const ui = await mount(status('bound'));
-        const labels = [
-          'Usar este aparelho como fonte de verdade',
-          'Conectar este aparelho a um cofre já recriado',
-        ];
-        await ui.openReset();
-        // Opening the disclosure exposes both continuations, with no default choice.
-        expect(text(renderer!.root)).toContain(
-          'Servidor de sincronização recriado',
-        );
-        if (platform === 'desktop') {
-          const choices = renderer!.root
-            .findAllByType('input')
-            .filter((n) => n.props.type === 'radio');
-          expect(choices.map((n) => n.props.value)).toEqual([
-            'source-of-truth',
-            'join-existing',
-          ]);
-          for (const label of labels)
-            expect(text(renderer!.root)).toContain(label);
-          expect(
-            ui.button('Preservar backup e remover vínculo antigo').props
-              .disabled,
-          ).toBe(true);
-          await act(async () => {
-            choices.find((n) => n.props.value === intent)!.props.onChange();
-          });
-          await act(async () => {
-            renderer!.root
-              .findAllByType('input')
-              .find((n) => n.props.type === 'checkbox')!
-              .props.onChange({ target: { checked: true } });
-          });
-        } else {
-          for (const label of labels) expect(ui.button(label)).toBeTruthy();
-          expect(
-            ui.button('Preservar backup e remover vínculo antigo').props
-              .disabled,
-          ).toBe(true);
-          await ui.press(labels[intent === 'source-of-truth' ? 0 : 1]);
-          await ui.press('Entendo que o remoto anterior será abandonado e que o backup será preservado antes de remover o vínculo.');
-        }
-        expect(text(renderer!.root)).toContain('cofres independentes');
-        expect(text(renderer!.root)).toContain(
-          'Este fluxo não cria um novo cofre',
-        );
-        await ui.press('Preservar backup e remover vínculo antigo');
-        expect(ui.controller.resetForRecreatedServer).toHaveBeenCalledWith(
-          'https://sync.example.com',
-          intent,
-          true,
-        );
-        expect(text(renderer!.root)).toContain(
-          'Backup criado: /private/backup.sqlite',
-        );
-        expect(!!ui.button('Criar novo cofre usando estes dados')).toBe(
-          intent === 'source-of-truth',
-        );
-        expect(!!ui.button('Conectar por convite')).toBe(
-          intent === 'join-existing',
-        );
-        expect(ui.button('Configurar sincronização')).toBeUndefined();
-        if (intent === 'source-of-truth') {
-          await ui.press('Criar novo cofre usando estes dados');
-          expect(ui.controller.create).toHaveBeenCalledTimes(1);
-        } else {
-          await ui.press('Conectar por convite');
-          expect(ui.controller.create).not.toHaveBeenCalled();
-        }
-      },
-    );
     it.each(['source-of-truth', 'join-existing'] as const)(
       'remount uses durable ready intention %s, without temporary selection',
       async (intent) => {
@@ -376,39 +238,10 @@ describe.each(['desktop', 'android'] as const)(
       expect(ui.controller.create).not.toHaveBeenCalled();
       expect(ui.button('Criar novo cofre usando estes dados')).toBeUndefined();
     });
-    it('changing the choice invalidates consent before unlink', async () => {
-      const ui = await mount(status('bound'));
-      await ui.openReset();
-      if (platform === 'desktop') {
-        const choose = async (intent: ServerResetIntent) =>
-          act(async () =>
-            renderer!.root
-              .findAllByType('input')
-              .find((n) => n.props.value === intent)!
-              .props.onChange(),
-          );
-        await choose('source-of-truth');
-        await act(async () =>
-          renderer!.root
-            .findAllByType('input')
-            .find((n) => n.props.type === 'checkbox')!
-            .props.onChange({ target: { checked: true } }),
-        );
-        await choose('join-existing');
-      } else {
-        await ui.press('Usar este aparelho como fonte de verdade');
-        await ui.press('Entendo que o remoto anterior será abandonado e que o backup será preservado antes de remover o vínculo.');
-        await ui.press('Conectar este aparelho a um cofre já recriado');
-      }
-      expect(
-        ui.button('Preservar backup e remover vínculo antigo').props.disabled,
-      ).toBe(true);
-      expect(ui.controller.resetForRecreatedServer).not.toHaveBeenCalled();
-    });
     it('a setup form already open cannot leak creation into join-existing ready', async () => {
       const ui = await mount(status('local'));
       await ui.press('Configurar sincronização');
-      expect(ui.button('Conectar')).toBeTruthy();
+      expect(text(renderer!.root)).toContain('Como você quer conectar este aparelho?');
       await ui.change(status('local', 'join-existing'));
       expect(ui.button('Conectar')).toBeUndefined();
       expect(ui.button('Configurar sincronização')).toBeUndefined();

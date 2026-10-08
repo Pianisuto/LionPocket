@@ -171,3 +171,22 @@ export const serverResetCopy = {
     'Entendo que o remoto anterior será abandonado e que o backup será preservado antes de remover o vínculo.',
   action: 'Preservar backup e remover vínculo antigo',
 };
+
+/** The ordinary connection flow replaces the recreated-server disclosure. */
+export const vaultConnectionCopy = {
+  question: 'Como você quer conectar este aparelho?',
+  choices: [
+    {
+      intent: 'source-of-truth',
+      label: 'Criar um cofre com os dados deste aparelho',
+      description: 'Use no primeiro aparelho. Criar um cofre em cada aparelho mantém seus dados separados.',
+    },
+    {
+      intent: 'join-existing',
+      label: 'Entrar em um cofre existente por convite',
+      description: 'Outro aparelho já está conectado? Use o convite dele para compartilhar o mesmo cofre.',
+    },
+  ] as const,
+  backup: 'Um backup local será preservado antes de iniciar a sincronização.',
+  createAction: 'Criar novo cofre',
+};

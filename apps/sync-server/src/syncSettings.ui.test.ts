@@ -87,7 +87,7 @@ afterEach(async () => {
 });
 
 describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platform) => {
-  async function mount(patch: Partial<SyncStatus> = {}) {
+  async function mount(patch: Partial<SyncStatus> = {}, initialInvitation?: string) {
     let current: SyncStatus = { ...baseStatus('local'), ...patch };
     const subscribers = new Set<() => void>();
     const changed = vi.fn(async () => undefined);
@@ -134,7 +134,7 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
     });
     runtime.controller = controller;
     vi.stubGlobal('window', { lionPocket: { syncStatus: controller.status, syncCommand: command, onSyncChanged: controller.subscribe } });
-    await act(async () => { renderer = create(React.createElement(platform === 'desktop' ? DesktopSyncPanel : MobileSyncPanel, { onChanged: changed })); });
+    await act(async () => { renderer = create(React.createElement(platform === 'desktop' ? DesktopSyncPanel : MobileSyncPanel, { onChanged: changed, initialInvitation })); });
     const button = (requested: string) => {
       const label = platform === 'android' && requested === 'Pausar' ? 'Pausar mantendo pendências' : platform === 'android' && requested === 'Retomar' ? 'Retomar sincronização' : requested;
       return renderer!.root.findAll((node) => platform === 'desktop'
@@ -158,7 +158,11 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
       current = { ...current, ...patch };
       await act(async () => subscribers.forEach((f) => f()));
     };
-    return { controller, changed, button, press, input, change, subscribers };
+    const choose = async (intent: ServerResetIntent) => {
+      if (platform === 'desktop') await act(async () => renderer!.root.findAllByType('input').find(n => n.props.type === 'radio' && n.props.value === intent)!.props.onChange());
+      else await press(intent === 'source-of-truth' ? 'Criar um cofre com os dados deste aparelho' : 'Entrar em um cofre existente por convite');
+    };
+    return { controller, changed, button, press, input, change, choose, subscribers };
   }
   it('requires confirmation, supports cancellation, and returns to local setup after unlink', async () => {
     const ui = await mount({ phase: 'bound', activity: 'ready' });
@@ -206,9 +210,12 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
   it('configures and creates a vault, then synchronizes and pauses/resumes', async () => {
     const ui = await mount();
     await ui.press('Configurar sincronização');
+    expect(ui.button('Criar novo cofre')).toBeUndefined();
+    expect(ui.controller.create).not.toHaveBeenCalled();
+    await ui.choose('source-of-truth');
     await ui.input('Servidor próprio', 'https://sync.example.com');
     if (platform === 'desktop') await act(async () => renderer!.root.findByType('form').props.onSubmit({ preventDefault: vi.fn() }));
-    else await ui.press('Conectar');
+    else await ui.press('Criar novo cofre');
     expect(ui.controller.configure).toHaveBeenCalledWith('https://sync.example.com');
     expect(ui.controller.create).toHaveBeenCalledOnce();
     await ui.press('Sincronizar agora');
@@ -222,11 +229,38 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
   });
   it('previews the invitation and displays the security code while waiting for approval', async () => {
     const ui = await mount();
+    await ui.press('Configurar sincronização');
+    await ui.choose('join-existing');
+    expect(ui.button('Criar novo cofre')).toBeUndefined();
     await ui.input('Convite do cofre', 'lionpocket://pair/LPV2.fixture');
     expect(ui.controller.inspectPairingInvitation).toHaveBeenCalled();
     await ui.press('Conectar');
     expect(ui.controller.connectInvitation).toHaveBeenCalledWith('lionpocket://pair/LPV2.fixture');
     expect(text(renderer!.root)).toContain('123 456');
+    expect(ui.controller.create).not.toHaveBeenCalled();
+  });
+  it('switching from create to invitation removes the creation action and never configures a server', async () => {
+    const ui = await mount();
+    await ui.press('Configurar sincronização');
+    await ui.choose('source-of-truth');
+    await ui.input('Servidor próprio', 'https://another.example.com');
+    await ui.choose('join-existing');
+    expect(ui.button('Criar novo cofre')).toBeUndefined();
+    await ui.input('Convite do cofre', 'lionpocket://pair/LPV2.fixture');
+    await ui.press('Conectar');
+    expect(ui.controller.configure).not.toHaveBeenCalled();
+    expect(ui.controller.create).not.toHaveBeenCalled();
+    expect(ui.controller.connectInvitation).toHaveBeenCalledOnce();
+  });
+  if (platform === 'android') it('a direct invitation opens only the joining flow', async () => {
+    const invitation = 'lionpocket://pair/LPV2.fixture';
+    const ui = await mount({}, invitation);
+    expect(ui.button('Configurar sincronização')).toBeUndefined();
+    expect(ui.button('Criar novo cofre')).toBeUndefined();
+    expect(ui.button('Escanear QR Code')).toBeUndefined();
+    await ui.press('Conectar');
+    expect(ui.controller.connectInvitation).toHaveBeenCalledWith(invitation);
+    expect(ui.controller.configure).not.toHaveBeenCalled();
     expect(ui.controller.create).not.toHaveBeenCalled();
   });
   it('approves a requested device and confirms a generated recovery code', async () => {
@@ -257,7 +291,7 @@ describe.each(['desktop', 'android'] as const)('%s sync settings flows', (platfo
     expect(ui.controller.prepareServerRecovery).toHaveBeenCalledWith(true);
     expect(ui.button('Sincronizar agora')).toBeUndefined();
     expect(ui.button('Adicionar aparelho')).toBeUndefined();
-    expect(text(renderer!.root)).toContain('Servidor de sincronização recriado');
+    expect(text(renderer!.root)).not.toContain('Servidor de sincronização recriado');
     await ui.input(platform === 'desktop' ? 'Digite o código que você guardou' : 'Confirme o código de recuperação do servidor', 'LP1.server');
     await ui.press('Guardei e conferi o código');
     expect(ui.controller.confirmServerRecovery).toHaveBeenCalledWith('LP1.server');

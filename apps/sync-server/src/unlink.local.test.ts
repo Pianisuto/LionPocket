@@ -67,7 +67,7 @@ describe.each(['desktop', 'android'] as const)('%s local server unlink', dialect
     const options: SyncOptions = {
       db, secrets, sodium, dialect,
       storage: { load: async () => structuredClone(saved), save: async value => { saved = structuredClone(value); } },
-      login: vi.fn(), backup: vi.fn(),
+      login: vi.fn(), backup: vi.fn(async () => '/fixture/pre-unlink.sqlite'),
     };
     const controller = new SyncController(options);
     cleanup.push(() => controller.coordinator.dispose());
@@ -84,6 +84,65 @@ describe.each(['desktop', 'android'] as const)('%s local server unlink', dialect
     expect(c.secrets.values.size).toBeGreaterThan(0);
     expect(c.preserved()).toEqual(before);
     expect(c.fetch).not.toHaveBeenCalled();
+    expect(c.options.backup).not.toHaveBeenCalled();
+  });
+  it.each(['failure', 'empty'] as const)('leaves credentials, transport and financial rows intact when backup returns %s', async mode => {
+    const c = await setup(), saved = c.saved(), financial = c.preserved();
+    const outbox = c.sqlite.prepare('SELECT * FROM sync_outbox').all();
+    const secrets = new Map(c.secrets.values);
+    if (mode === 'failure') vi.mocked(c.options.backup).mockRejectedValueOnce(new Error('disk full'));
+    else vi.mocked(c.options.backup).mockResolvedValueOnce('');
+    await expect(c.controller.unlinkServer(true)).rejects.toThrow('Não foi possível preservar o backup local');
+    expect(c.saved()).toEqual(saved);
+    expect(c.secrets.values).toEqual(secrets);
+    expect(c.preserved()).toEqual(financial);
+    expect(c.sqlite.prepare('SELECT * FROM sync_outbox').all()).toEqual(outbox);
+    expect(c.fetch).not.toHaveBeenCalled();
+    await c.controller.unlinkServer(true);
+    expect(c.saved()).toEqual({ endpoint: '' });
+  });
+  it('completes backup before saving intent or removing credentials and captures pending changes', async () => {
+    const c = await setup(), saved = c.saved();
+    const secrets = new Map(c.secrets.values);
+    const outbox = c.sqlite.prepare('SELECT * FROM sync_outbox').all();
+    vi.mocked(c.options.backup).mockImplementationOnce(async () => {
+      expect(c.saved()).toEqual(saved);
+      expect(c.secrets.values).toEqual(secrets);
+      expect(c.sqlite.prepare('SELECT * FROM sync_outbox').all()).toEqual(outbox);
+      expect(c.sqlite.prepare('SELECT safety_margin_cents FROM monthly_planning').all()).toContainEqual({ safety_margin_cents: 50123 });
+      return '/fixture/pre-unlink.sqlite';
+    });
+    await c.controller.unlinkServer(true);
+    expect(c.options.backup).toHaveBeenCalledOnce();
+  });
+  it.each([false, true])('does not clean anything if the backup path cannot be persisted (legacy pending: %s)', async pending => {
+    const c = await setup();
+    if (pending) await c.options.storage.save({ ...c.saved(), unlinkPending: true });
+    const saved = c.saved(), secrets = new Map(c.secrets.values);
+    const outbox = c.sqlite.prepare('SELECT * FROM sync_outbox').all();
+    vi.spyOn(c.options.storage, 'save').mockRejectedValueOnce(new Error('storage unavailable'));
+    const operation = pending ? c.controller.resumeRecoveryOnStartup() : c.controller.unlinkServer(true);
+    await expect(operation).rejects.toThrow('storage unavailable');
+    expect(c.saved()).toEqual(saved);
+    expect(c.secrets.values).toEqual(secrets);
+    expect(c.sqlite.prepare('SELECT * FROM sync_outbox').all()).toEqual(outbox);
+    expect(c.fetch).not.toHaveBeenCalled();
+  });
+  it('backs up legacy pending cleanup once before resuming and preserves intent if backup fails', async () => {
+    const c = await setup();
+    await c.options.storage.save({ ...c.saved(), unlinkPending: true });
+    const saved = c.saved(), secrets = new Map(c.secrets.values);
+    vi.mocked(c.options.backup).mockRejectedValueOnce(new Error('disk full'));
+    const restarted = new SyncController(c.options);
+    cleanup.push(() => restarted.coordinator.dispose());
+    await expect(restarted.resumeRecoveryOnStartup()).rejects.toThrow('Não foi possível preservar o backup local');
+    expect(c.saved()).toEqual(saved);
+    expect(c.secrets.values).toEqual(secrets);
+    await restarted.resumeRecoveryOnStartup();
+    expect(c.options.backup).toHaveBeenCalledTimes(2);
+    expect(c.saved()).toEqual({ endpoint: '' });
+    await restarted.resumeRecoveryOnStartup();
+    expect(c.options.backup).toHaveBeenCalledTimes(2);
   });
   it('keeps all financial rows, pending edits, stable identities and import provenance; works locally and can bind again', async () => {
     const c = await setup();
@@ -159,12 +218,14 @@ describe.each(['desktop', 'android'] as const)('%s local server unlink', dialect
     expect(c.preserved()).toEqual(before);
     expect(c.sqlite.prepare('SELECT * FROM sync_outbox').all()).toEqual(outbox);
     expect(c.saved().unlinkPending).toBe(true);
+    expect(c.saved().unlinkBackupPath).toBe('/fixture/pre-unlink.sqlite');
     await expect(c.controller.create()).rejects.toThrow('Conclua');
     c.sqlite.exec('DROP TRIGGER unlink_disk_failure');
     const restarted = new SyncController(c.options);
     cleanup.push(() => restarted.coordinator.dispose());
     await restarted.resumeRecoveryOnStartup();
     expect((await restarted.status()).activity).toBe('local');
+    expect(c.options.backup).toHaveBeenCalledOnce();
     expect(c.preserved()).toEqual(before);
     expect(c.fetch).not.toHaveBeenCalled();
   });
@@ -189,6 +250,7 @@ describe.each(['desktop', 'android'] as const)('%s local server unlink', dialect
     expect(c.sqlite.prepare("SELECT * FROM sync_review WHERE reason='detached_history' ORDER BY rowid").all()).toEqual(history);
     expect(c.preserved()).toEqual(before);
     expect(c.saved()).toEqual({ endpoint: '' });
+    expect(c.options.backup).toHaveBeenCalledOnce();
   });
   it('cleans staged recovery profiles, preparation secrets and immutable sidecars while preserving archived financial versions', async () => {
     const c = await setup();

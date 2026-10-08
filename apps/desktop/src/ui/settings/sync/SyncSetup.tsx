@@ -1,4 +1,8 @@
-import { useState } from 'react';
+import {
+  vaultConnectionCopy,
+  type ServerResetIntent,
+} from '@lionpocket/sync-local';
+import { useState, type RefObject } from 'react';
 import {
   ArrowRight,
   HardDrive,
@@ -9,43 +13,97 @@ import {
   Server,
 } from 'lucide-react';
 import { SyncDisclosure, SyncSection } from './primitives';
+import { InvitationSection } from './Pairing';
 import { useEndpointDraft, type SyncSession } from './useSyncSession';
 
 /** First configuration: explains the choice and connects to a server. */
-export function SyncSetup({ status, busy, run }: SyncSession) {
+export function SyncSetup({
+  status,
+  busy,
+  run,
+  setError,
+  inputRef,
+}: SyncSession & {
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+}) {
   const [open, setOpen] = useState(false);
+  const [intent, setIntent] = useState<ServerResetIntent>();
   const [endpoint, setEndpoint] = useEndpointDraft(status.endpoint);
   if (open)
     return (
-      <SyncSection
-        icon={Server}
-        title="Configurar sincronização"
-        description="Conecte seu servidor e crie seu cofre."
-      >
-        <form
-          className="sync-server-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!busy && endpoint.trim()) void run('setup', [endpoint]);
-          }}
+      <>
+        <SyncSection
+          icon={Server}
+          title="Configurar sincronização"
+          description="Crie um cofre no primeiro aparelho ou use o convite de um aparelho conectado."
         >
-          <label className="field">
-            <span>Servidor próprio</span>
-            <input
-              aria-label="Servidor próprio"
-              value={endpoint}
-              onChange={(e) => setEndpoint(e.target.value)}
-              placeholder="https://sync.exemplo.com"
-            />
-          </label>
-          <button
-            className="button button--primary"
-            disabled={busy || !endpoint.trim()}
-          >
-            Conectar
-          </button>
-        </form>
-      </SyncSection>
+          <fieldset className="sync-reset-choices" disabled={busy}>
+            <legend>{vaultConnectionCopy.question}</legend>
+            <div className="sync-reset-choices__grid">
+              {vaultConnectionCopy.choices.map((choice) => (
+                <label
+                  key={choice.intent}
+                  className="sync-choice sync-reset-choice"
+                >
+                  <input
+                    type="radio"
+                    name="vault-connection-intent"
+                    value={choice.intent}
+                    aria-label={choice.label}
+                    aria-describedby={`vault-${choice.intent}-description`}
+                    checked={intent === choice.intent}
+                    onChange={() => setIntent(choice.intent)}
+                  />
+                  <span>
+                    <strong>{choice.label}</strong>
+                    <small id={`vault-${choice.intent}-description`}>
+                      {choice.description}
+                    </small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <p>{vaultConnectionCopy.backup}</p>
+          {intent === 'source-of-truth' && (
+            <form
+              className="sync-server-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!busy && intent === 'source-of-truth' && endpoint.trim())
+                  void run('setup', [endpoint]);
+              }}
+            >
+              <label className="field">
+                <span>Servidor próprio</span>
+                <input
+                  aria-label="Servidor próprio"
+                  value={endpoint}
+                  disabled={busy}
+                  onChange={(e) => setEndpoint(e.target.value)}
+                  placeholder="https://sync.exemplo.com"
+                />
+              </label>
+              <button
+                className="button button--primary"
+                disabled={busy || !endpoint.trim()}
+              >
+                {vaultConnectionCopy.createAction}
+              </button>
+            </form>
+          )}
+        </SyncSection>
+        {intent === 'join-existing' && (
+          <InvitationSection
+            status={status}
+            busy={busy}
+            run={run}
+            setError={setError}
+            inputRef={inputRef}
+            title="Entrar em um cofre existente por convite"
+          />
+        )}
+      </>
     );
   return (
     <div className="sync-onboarding">
@@ -56,7 +114,10 @@ export function SyncSetup({ status, busy, run }: SyncSession) {
           Conecte seu computador e celular a um servidor da sua escolha. Se ele
           ficar indisponível, o LionPocket continua funcionando.
         </p>
-        <button className="button button--primary" onClick={() => setOpen(true)}>
+        <button
+          className="button button--primary"
+          onClick={() => setOpen(true)}
+        >
           <Plus size={16} aria-hidden="true" />
           Configurar sincronização
         </button>
@@ -94,7 +155,9 @@ export function RecoverVault({ busy, run }: SyncSession) {
   const [code, setCode] = useState('');
   return (
     <SyncDisclosure icon={KeyRound} title="Recuperar um cofre existente">
-      <p>Use o pacote de recuperação e o código guardados fora do aplicativo.</p>
+      <p>
+        Use o pacote de recuperação e o código guardados fora do aplicativo.
+      </p>
       <label className="field">
         <span>Pacote de recuperação</span>
         <textarea

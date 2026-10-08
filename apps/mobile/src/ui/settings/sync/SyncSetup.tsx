@@ -1,7 +1,18 @@
+import {
+  vaultConnectionCopy,
+  type ServerResetIntent,
+} from '@lionpocket/sync-local';
 import React, { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import { Button } from '../../components';
-import { SyncCard, SyncDisclosure, SyncField, useSyncStyles } from './kit';
+import {
+  SyncCard,
+  SyncChoice,
+  SyncDisclosure,
+  SyncField,
+  useSyncStyles,
+} from './kit';
+import { InvitationSection } from './Pairing';
 import { useEndpointDraft, type SyncSession } from './useSyncSession';
 
 /** First connection of this device to the user's own sync server. */
@@ -9,15 +20,22 @@ export function SyncSetup({
   status,
   busy,
   act,
-  direct,
+  setError,
+  invitation,
+  onInvitationChange,
+  preview,
+  inputRef,
 }: SyncSession & {
-  /** Opened from an invitation link: skip the introduction. */
-  direct: boolean;
+  invitation: string;
+  onInvitationChange: (invitation: string) => void;
+  preview?: { id: string; endpoint: string };
+  inputRef: React.Ref<React.ComponentRef<typeof TextInput>>;
 }) {
   const styles = useSyncStyles();
   const [open, setOpen] = useState(false);
+  const [intent, setIntent] = useState<ServerResetIntent>();
   const [endpoint, setEndpoint] = useEndpointDraft(status.endpoint);
-  if (!open && !direct)
+  if (!open)
     return (
       <SyncCard
         icon="sync"
@@ -32,37 +50,67 @@ export function SyncSetup({
       </SyncCard>
     );
   return (
-    <SyncCard
-      icon="server"
-      title="Conectar ao servidor"
-      description="Informe o endereço do seu servidor de sincronização. Um novo cofre será criado com os dados deste aparelho."
-    >
-      <SyncField
-        label="Servidor próprio"
-        placeholder="https://sync.exemplo.com"
-        value={endpoint}
-        onChangeText={setEndpoint}
-        keyboardType="url"
-      />
-      <View style={styles.actions}>
-        <Button
-          label="Conectar"
-          tone="primary"
-          disabled={busy || !endpoint.trim()}
-          onPress={() =>
-            act(async (c) => {
-              await c.configure(endpoint);
-              await c.create();
-            })
-          }
-        />
-        {!direct && (
-          <Text style={styles.muted}>
-            Já usa o LionPocket em outro aparelho? Use o convite abaixo.
-          </Text>
+    <>
+      <SyncCard
+        icon="server"
+        title="Configurar sincronização"
+        description="Crie um cofre no primeiro aparelho ou use o convite de um aparelho conectado."
+      >
+        <View accessibilityRole="radiogroup" style={styles.actions}>
+          <Text style={styles.label}>{vaultConnectionCopy.question}</Text>
+          {vaultConnectionCopy.choices.map((choice) => (
+            <SyncChoice
+              key={choice.intent}
+              label={choice.label}
+              description={choice.description}
+              checked={intent === choice.intent}
+              disabled={busy}
+              onPress={() => setIntent(choice.intent)}
+            />
+          ))}
+        </View>
+        <Text style={styles.muted}>{vaultConnectionCopy.backup}</Text>
+        {intent === 'source-of-truth' && (
+          <>
+            <SyncField
+              label="Servidor próprio"
+              placeholder="https://sync.exemplo.com"
+              value={endpoint}
+              onChangeText={setEndpoint}
+              keyboardType="url"
+              editable={!busy}
+            />
+            <View style={styles.actions}>
+              <Button
+                label={vaultConnectionCopy.createAction}
+                tone="primary"
+                disabled={busy || !endpoint.trim()}
+                onPress={() =>
+                  act(async (c) => {
+                    await c.configure(endpoint);
+                    await c.create();
+                  })
+                }
+              />
+            </View>
+          </>
         )}
-      </View>
-    </SyncCard>
+      </SyncCard>
+      {intent === 'join-existing' && (
+        <InvitationSection
+          status={status}
+          busy={busy}
+          act={act}
+          setError={setError}
+          invitation={invitation}
+          onInvitationChange={onInvitationChange}
+          preview={preview}
+          inputRef={inputRef}
+          fromLink={false}
+          title="Entrar em um cofre existente por convite"
+        />
+      )}
+    </>
   );
 }
 

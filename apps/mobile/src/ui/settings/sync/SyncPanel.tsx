@@ -6,7 +6,7 @@ import { SyncCard, SyncNotice, useSyncStyles } from './kit';
 import { InvitationSection, PairingProgress } from './Pairing';
 import { ProtectionSection } from './Protection';
 import { ServerRecovery } from './ServerRecovery';
-import { ServerResetContinuation, ServerResetForm } from './ServerReset';
+import { ServerResetContinuation } from './ServerReset';
 import { UnlinkServer } from './UnlinkServer';
 import { SyncOverview } from './SyncOverview';
 import { SyncDiagnostics, SyncReviews } from './SyncReviews';
@@ -19,7 +19,7 @@ import {
 
 /**
  * Sync settings, composed by phase: overview and pending decisions first,
- * then setup or devices, and the rare recreated-server flow at the end.
+ * then setup or devices, with recovery tools below the devices.
  * With `initialInvitation` (opened from a link) it shows only the pairing path.
  */
 export function SyncPanel({
@@ -66,7 +66,10 @@ export function SyncPanel({
       )}
 
       {status.compatibilityMessage && (
-        <SyncNotice tone="warning" title="A sincronização precisa da sua atenção">
+        <SyncNotice
+          tone="warning"
+          title="A sincronização precisa da sua atenção"
+        >
           {status.compatibilityMessage}
         </SyncNotice>
       )}
@@ -88,10 +91,10 @@ export function SyncPanel({
       {local && status.pairingStep === 'preparing' && (
         <Text style={styles.text}>Preparando conexão…</Text>
       )}
-      {local && !view.resetReady && !invitation && (
-        <SyncSetup {...session} direct={fromLink} />
+      {local && !view.resetReady && !fromLink && (
+        <SyncSetup {...invitationProps} inputRef={invitationInput} />
       )}
-      {local && (
+      {local && (view.resetReady || fromLink) && (
         <InvitationSection
           {...invitationProps}
           inputRef={invitationInput}
@@ -103,8 +106,12 @@ export function SyncPanel({
         />
       )}
       {local && !fromLink && <RecoverVault {...session} />}
-      {!status.unlinkPending && status.phase === 'creating' && <ResumeVaultCreation {...session} />}
-      {!status.unlinkPending && status.phase === 'pairing' && <PairingProgress {...invitationProps} />}
+      {!status.unlinkPending && status.phase === 'creating' && (
+        <ResumeVaultCreation {...session} />
+      )}
+      {!status.unlinkPending && status.phase === 'pairing' && (
+        <PairingProgress {...invitationProps} />
+      )}
 
       {view.canManage && (
         <>
@@ -113,8 +120,6 @@ export function SyncPanel({
           <SyncDiagnostics {...session} />
         </>
       )}
-
-      {view.connected && <ServerResetForm {...session} />}
 
       {view.canUnlink && <UnlinkServer {...session} />}
 
