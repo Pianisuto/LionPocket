@@ -3,6 +3,12 @@ const {readFileSync,lstatSync,readlinkSync} = require('node:fs');
 const {createHash} = require('node:crypto');
 const {join} = require('node:path');
 function git(root,args) { return execFileSync('git',args,{cwd:root,encoding:'utf8'}).trim(); }
+function isolatedGitEnvironment(root,environment=process.env) {
+  const isolated={...environment};
+  const names=execFileSync('git',['rev-parse','--local-env-vars'],{cwd:root,env:environment,encoding:'utf8'}).trim().split(/\s+/);
+  for(const name of names) delete isolated[name];
+  return isolated;
+}
 function sourceFingerprint(root) {
   const files = execFileSync('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:root}).toString().split('\0').filter(Boolean);
   const digest = createHash('sha256');
@@ -42,4 +48,4 @@ function receiptMatches(receipt,fingerprint,runtime,now=Date.now(),profile='quic
     Number.isFinite(receipt.completedAt) && receipt.completedAt<=now && now-receipt.completedAt<24*60*60*1000 &&
     receipt.passed===true);
 }
-module.exports = {git,sourceFingerprint,requireIndexMatchesWorktree,requireHeadMatchesIndex,requirePushTargetsHead,receiptMatches};
+module.exports = {git,isolatedGitEnvironment,sourceFingerprint,requireIndexMatchesWorktree,requireHeadMatchesIndex,requirePushTargetsHead,receiptMatches};

@@ -5,7 +5,7 @@ const {resolve,join,dirname,basename} = require('node:path');
 const {homedir,tmpdir} = require('node:os');
 const {randomUUID} = require('node:crypto');
 const net = require('node:net');
-const {git,sourceFingerprint,requireIndexMatchesWorktree,requireHeadMatchesIndex,requirePushTargetsHead,receiptMatches} = require('./state.cjs');
+const {git,isolatedGitEnvironment,sourceFingerprint,requireIndexMatchesWorktree,requireHeadMatchesIndex,requirePushTargetsHead,receiptMatches} = require('./state.cjs');
 const {createBudget} = require('./budget.cjs');
 const root = resolve(__dirname,'../..');
 const args = process.argv.slice(2);
@@ -44,7 +44,10 @@ const node = (label,file,params=[],options={}) => run(label,process.execPath,[fi
 function configuration() {
   if(Number(process.versions.node.split('.')[0])<24) throw new Error('Node 24 ou superior é necessário.');
   if(!existsSync(join(root,'node_modules'))) throw new Error('Execute npm ci antes de validar.');
-  if(!full&&!androidOnly) return {runtime:process.version+'/'+process.platform+'/'+process.arch,env:{...process.env,LIONPOCKET_SYNC_INTEGRATION:'0'}};
+  // Hooks export this checkout's Git paths. Foreign fixture repositories must
+  // resolve their own .git instead of modifying the real checkout/index.
+  const childEnv=isolatedGitEnvironment(root);
+  if(!full&&!androidOnly) return {runtime:process.version+'/'+process.platform+'/'+process.arch,env:{...childEnv,LIONPOCKET_SYNC_INTEGRATION:'0'}};
   if(process.platform!=='linux' || process.arch!=='x64') throw new Error('O pipeline completo requer Linux x64; confira docs/local-validation.md para Windows.');
   const cachedJdk=join(homedir(),'.cache/lionpocket-local-validation/jdk21');
   const javaHome = process.env.JAVA_HOME || (existsSync(join(cachedJdk,'bin/javac')) ? cachedJdk : /java.home = (.*)/.exec(capture('java',['-XshowSettings:properties','-version']))?.[1]?.trim());
@@ -56,7 +59,7 @@ function configuration() {
     if(!existsSync(join(sdk,file))) throw new Error('Pré-requisito Android ausente: '+file+'. Veja docs/local-validation.md.');
   if(!existsSync('/dev/kvm')) throw new Error('KVM é necessário para o emulador descartável.');
   const docker = capture('docker',['version','--format','{{.Server.Version}}']); capture('docker',['compose','version']);
-  const env = {...process.env,JAVA_HOME:javaHome,ANDROID_HOME:sdk,ANDROID_SDK_ROOT:sdk,PATH:[join(sdk,'platform-tools'),join(sdk,'emulator'),join(javaHome,'bin'),process.env.PATH].join(':')};
+  const env = {...childEnv,JAVA_HOME:javaHome,ANDROID_HOME:sdk,ANDROID_SDK_ROOT:sdk,PATH:[join(sdk,'platform-tools'),join(sdk,'emulator'),join(javaHome,'bin'),process.env.PATH].join(':')};
   return {sdk,env,runtime:JSON.stringify({node:process.version,platform:process.platform,arch:process.arch,java:javaVersion,docker,sdk,javaHome})};
 }
 async function integration(env,id) {

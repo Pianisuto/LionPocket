@@ -236,6 +236,10 @@ export interface CategorySummary {
 
 export interface Overview {
   planning?: MonthlyPlanningBalance;
+  /** Derivado de margem + reforços; ausente em visões antigas, nunca persistido nem sincronizado. */
+  protection?: ProtectionBalance;
+  /** Só existe quando o mês consultado é o mês atual. */
+  freeNow?: FreeNow | null;
   summary: MonthSummary;
   annual: MonthSummary[];
   categoryBreakdown: CategorySummary[];
@@ -294,4 +298,56 @@ export interface GoalReinforcementPlan {
   month: string;
   totalCents: number;
   items: GoalReinforcementItem[];
+}
+
+/** Dinheiro protegido de um mês: margem de segurança + reforços ativos dos objetivos. Derivado. */
+export interface ProtectedMoney {
+  month: string;
+  safetyMarginCents: number;
+  goalReinforcementCents: number;
+  protectedMoneyCents: number;
+}
+export interface ProtectionBalance extends ProtectedMoney {
+  projectedBalanceCents: number;
+  balanceAfterProtectionCents: number;
+}
+/** Receitas previstas, ainda não recebidas, que caem no primeiro dia com entrada. */
+export interface NextIncome {
+  date: string;
+  /** Soma das entradas previstas nessa data. */
+  amountCents: number;
+  count: number;
+  /** Descrição da entrada quando é uma só; nulo quando há várias na mesma data. */
+  description: string | null;
+}
+/**
+ * "Livre agora": o ponto mais baixo do saldo do mês (em mãos, aplicando cada conta e cada
+ * entrada prevista na sua data) menos o dinheiro protegido. Pode ser negativo. Não é saldo bancário.
+ */
+export interface FreeNow extends ProtectedMoney {
+  today: string;
+  /** Recebido - pago no mês; o LionPocket não conhece saldo de conta nem sobra de meses anteriores. */
+  realizedBalanceCents: number;
+  /** Informativa: a próxima entrada ainda prevista, se houver. */
+  nextIncome: NextIncome | null;
+  /** Menor saldo do mês a partir de hoje (inclui o saldo de hoje) e a primeira data em que ocorre. */
+  lowestPointCents: number;
+  lowestPointDate: string;
+  /** Soma das contas e das entradas aplicadas até o ponto mais baixo, inclusive. */
+  commitmentsUntilLowestPointCents: number;
+  incomesUntilLowestPointCents: number;
+  /** O caminho dia a dia: hoje e cada conta/entrada pendente, com o saldo depois dela. */
+  timeline: FreeNowTimelineRow[];
+  freeNowCents: number;
+}
+export interface FreeNowTimelineRow {
+  key: string;
+  kind: 'start' | 'income' | 'expense';
+  date: string;
+  label: string;
+  /** Com sinal: entrada soma, conta subtrai; o saldo em mãos de hoje na primeira linha. */
+  cents: number;
+  balanceCents: number;
+  /** A primeira linha em que o saldo chega ao menor valor do mês. */
+  lowest: boolean;
 }

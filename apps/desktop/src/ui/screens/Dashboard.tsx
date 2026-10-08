@@ -13,9 +13,10 @@ import {
   TrendingUp,
   WalletCards,
 } from 'lucide-react';
-import type { Overview, Transaction } from '@lionpocket/core/types';
+import type { FreeNow, Overview, Transaction } from '@lionpocket/core/types';
+import { freeNowComposition, freeNowHeadline, protectionHint } from '@lionpocket/core/free-now';
 import { groupCreditCardInvoices } from '@lionpocket/core/credit-cards';
-import { EmptyState, ProgressBar, Skeleton } from '../components';
+import { EmptyState, Modal, ProgressBar, Skeleton } from '../components';
 import { compactCurrency, currency, formatDate, monthLabel, overdueLabel } from '../format';
 
 const MetricCard = ({
@@ -25,6 +26,7 @@ const MetricCard = ({
   tone,
   icon,
   displayValue,
+  children,
 }: {
   label: string;
   value: number;
@@ -32,16 +34,90 @@ const MetricCard = ({
   tone: 'income' | 'expense' | 'balance' | 'neutral';
   icon: React.ReactNode;
   displayValue?: string;
+  children?: React.ReactNode;
 }) => (
   <article className={`metric-card metric-card--${tone}`}>
     <div className="metric-card__top">
       <span>{label}</span>
       <div className="metric-card__icon">{icon}</div>
     </div>
-    <strong>{displayValue ?? currency.format(value)}</strong>
+    <div className="metric-card__values">
+      <strong>{displayValue ?? currency.format(value)}</strong>
+      {children}
+    </div>
     <small>{hint}</small>
   </article>
 );
+
+/** Availability is part of the projected balance; clicking opens its detail. */
+const FreeNowAction = ({ freeNow, onOpen }: { freeNow: FreeNow; onOpen: () => void }) => {
+  const headline = freeNowHeadline(freeNow);
+  return (
+    <button type="button" className={`metric-card__availability${headline.negative ? ' is-short' : ''}`} onClick={onOpen} aria-haspopup="dialog" title="Ver o dia a dia do mês">
+      <span>{headline.label}</span>
+      <strong>{currency.format(headline.cents / 100)}</strong>
+      <ChevronRight size={16} aria-hidden="true" />
+    </button>
+  );
+};
+
+/** Modal content: the headline, the balance day by day and the arithmetic behind the number. */
+export const FreeNowDetails = ({ freeNow }: { freeNow: FreeNow }) => {
+  const headline = freeNowHeadline(freeNow);
+  const money = (cents: number) => currency.format(cents / 100);
+  return (
+    <div className={headline.negative ? 'free-now free-now--short' : 'free-now'}>
+      <section className="free-now__hero">
+        <span className="eyebrow">{headline.label}</span>
+        <strong className="free-now__value">{money(headline.cents)}</strong>
+        <small className="free-now__note">{headline.note}</small>
+      </section>
+      <div className="free-now__section">
+        <div className="free-now__columns">
+          <span className="eyebrow">Seu saldo, dia a dia</span>
+          <span className="free-now__movement-heading">Movimento</span>
+          <span>Saldo</span>
+        </div>
+        <ol className="free-now__timeline" aria-label="Saldo dia a dia">
+          {freeNow.timeline.map((row) => (
+            <li key={row.key} className={`free-now__row free-now__row--${row.kind}${row.lowest ? ' is-lowest' : ''}`}>
+              <span className="date-badge">
+                {row.kind === 'start'
+                  ? <strong className="free-now__today">Hoje</strong>
+                  : <><strong>{formatDate(row.date, 'dd')}</strong><small>{formatDate(row.date, 'MMM')}</small></>}
+              </span>
+              <span className="free-now__copy">
+                <span className="free-now__row-title">
+                  <strong>{row.kind === 'start' ? 'Em mãos' : row.label}</strong>
+                  {row.lowest && <span className="free-now__badge">mais apertado</span>}
+                </span>
+                <small>{row.kind === 'start' ? 'recebido − pago no mês' : row.kind === 'income' ? 'Entrada prevista' : 'Saída prevista'}</small>
+              </span>
+              <span className={`free-now__delta ${row.kind === 'income' ? 'money-positive' : 'money-negative'}`}>
+                {row.kind === 'start' ? '' : `${row.cents >= 0 ? '+' : '−'} ${money(Math.abs(row.cents))}`}
+              </span>
+              <span className="free-now__balance">
+                <strong className={row.balanceCents < 0 ? 'money-negative' : undefined}>{money(row.balanceCents)}</strong>
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+      <section className="free-now__sum">
+        <span className="eyebrow">A conta</span>
+        <dl>
+          {freeNowComposition(freeNow).map((line) => (
+            <div key={line.key}>
+              <dt>{line.label}</dt>
+              <dd className={line.cents < 0 ? 'is-minus' : undefined}>{line.cents < 0 ? '− ' : ''}{money(Math.abs(line.cents))}</dd>
+            </div>
+          ))}
+          <div className="free-now__result"><dt>{headline.label}</dt><dd>{money(headline.cents)}</dd></div>
+        </dl>
+      </section>
+    </div>
+  );
+};
 
 const AnnualChart = ({ overview }: { overview: Overview }) => {
   const [activeBar, setActiveBar] = useState<{ month: string; kind: 'income' | 'expense' } | null>(null);
@@ -263,6 +339,7 @@ export const Dashboard = ({
   onSettleTransactions: (items: Transaction[]) => Promise<boolean>;
 }) => {
   const [settlingId, setSettlingId] = useState('');
+  const [freeNowOpen, setFreeNowOpen] = useState(false);
   if (loading || !overview) {
     return <div className="dashboard-grid"><Skeleton className="skeleton--hero" /><Skeleton className="skeleton--hero" /><Skeleton className="skeleton--panel" /><Skeleton className="skeleton--panel" /></div>;
   }
@@ -276,9 +353,17 @@ export const Dashboard = ({
       <section className="metric-grid">
         <MetricCard label="Entradas planejadas" value={summary.plannedIncome} hint={`${currency.format(summary.receivedIncome)} já recebidos`} tone="income" icon={<ArrowUpRight size={20} />} />
         <MetricCard label="Saídas planejadas" value={summary.plannedExpenses} hint={summary.overdueExpenses > 0 ? `${currency.format(summary.paidExpenses)} já pagos · ${currency.format(summary.overdueExpenses)} em atraso` : `${currency.format(summary.paidExpenses)} já pagos`} tone="expense" icon={<ReceiptText size={20} />} />
-        <MetricCard label="Saldo projetado" value={summary.projectedBalance} hint={overview.planning && overview.planning.safetyMargin > 0 ? `${currency.format(overview.planning.balanceAfterSafetyMargin)} após margem de segurança` : 'Se tudo ocorrer como planejado'} tone="balance" icon={<TrendingUp size={20} />} />
+        <MetricCard label="Saldo projetado" value={summary.projectedBalance} hint={protectionHint(overview.protection) ?? 'Se tudo ocorrer como planejado'} tone="balance" icon={<TrendingUp size={20} />}>
+          {overview.freeNow && <FreeNowAction freeNow={overview.freeNow} onOpen={() => setFreeNowOpen(true)} />}
+        </MetricCard>
         <MetricCard label="Renda comprometida" value={summary.committedPercent} displayValue={`${Math.round(summary.committedPercent * 100)}%`} hint="do que deve entrar" tone="neutral" icon={<WalletCards size={20} />} />
       </section>
+
+      {overview.freeNow && freeNowOpen && (
+        <Modal title="Pode gastar hoje" description={`Como o saldo de ${monthLabel(summary.month)} evolui até o fim do mês`} wide onClose={() => setFreeNowOpen(false)}>
+          <FreeNowDetails freeNow={overview.freeNow} />
+        </Modal>
+      )}
 
       <div className="dashboard-grid">
         <section className="panel panel--wide">

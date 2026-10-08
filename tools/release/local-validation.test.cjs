@@ -4,7 +4,7 @@ const {mkdtempSync,writeFileSync,mkdirSync,rmSync,unlinkSync} = require('node:fs
 const {tmpdir} = require('node:os');
 const {join} = require('node:path');
 const {execFileSync} = require('node:child_process');
-const {sourceFingerprint,requireIndexMatchesWorktree,requireHeadMatchesIndex,requirePushTargetsHead,receiptMatches} = require('../local-validation/state.cjs');
+const {isolatedGitEnvironment,sourceFingerprint,requireIndexMatchesWorktree,requireHeadMatchesIndex,requirePushTargetsHead,receiptMatches} = require('../local-validation/state.cjs');
 function fixture(action) {
   const directory=mkdtempSync(join(tmpdir(),'lion-local-git-test-'));
   const git=args=>execFileSync('git',args,{cwd:directory,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
@@ -14,6 +14,21 @@ function fixture(action) {
     action(directory,git);
   } finally {rmSync(directory,{recursive:true,force:true});}
 }
+test('child checks isolate inherited hook Git paths without changing the checkout or hook environment',()=>fixture((root,git)=>{
+  const inherited={...process.env,GIT_DIR:join(root,'.git'),GIT_WORK_TREE:root,GIT_INDEX_FILE:join(root,'.git','index'),GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'core.bare',GIT_CONFIG_VALUE_0:'false'};
+  const isolated=isolatedGitEnvironment(root,inherited);
+  const foreign=mkdtempSync(join(tmpdir(),'lion-local-foreign-git-test-'));
+  const first=sourceFingerprint(root);
+  try {
+    execFileSync('git',['init','--bare','--quiet'],{cwd:foreign,env:isolated,stdio:'pipe'});
+    assert.equal(execFileSync('git',['rev-parse','--is-bare-repository'],{cwd:foreign,env:isolated,encoding:'utf8'}).trim(),'true');
+    assert.equal(git(['config','--get','core.bare']),'false');
+    assert.equal(sourceFingerprint(root),first);
+    for(const key of ['GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_CONFIG_COUNT']) assert.equal(isolated[key],undefined);
+    assert.equal(inherited.GIT_DIR,join(root,'.git'));
+    assert.equal(isolated.PATH,inherited.PATH);
+  } finally {rmSync(foreign,{recursive:true,force:true});}
+}));
 test('source edits, additions and deletions invalidate the exact-content receipt; ignored build output does not',()=>fixture((root,git)=>{
   const first=sourceFingerprint(root); mkdirSync(join(root,'out')); writeFileSync(join(root,'out','bundle.js'),'generated'); assert.equal(sourceFingerprint(root),first);
   writeFileSync(join(root,'app.js'),'second'); assert.notEqual(sourceFingerprint(root),first); writeFileSync(join(root,'app.js'),'first');

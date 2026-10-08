@@ -36,7 +36,7 @@ import {
   todayIso,
 } from '@lionpocket/core/finance';
 import { fixedRecurringDates, planInstallmentUpdate, recurringEffectiveDate, recurringOccurrence, rollingRecurringDates, type RecurringSchedule } from '@lionpocket/core/planning';
-import { assertGoalReinforcementAllowed, monthlyPlanningBalance, validateGoalReinforcement, validateMonthlyPlanning, type GoalMonthlyReinforcement, type MonthlyPlanning } from '@lionpocket/core';
+import { assertGoalReinforcementAllowed, monthlyPlanningBalance, monthlyProtectionOverview, validateGoalReinforcement, validateMonthlyPlanning, type GoalMonthlyReinforcement, type MonthlyPlanning } from '@lionpocket/core';
 import { expenseCountsInMonth } from '@lionpocket/core/transactions';
 
 type Row = Record<string, string | number | null>;
@@ -2240,14 +2240,19 @@ export class LionPocketDatabase {
       .slice(0, 6);
 
     const summary = this.monthSummary(month);
+    const planning = this.getMonthlyPlanning(month);
+    const allGoals = this.listGoals();
     return {
       summary,
-      planning: monthlyPlanningBalance(summary.projectedBalance, this.getMonthlyPlanning(month)),
+      planning: monthlyPlanningBalance(summary.projectedBalance, planning),
+      ...monthlyProtectionOverview(
+        monthlyTransactions, allGoals, this.listGoalReinforcements(month), planning, month, todayIso(), summary.projectedBalance,
+      ),
       annual,
       categoryBreakdown,
       upcoming,
       recent,
-      goals: this.listGoals().filter((goal) => !['cancelled', 'completed'].includes(goal.status)).slice(0, 3),
+      goals: allGoals.filter((goal) => !['cancelled', 'completed'].includes(goal.status)).slice(0, 3),
     };
   }
 
