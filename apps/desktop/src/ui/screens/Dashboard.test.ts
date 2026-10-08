@@ -224,13 +224,14 @@ describe('Livre agora in the Dashboard', () => {
   const details = (data: Overview) => renderToStaticMarkup(createElement(FreeNowDetails, { freeNow: data.freeNow as FreeNow }));
   const detailsText = (data: Overview) => details(data).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-  it('adds Pode gastar hoje as a fifth card (a button), with Saldo projetado still the main card', () => {
+  it('shows Pode gastar hoje inside Saldo projetado, keeping four metric cards', () => {
     const markup = html(overviewFor(50000, 70000));
     expect(markup.match(/<article class="metric-card /g)).toHaveLength(4);
-    expect(markup.match(/<button type="button" class="metric-card metric-card--free"/g)).toHaveLength(1);
+    expect(markup.match(/<button type="button" class="metric-card__availability"/g)).toHaveLength(1);
+    expect(markup).toMatch(/<article class="metric-card metric-card--balance">(?:(?!<\/article>)[\s\S])*class="metric-card__availability"/);
     expect(markup).toContain('aria-haspopup="dialog"');
-    expect(text(overviewFor(50000, 70000))).toMatch(/Saldo projetado R\$.*1\.800,00 R\$.*600,00 após proteções/);
-    expect(text(overviewFor(50000, 70000))).toMatch(/Pode gastar hoje R\$.*500,00 Ver o dia a dia do mês/);
+    expect(text(overviewFor(50000, 70000))).toMatch(/Saldo projetado R\$.*1\.800,00 Pode gastar hoje R\$.*500,00 R\$.*600,00 após proteções/);
+    expect(text(overviewFor(50000, 70000))).toMatch(/Pode gastar hoje R\$.*500,00/);
   });
   it('keeps the detail out of the page until the card is opened', () => {
     const markup = html(overviewFor(50000, 70000));
@@ -241,11 +242,13 @@ describe('Livre agora in the Dashboard', () => {
     const content = detailsText(overviewFor(50000, 70000));
     expect(content).toMatch(/Pode gastar hoje R\$.*500,00/);
     expect(content).toContain('Sem ficar no vermelho este mês. O mais apertado é 14/10.');
-    expect(content).toMatch(/Hoje Em mãos recebido − pago no mês saldo R\$.*2\.000,00/);
-    expect(content).toMatch(/12 out Luz Saída prevista − R\$.{1,3}200,00 14 out/);
-    expect(content).toMatch(/14 out Internet Saída prevista mais apertado − R\$.*100,00 saldo R\$.*1\.700,00/);
-    expect(content).toMatch(/15 out Freela Entrada prevista \+ R\$.{1,3}500,00 20 out/);
-    expect(content.match(/saldo R\$/g)).toHaveLength(2); // só em "Em mãos" e na linha mais apertada
+    expect(content).toMatch(/Hoje Em mãos recebido − pago no mês R\$.*2\.000,00/);
+    expect(content).toMatch(/12 out Luz Saída prevista − R\$.{1,3}200,00 R\$.{1,3}1\.800,00 14 out/);
+    expect(content).toMatch(/14 out Internet mais apertado Saída prevista − R\$.*100,00 R\$.*1\.700,00/);
+    expect(content).toMatch(/15 out Freela Entrada prevista \+ R\$.{1,3}500,00 R\$.{1,3}2\.200,00 20 out/);
+    expect(details(overviewFor(50000, 70000)).match(/class="free-now__balance"/g)).toHaveLength(5);
+    expect(content.match(/Saldo/g)).toHaveLength(1);
+    expect(content).toMatch(/20 out Cartão Saída prevista − R\$.{1,3}400,00 R\$.{1,3}1\.800,00/);
     expect(content).toMatch(/Menor saldo do mês \(14\/10\) R\$.*1\.700,00/);
     expect(content).toMatch(/Margem de segurança − R\$.*500,00/);
     expect(content).toMatch(/Objetivos − R\$.*700,00/);
@@ -262,17 +265,17 @@ describe('Livre agora in the Dashboard', () => {
   });
   it('shows what is missing, with the attention tone, instead of a negative or zero value', () => {
     const data = overviewFor(150000, 70000);
-    expect(html(data)).toMatch(/class="metric-card metric-card--free metric-card--short"/);
+    expect(html(data)).toMatch(/class="metric-card__availability is-short"/);
     expect(text(data)).toMatch(/Faltam R\$.*500,00/);
     expect(details(data)).toMatch(/class="free-now free-now--short"/);
     expect(detailsText(data)).toMatch(/Faltam R\$.*500,00/);
     expect(detailsText(data)).toContain('contando suas proteções');
   });
   it('does not render the card for other months or old overviews', () => {
-    expect(html({ ...overviewFor(0, 0), freeNow: null })).not.toContain('metric-card--free');
+    expect(html({ ...overviewFor(0, 0), freeNow: null })).not.toContain('metric-card__availability');
     const legacy: Partial<Overview> = overviewFor(0, 0);
     delete legacy.freeNow;
-    expect(html(legacy as Overview)).not.toContain('metric-card--free');
+    expect(html(legacy as Overview)).not.toContain('metric-card__availability');
   });
   it('says so when the tightest day is today', () => {
     const calm = monthlyProtectionOverview([items[0], items[4]], [], [], null, '2026-10', '2026-10-10', 0);

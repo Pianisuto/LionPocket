@@ -11,7 +11,6 @@ import {
   ReceiptText,
   Target,
   TrendingUp,
-  Wallet,
   WalletCards,
 } from 'lucide-react';
 import type { FreeNow, Overview, Transaction } from '@lionpocket/core/types';
@@ -27,6 +26,7 @@ const MetricCard = ({
   tone,
   icon,
   displayValue,
+  children,
 }: {
   label: string;
   value: number;
@@ -34,28 +34,29 @@ const MetricCard = ({
   tone: 'income' | 'expense' | 'balance' | 'neutral';
   icon: React.ReactNode;
   displayValue?: string;
+  children?: React.ReactNode;
 }) => (
   <article className={`metric-card metric-card--${tone}`}>
     <div className="metric-card__top">
       <span>{label}</span>
       <div className="metric-card__icon">{icon}</div>
     </div>
-    <strong>{displayValue ?? currency.format(value)}</strong>
+    <div className="metric-card__values">
+      <strong>{displayValue ?? currency.format(value)}</strong>
+      {children}
+    </div>
     <small>{hint}</small>
   </article>
 );
 
-/** Fifth metric card: the headline number; clicking opens the day-by-day detail. */
-const FreeNowCard = ({ freeNow, onOpen }: { freeNow: FreeNow; onOpen: () => void }) => {
+/** Availability is part of the projected balance; clicking opens its detail. */
+const FreeNowAction = ({ freeNow, onOpen }: { freeNow: FreeNow; onOpen: () => void }) => {
   const headline = freeNowHeadline(freeNow);
   return (
-    <button type="button" className={`metric-card metric-card--free${headline.negative ? ' metric-card--short' : ''}`} onClick={onOpen} aria-haspopup="dialog">
-      <div className="metric-card__top">
-        <span>{headline.label}</span>
-        <div className="metric-card__icon"><Wallet size={20} /></div>
-      </div>
+    <button type="button" className={`metric-card__availability${headline.negative ? ' is-short' : ''}`} onClick={onOpen} aria-haspopup="dialog" title="Ver o dia a dia do mês">
+      <span>{headline.label}</span>
       <strong>{currency.format(headline.cents / 100)}</strong>
-      <small>Ver o dia a dia do mês</small>
+      <ChevronRight size={16} aria-hidden="true" />
     </button>
   );
 };
@@ -72,7 +73,11 @@ export const FreeNowDetails = ({ freeNow }: { freeNow: FreeNow }) => {
         <small className="free-now__note">{headline.note}</small>
       </section>
       <div className="free-now__section">
-        <span className="eyebrow">Seu saldo, dia a dia</span>
+        <div className="free-now__columns">
+          <span className="eyebrow">Seu saldo, dia a dia</span>
+          <span className="free-now__movement-heading">Movimento</span>
+          <span>Saldo</span>
+        </div>
         <ol className="free-now__timeline" aria-label="Saldo dia a dia">
           {freeNow.timeline.map((row) => (
             <li key={row.key} className={`free-now__row free-now__row--${row.kind}${row.lowest ? ' is-lowest' : ''}`}>
@@ -82,15 +87,17 @@ export const FreeNowDetails = ({ freeNow }: { freeNow: FreeNow }) => {
                   : <><strong>{formatDate(row.date, 'dd')}</strong><small>{formatDate(row.date, 'MMM')}</small></>}
               </span>
               <span className="free-now__copy">
-                <strong>{row.kind === 'start' ? 'Em mãos' : row.label}</strong>
+                <span className="free-now__row-title">
+                  <strong>{row.kind === 'start' ? 'Em mãos' : row.label}</strong>
+                  {row.lowest && <span className="free-now__badge">mais apertado</span>}
+                </span>
                 <small>{row.kind === 'start' ? 'recebido − pago no mês' : row.kind === 'income' ? 'Entrada prevista' : 'Saída prevista'}</small>
               </span>
-              {row.lowest && <span className="free-now__badge">mais apertado</span>}
               <span className={`free-now__delta ${row.kind === 'income' ? 'money-positive' : 'money-negative'}`}>
                 {row.kind === 'start' ? '' : `${row.cents >= 0 ? '+' : '−'} ${money(Math.abs(row.cents))}`}
               </span>
               <span className="free-now__balance">
-                {(row.kind === 'start' || row.lowest) && <><small>saldo</small><strong className={row.balanceCents < 0 ? 'money-negative' : undefined}>{money(row.balanceCents)}</strong></>}
+                <strong className={row.balanceCents < 0 ? 'money-negative' : undefined}>{money(row.balanceCents)}</strong>
               </span>
             </li>
           ))}
@@ -346,9 +353,10 @@ export const Dashboard = ({
       <section className="metric-grid">
         <MetricCard label="Entradas planejadas" value={summary.plannedIncome} hint={`${currency.format(summary.receivedIncome)} já recebidos`} tone="income" icon={<ArrowUpRight size={20} />} />
         <MetricCard label="Saídas planejadas" value={summary.plannedExpenses} hint={summary.overdueExpenses > 0 ? `${currency.format(summary.paidExpenses)} já pagos · ${currency.format(summary.overdueExpenses)} em atraso` : `${currency.format(summary.paidExpenses)} já pagos`} tone="expense" icon={<ReceiptText size={20} />} />
-        <MetricCard label="Saldo projetado" value={summary.projectedBalance} hint={protectionHint(overview.protection) ?? 'Se tudo ocorrer como planejado'} tone="balance" icon={<TrendingUp size={20} />} />
+        <MetricCard label="Saldo projetado" value={summary.projectedBalance} hint={protectionHint(overview.protection) ?? 'Se tudo ocorrer como planejado'} tone="balance" icon={<TrendingUp size={20} />}>
+          {overview.freeNow && <FreeNowAction freeNow={overview.freeNow} onOpen={() => setFreeNowOpen(true)} />}
+        </MetricCard>
         <MetricCard label="Renda comprometida" value={summary.committedPercent} displayValue={`${Math.round(summary.committedPercent * 100)}%`} hint="do que deve entrar" tone="neutral" icon={<WalletCards size={20} />} />
-        {overview.freeNow && <FreeNowCard freeNow={overview.freeNow} onOpen={() => setFreeNowOpen(true)} />}
       </section>
 
       {overview.freeNow && freeNowOpen && (

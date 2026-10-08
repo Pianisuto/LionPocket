@@ -2009,6 +2009,7 @@ strong,
 }
 
 .dashboard {
+  container: dashboard / inline-size;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -2024,12 +2025,8 @@ strong,
   gap: 14px;
 }
 
-/* Com o quinto card (Pode gastar hoje) a grade passa a ter cinco colunas. */
-.metric-grid:has(> .metric-card--free) {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
 .metric-card {
+  container: metric / inline-size;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -2065,6 +2062,7 @@ strong,
 .metric-card__icon {
   display: grid;
   place-items: center;
+  flex: 0 0 auto;
   width: 34px;
   height: 34px;
   color: var(--metric-tone, var(--primary));
@@ -2104,47 +2102,49 @@ strong,
   --metric-wash: var(--violet-wash);
 }
 
-/* Pode gastar hoje é um botão: abre o detalhe em um modal. */
-.metric-card--free {
-  --metric-tone: var(--positive);
-  --metric-wash: var(--positive-wash);
-  width: 100%;
-  color: inherit;
-  font: inherit;
+/* Projeção e disponibilidade dividem a mesma linha, sem um rodapé extra. */
+.metric-card__values {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 39px;
+}
+
+.metric-card__values > strong { white-space: nowrap; }
+
+.metric-card__availability {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 3px 8px;
+  padding: 0 0 0 16px;
+  color: var(--text-muted);
   text-align: left;
-  cursor: pointer;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  transition: 140ms ease;
+  border: 0;
+  border-left: 1px solid var(--line-1);
+  border-radius: 0;
+  background: transparent;
+  font-size: 11px;
+  transition: color 140ms ease;
 }
 
-.metric-card--free:hover {
-  border-color: var(--line-2);
-  background: var(--surface-2);
-}
-
-.metric-card--free:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-.metric-card--short {
-  --metric-tone: var(--alert);
-  --metric-wash: var(--alert-wash);
-}
+.metric-card__availability > span,
+.metric-card__availability > strong { grid-column: 1; }
+.metric-card__availability > span { white-space: nowrap; }
+.metric-card__availability strong { font-size: 17px; white-space: nowrap; }
+.metric-card__availability > svg { grid-column: 2; grid-row: 1 / 3; color: var(--primary-ink); }
+.metric-card__availability:hover { color: var(--primary-ink); }
+.metric-card__availability.is-short strong { color: var(--alert); }
 
 /* Detalhe do Pode gastar hoje (dentro do modal), no vocabulário dos painéis. */
 .free-now {
-  --free-tone: var(--positive);
+  container: free-now / inline-size;
   display: flex;
   flex-direction: column;
   gap: 20px;
   padding: 20px 24px 24px;
-}
-
-.free-now--short {
-  --free-tone: var(--alert);
 }
 
 .free-now__hero {
@@ -2154,7 +2154,7 @@ strong,
   padding: 16px 18px;
   border: 1px solid var(--line-1);
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--free-tone) 14%, var(--surface-2)), var(--surface-2) 70%);
+  background: var(--surface-2);
 }
 
 .free-now__value {
@@ -2169,6 +2169,7 @@ strong,
 .free-now__note {
   color: var(--text-soft);
   font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .free-now__section {
@@ -2186,19 +2187,22 @@ strong,
   list-style: none;
 }
 
+.free-now__columns,
 .free-now__row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 116px 108px;
   align-items: center;
   gap: 13px;
-  padding: 6px 11px;
-  border-radius: var(--radius-md);
-  transition: 130ms ease;
+  padding: 8px 11px;
 }
 
+.free-now__columns { color: var(--text-muted); font-size: 10.5px; }
+.free-now__columns > .eyebrow { grid-column: span 2; }
+.free-now__columns > span:not(.eyebrow) { text-align: right; }
+.free-now__row { border-radius: var(--radius-sm); transition: background 130ms ease; }
 .free-now__row:hover { background: var(--surface-2); }
-
 .free-now__row.is-lowest {
-  background: var(--surface-2);
+  background: var(--primary-wash);
   box-shadow: inset 0 0 0 1px var(--line-2);
 }
 
@@ -2214,12 +2218,8 @@ strong,
   min-width: 0;
 }
 
-.free-now__copy strong {
-  overflow: hidden;
-  font-size: 13.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.free-now__row-title { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+.free-now__copy strong { font-size: 13px; overflow-wrap: anywhere; }
 
 .free-now__copy small {
   color: var(--text-muted);
@@ -2230,17 +2230,18 @@ strong,
   flex: none;
   padding: 3px 9px;
   border-radius: 999px;
-  background: var(--surface-3);
-  color: var(--text-soft);
-  font-size: 11px;
+  background: var(--primary-wash);
+  color: var(--primary-ink);
+  font-size: 10px;
   font-weight: 620;
   white-space: nowrap;
 }
 
 .free-now__delta {
   flex: none;
-  min-width: 100px;
-  font-size: 13px;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 12.5px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -2252,13 +2253,8 @@ strong,
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  min-width: 96px;
-}
-
-.free-now__balance small {
-  color: var(--text-muted);
-  font-size: 10.5px;
-  text-transform: uppercase;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .free-now__balance strong {
@@ -2274,7 +2270,7 @@ strong,
   padding: 16px 18px;
   border: 1px solid var(--line-1);
   border-radius: var(--radius-md);
-  background: var(--surface-2);
+  background: var(--surface);
 }
 
 .free-now__sum dl {
@@ -2319,7 +2315,7 @@ strong,
    e o mínimo de 320px derruba para duas ou uma quando o espaço aperta. */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(max(320px, (100% - 32px) / 3), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(320px, (100% - 32px) / 3)), 1fr));
   gap: 16px;
 }
 
@@ -5281,27 +5277,48 @@ label.settings-row__text {
    Telas estreitas
    -------------------------------------------------------------------------- */
 
-/* Entre 1241px e 1500px, cinco colunas deixam os rótulos quebrados: três colunas, com o quinto card ocupando dois espaços. */
-@media (min-width: 1241px) and (max-width: 1500px) {
-  .metric-grid:has(> .metric-card--free) {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .metric-grid > .metric-card--free {
-    grid-column: span 2;
-  }
+/* Breakpoints follow the available dashboard width, including sidebar and padding. */
+@container dashboard (max-width: 1400px) {
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-card { padding: 16px 18px; gap: 6px; }
 }
 
-@media (max-width: 1240px) {
-  .metric-grid,
-  .metric-grid:has(> .metric-card--free) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+@container dashboard (max-width: 440px) {
+  .metric-card { padding: 14px; }
+  .metric-card__values > strong { font-size: 21px; }
+  .metric-card__top { align-items: flex-start; }
+  .metric-card__icon { width: 28px; height: 28px; border-radius: 9px; }
+}
 
-  /* O quinto card ocupa a última linha inteira em vez de ficar sozinho num canto. */
-  .metric-grid > .metric-card--free {
-    grid-column: 1 / -1;
-  }
+@container metric (max-width: 300px) {
+  .metric-card__values { gap: 12px; }
+  .metric-card__values > strong { font-size: 22px; }
+  .metric-card__availability { padding-left: 12px; }
+  .metric-card__availability strong { font-size: 16px; }
+}
+
+@container metric (max-width: 250px) {
+  .metric-card__values:has(.metric-card__availability) { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .metric-card__availability { padding-left: 0; border-left: 0; }
+}
+
+@container dashboard (max-width: 320px) {
+  .metric-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@container free-now (max-width: 540px) {
+  .free-now__columns,
+  .free-now__row { grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr); gap: 6px 12px; }
+  .free-now__movement-heading { display: none; }
+  .free-now__row .date-badge { grid-row: span 2; }
+  .free-now__copy { grid-column: 2 / -1; }
+  .free-now__delta { grid-column: 2; text-align: left; }
+  .free-now__balance { grid-column: 3; }
+  .free-now__balance strong { font-size: 12.5px; }
+}
+
+@media (max-width: 600px) {
+  .free-now { padding: 16px; gap: 16px; }
 }
 
 /* Compact windows keep every category reachable in a horizontal strip. */
